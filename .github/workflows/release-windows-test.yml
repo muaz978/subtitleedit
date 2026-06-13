@@ -1,0 +1,112 @@
+name: Release Windows test build
+
+# Builds a portable Windows x64 test build from the current branch and publishes
+# it as a GitHub pre-release on this fork, so it can be handed to a reporter to
+# verify a fix (e.g. the layout-change freeze, issue #11585) before it is merged
+# upstream. libmpv is bundled so the video player works (the freeze involves the
+# native video control). ffmpeg is left to the user's existing configuration.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag (blank = auto timestamp)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish portable Windows x64
+        shell: pwsh
+        run: |
+          dotnet publish src/ui/UI.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:DebugSymbols=false `
+            -p:DebugType=none `
+            -o ./publish/windows-x64
+          Get-ChildItem -Path "./publish/windows-x64" -Filter "*.pdb" -Recurse -File | Remove-Item -Force
+
+      - name: Bundle libmpv
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/SubtitleEdit/support-files/releases/download/libmpv-2026-04-21/libmpv2-win64.zip" -OutFile "libmpv2-64.zip"
+          Expand-Archive -Path "libmpv2-64.zip" -DestinationPath "libmpv-temp"
+          Copy-Item "libmpv-temp/libmpv-2.dll" "./publish/windows-x64/"
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          Copy-Item "./LICENSE" "./publish/windows-x64/LICENSE"
+          Compress-Archive -Path "./publish/windows-x64/*" -DestinationPath "./SubtitleEdit-Windows-x64-portable.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: windows-x64-portable
+          path: ./SubtitleEdit-Windows-x64-portable.zip
+          overwrite: true
+
+  create-release:
+    needs: [build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            echo "tag=$(echo '${{ inputs.release_tag }}' | xargs)" >> $GITHUB_OUTPUT
+          else
+            echo "tag=win-test-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download artifact
+        uses: actions/download-artifact@v5
+        with:
+          path: ./artifacts
+
+      - name: Stage release asset
+        run: |
+          mkdir -p ./release-assets
+          cp ./artifacts/windows-x64-portable/*.zip ./release-assets/
+          ls -la ./release-assets/
+
+      - name: Create pre-release with portable build
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Windows test build - layout-change freeze fix (#11585) - ${{ steps.tag.outputs.tag }}"
+          prerelease: true
+          draft: false
+          body: |
+            **Portable Windows x64 test build** to verify the fix for the layout-change freeze (#11585).
+
+            ### How to test
+            1. Download `SubtitleEdit-Windows-x64-portable.zip` and extract it anywhere.
+            2. Run `SubtitleEdit.exe`.
+            3. Reproduce the original steps: load a subtitle, then change the layout. It should no longer hang. Also try changing the layout with no subtitle loaded after a session where one was loaded.
+
+            This is an unofficial test build from a fork, for verification only.
+          files: |
+            ./release-assets/SubtitleEdit-Windows-x64-portable.zip
