@@ -198,6 +198,11 @@ public partial class SpeechToTextViewModel : ObservableObject
             Engines.Add(new WhisperEngineCTranslate2());
         }
 
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            Engines.Add(new FasterWhisperMac());
+        }
+
         Engines.Add(new WhisperEngineOpenAi());
 
         // Add OpenAI Compatible STT engine (available on all platforms)
@@ -2440,6 +2445,16 @@ public partial class SpeechToTextViewModel : ObservableObject
 
             if (!engine.IsEngineInstalled())
             {
+                if (engine is FasterWhisperMac)
+                {
+                    // pip-managed engine - Subtitle Edit cannot download it.
+                    await MessageBox.Show(
+                        Window!,
+                        $"{engine.Name} not found",
+                        "faster-whisper not found - install it with: pip3 install faster-whisper");
+                    return;
+                }
+
                 if (engine is ICrispAsrEngine && Configuration.IsRunningOnWindows)
                 {
                     var answer = await MessageBox.Show(
@@ -3263,6 +3278,30 @@ public partial class SpeechToTextViewModel : ObservableObject
             parameters = parameters.Replace("--model", "--model_directory");
         }
 
+        if (engine is FasterWhisperMac)
+        {
+            // "--device auto" lets CTranslate2 pick the fastest available backend on the Mac,
+            // and the SRT result is written next to the input audio file where
+            // GetResultFromSrt looks for it. Skip flags the user already supplied.
+            var fasterWhisperPrefix = string.Empty;
+            if (!parameters.Contains("--device", StringComparison.Ordinal))
+            {
+                fasterWhisperPrefix += "--device auto ";
+            }
+
+            if (!parameters.Contains("--output_format", StringComparison.Ordinal))
+            {
+                fasterWhisperPrefix += "--output_format srt ";
+            }
+
+            if (!parameters.Contains("--output_dir", StringComparison.Ordinal))
+            {
+                fasterWhisperPrefix += $"--output_dir \"{Path.GetDirectoryName(waveFileName)}\" ";
+            }
+
+            parameters = fasterWhisperPrefix + parameters;
+        }
+
         Se.WriteToolsLog($"{w} {parameters}");
 
         var process = new Process
@@ -3350,7 +3389,8 @@ public partial class SpeechToTextViewModel : ObservableObject
     {
         if (engine.Choice == new WhisperEnginePurfviewFasterWhisperXxl().Choice ||
             engine.Choice == new WhisperEngineOpenAi().Choice ||
-            engine.Choice == new WhisperEngineCTranslate2().Choice)
+            engine.Choice == new WhisperEngineCTranslate2().Choice ||
+            engine.Choice == new FasterWhisperMac().Choice)
         {
             return "--task translate ";
         }
@@ -3786,6 +3826,14 @@ public partial class SpeechToTextViewModel : ObservableObject
         // It opens a dialog with the installed backend, status and Re-download — which is
         // also the answer to issue #11022 (switch backend after the initial install).
         IsEngineSettingsButtonVisible = canDownload && isInstalled && IsSettingsCapable(engine);
+
+        if (engine is FasterWhisperMac && !isInstalled)
+        {
+            // pip-managed engine - Subtitle Edit cannot download it, so show install help instead.
+            EngineDownloadHint = "faster-whisper not found - install it with: pip3 install faster-whisper";
+            IsEngineDownloadButtonVisible = false;
+            return;
+        }
 
         if (!canDownload || isInstalled)
         {
