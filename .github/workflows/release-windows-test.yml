@@ -82,13 +82,11 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v5
         with:
-          path: ./artifacts
+          name: windows-x64-portable
+          path: ./release-assets
 
-      - name: Stage release asset
-        run: |
-          mkdir -p ./release-assets
-          cp ./artifacts/windows-x64-portable/*.zip ./release-assets/
-          ls -la ./release-assets/
+      - name: List release assets
+        run: ls -la ./release-assets/
 
       - name: Create pre-release with portable build
         uses: softprops/action-gh-release@v2
