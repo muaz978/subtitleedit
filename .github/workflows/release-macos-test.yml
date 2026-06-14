@@ -164,9 +164,19 @@ jobs:
             install_name_tool -add_rpath "@executable_path/../Frameworks" "$executable" || true
           fi
 
-          # Unsigned test build: drop any ad-hoc signature so the bundled fix script
-          # (xattr clear) is the documented way for testers to open it.
-          codesign --remove-signature "$app" 2>/dev/null || true
+          # No Apple Developer ID here, so ad-hoc sign (sign -) instead of removing the
+          # signature. On Apple Silicon an app with NO signature is killed by the kernel and
+          # won't run at all; an ad-hoc signature makes it launchable once the user clears the
+          # download quarantine (Gatekeeper). Sign inside-out: nested dylibs + bundled ffmpeg
+          # first, then the app bundle. No --options runtime, so .NET's JIT works without
+          # hardened-runtime entitlements. This does NOT bypass Gatekeeper - the user still
+          # allows it once via the bundled fix-unsigned-app.sh / `xattr -cr` / Open Anyway.
+          for f in "$app/Contents/Frameworks/"*.dylib "$app/Contents/MacOS/"*.dylib "$app/Contents/MacOS/ffmpeg"; do
+            [ -f "$f" ] || continue
+            codesign --force --sign - "$f" 2>/dev/null || true
+          done
+          codesign --force --sign - "$app/Contents/MacOS/SubtitleEdit" 2>/dev/null || true
+          codesign --force --sign - "$app" 2>/dev/null || true
 
           dmg_dir="./dmg-temp-${{ matrix.arch }}"
           dmg_out="./SubtitleEdit-macOS-${{ matrix.arch_label }}.dmg"
@@ -247,10 +257,17 @@ jobs:
             - **Intel:** `SubtitleEdit-macOS-x64.dmg`
 
             ### First run (the app is unsigned)
-            macOS will block an unsigned app. After dragging **Subtitle Edit** to Applications, either:
-            - Right-click the app → **Open** → **Open**, or
-            - Run the bundled `fix-unsigned-app.sh` (also in the DMG), or
-            - Terminal: `xattr -cr "/Applications/Subtitle Edit.app"`
+            macOS blocks unsigned apps with *"Apple could not verify … is free of malware"*. This is
+            expected for any app without a paid Apple Developer ID — it is not a defect in the build.
+            After dragging **Subtitle Edit** to Applications, do ONE of these:
+
+            - **Easiest (Terminal):** `xattr -cr "/Applications/Subtitle Edit.app"` then open normally. This
+              clears the download quarantine and it opens every time after.
+            - **Or run the bundled `fix-unsigned-app.sh`** from the DMG (does the same thing).
+            - **Or via System Settings** (macOS Ventura/Sonoma/Sequoia): try to open it once, then go to
+              **System Settings → Privacy & Security**, scroll to *"Subtitle Edit was blocked"* and click
+              **Open Anyway**, then confirm. (On Sequoia the first dialog only offers "Move to Trash/Done" —
+              the **Open Anyway** button appears in Privacy & Security after that first attempt.)
 
             See `README-macOS.txt` in the DMG for details.
 
