@@ -2,7 +2,7 @@ name: Release macOS test build
 
 # Builds and publishes UNSIGNED macOS test DMGs (Apple Silicon + Intel) from the
 # current branch and attaches them to a GitHub pre-release on this fork, so they
-# can be handed to Mac testers (e.g. to try the Faster Whisper Mac engine).
+# can be handed to Mac testers (e.g. to try the MLX Whisper Mac GPU engine).
 #
 # This is a macOS-only, fork-friendly slimmed copy of build-ui.yml's macOS path:
 # the release is gated ONLY on the Mac build (not on Windows/Linux/Flatpak), and
@@ -246,35 +246,38 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: "macOS test build (Faster Whisper Mac) - ${{ steps.tag.outputs.tag }}"
+          name: "macOS test build - ${{ steps.tag.outputs.tag }}"
           prerelease: true
           draft: false
           body: |
-            **Unsigned macOS test build** for trying the new **Faster Whisper Mac** speech-to-text engine.
+            **Unsigned macOS test build** with the **MLX Whisper Mac** (Apple GPU) speech-to-text engine.
 
             ### Downloads
-            - **Apple Silicon (M1/M2/M3/M4):** `SubtitleEdit-macOS-ARM64.dmg`
+            - **Apple Silicon (M1/M2/M3/M4/M5):** `SubtitleEdit-macOS-ARM64.dmg`
             - **Intel:** `SubtitleEdit-macOS-x64.dmg`
 
-            ### First run (the app is unsigned)
-            macOS blocks unsigned apps with *"Apple could not verify … is free of malware"*. This is
-            expected for any app without a paid Apple Developer ID — it is not a defect in the build.
-            After dragging **Subtitle Edit** to Applications, do ONE of these:
+            ### Install (the app is unsigned — required Terminal steps)
+            This build has no paid Apple Developer signature, so macOS will otherwise show
+            *"Subtitle Edit is damaged"* or kill it on launch (especially on Apple Silicon). This is
+            expected — it is not a defect in the build. After dragging **Subtitle Edit** to your
+            Applications folder, run these three commands in **Terminal**:
 
-            - **Easiest (Terminal):** `xattr -cr "/Applications/Subtitle Edit.app"` then open normally. This
-              clears the download quarantine and it opens every time after.
-            - **Or run the bundled `fix-unsigned-app.sh`** from the DMG (does the same thing).
-            - **Or via System Settings** (macOS Ventura/Sonoma/Sequoia): try to open it once, then go to
-              **System Settings → Privacy & Security**, scroll to *"Subtitle Edit was blocked"* and click
-              **Open Anyway**, then confirm. (On Sequoia the first dialog only offers "Move to Trash/Done" —
-              the **Open Anyway** button appears in Privacy & Security after that first attempt.)
+            ```bash
+            codesign --force --deep --sign - "/Applications/Subtitle Edit.app"
+            xattr -cr "/Applications/Subtitle Edit.app"
+            open "/Applications/Subtitle Edit.app"
+            ```
 
-            See `README-macOS.txt` in the DMG for details.
+            - The first line re-signs the app with a local ad-hoc signature so Apple Silicon will run it.
+            - The second clears the download quarantine.
+            - The third launches it. After this it opens normally every time.
 
-            ### Trying the Faster Whisper Mac engine
-            1. Install the library once: `pip3 install faster-whisper`
-            2. In Subtitle Edit: **Video → Audio to text (Whisper)**, pick **Faster Whisper Mac**, choose a model (tiny … large-v3) and transcribe.
-            3. The model downloads automatically on first use. Inference runs on CPU via CTranslate2 (fast on Apple Silicon and Intel).
+            If `codesign` reports a permission error, prefix it with `sudo`. See `README-macOS.txt` in the DMG for more.
+
+            ### Trying the MLX Whisper Mac engine (Apple GPU)
+            1. Install the backend once: `pip3 install mlx-whisper`
+            2. In Subtitle Edit: **Video → Audio to text (Whisper)**, pick **MLX Whisper Mac**, choose model **large-v3-turbo** and transcribe.
+            3. The model downloads automatically on first use. Inference runs on the Apple GPU / Neural Engine via MLX — much faster than CPU on M-series Macs.
 
             This is a community **test build** from a fork, not an official Subtitle Edit release.
           files: |
