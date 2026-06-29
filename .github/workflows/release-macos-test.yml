@@ -213,6 +213,10 @@ jobs:
 
   create-release:
     needs: [build-macos]
+    # Publish whatever arch builds succeeded. The Intel/x64 leg depends on an external static
+    # ffmpeg whose architecture occasionally changes upstream and breaks that leg; don't let that
+    # block the (primary) Apple Silicon DMG from being released.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -232,13 +236,19 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           path: ./artifacts
+        continue-on-error: true
 
       - name: Stage release assets
         run: |
           mkdir -p ./release-assets
-          cp ./artifacts/macos-dmg-arm64/*.dmg ./release-assets/
-          cp ./artifacts/macos-dmg-x64/*.dmg ./release-assets/
+          # Copy whichever DMGs were produced; a failed arch leg simply has no artifact.
+          cp ./artifacts/macos-dmg-arm64/*.dmg ./release-assets/ 2>/dev/null || true
+          cp ./artifacts/macos-dmg-x64/*.dmg ./release-assets/ 2>/dev/null || true
           ls -la ./release-assets/
+          if [ -z "$(ls -A ./release-assets/ 2>/dev/null)" ]; then
+            echo "::error::No DMG artifacts were produced by any arch build."
+            exit 1
+          fi
 
       - name: Create pre-release with macOS DMGs
         uses: softprops/action-gh-release@v2
