@@ -158,6 +158,12 @@ namespace Nikse.SubtitleEdit.Logic
             ApplyRightToLeftSettings(window);
             UiTheme.ApplyScaleToWindow(window);
 
+            // Keep the dialog above undocked tool windows (audio visualizer / video player), which
+            // float on top of the main window via the same helper. Without this the dialog opens
+            // behind them in undocked mode. (#11971)
+            KeepTopmostWhileOwnerActive(window, owner);
+
+            await YieldForPendingFlyoutDismissAsync();
             await window.ShowDialog(owner);
 
             return window;
@@ -187,9 +193,25 @@ namespace Nikse.SubtitleEdit.Logic
             ApplyRightToLeftSettings(window);
             UiTheme.ApplyScaleToWindow(window);
 
+            // Keep the dialog above undocked tool windows (audio visualizer / video player), which
+            // float on top of the main window via the same helper. Without this the dialog opens
+            // behind them in undocked mode. (#11971)
+            KeepTopmostWhileOwnerActive(window, owner);
+
+            await YieldForPendingFlyoutDismissAsync();
             await window.ShowDialog(owner);
-            
+
             return viewModel;
+        }
+
+        // When a dialog is launched from a context menu item, the command runs synchronously while the
+        // MenuFlyout is still mid-dismiss. Opening the modal dialog at that moment (notably on macOS)
+        // leaves it without keyboard focus, so it cannot receive key input such as Escape. Yielding a
+        // dispatcher cycle at Background priority lets the flyout finish its light-dismiss and focus
+        // restoration first, so the dialog then opens and takes focus cleanly.
+        private static Task YieldForPendingFlyoutDismissAsync()
+        {
+            return Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background).GetTask();
         }
 
         /// <summary>

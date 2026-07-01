@@ -104,6 +104,7 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
 
         private readonly TextBlock _textBlockVideoFileName;
         private readonly TextBlock _textBlockPlayerName;
+        private readonly TextBlock _textBlockProgress;
 
         public ICommand PlayCommand
         {
@@ -369,8 +370,8 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
             {
                 ToolTip.SetTip(sliderPosition, Se.Language.General.VideoPosition);
 
-                // Show the hovered timestamp in the tooltip (frame/HH:MM:SS:FF vs ms format is
-                // already handled by ToShortDisplayString via UseTimeFormatHHMMSSFF).
+                // Show the hovered timestamp in the tooltip (frame/HH:MM:SS:FF vs ms format
+                // is already handled by ToDisplayString via UseTimeFormatHHMMSSFF).
                 // Avalonia's Slider centers the thumb on the value point, so the effective
                 // value-range track is narrower than the slider by one thumb width — we have
                 // to match that mapping or the hint reads later than the actual click target.
@@ -387,7 +388,7 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                     var ratio = Math.Clamp(x / available, 0.0, 1.0);
                     var hovered = sliderPosition.Minimum + ratio * (sliderPosition.Maximum - sliderPosition.Minimum);
                     var offsetSec = Se.Settings.General.CurrentVideoOffsetInMs / 1000.0;
-                    ToolTip.SetTip(sliderPosition, TimeCode.FromSeconds(hovered + offsetSec).ToShortDisplayString());
+                    ToolTip.SetTip(sliderPosition, TimeCode.FromSeconds(hovered + offsetSec).ToDisplayString());
                 });
             }
             sliderPosition.TemplateApplied += (s, e) =>
@@ -474,8 +475,9 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                 _videoPlayerInstance.Volume = e.NewValue;
                 VolumeChanged?.Invoke(e.NewValue);
                 SetVolumeIcon(e.NewValue < 0.0001);
-            };
 
+                ToolTip.SetTip(sliderVolume, $"{Se.Language.General.Volume} {sliderVolume.Value:0}%");
+            };
 
             _gridProgress.Children.Add(sliderVolume);
             Grid.SetColumn(sliderVolume, 3);
@@ -488,7 +490,9 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                 HorizontalAlignment = HorizontalAlignment.Center,
                 FontSize = 12,
                 FontWeight = FontWeight.Bold,
+                FontFeatures = FontFeatureCollection.Parse("tnum"),
             };
+            _textBlockProgress = progressText;
             progressText.Bind(TextBlock.TextProperty, this.GetObservable(ProgressTextProperty));
             _gridProgress.Children.Add(progressText);
             Grid.SetColumn(progressText, 1);
@@ -514,9 +518,20 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                 FontWeight = FontWeight.Bold,
                 Opacity = 0.6,
                 TextAlignment = TextAlignment.Right,
+                // Trim from the start so the file extension stays visible (e.g. "…movie.mkv").
+                TextTrimming = TextTrimming.PrefixCharacterEllipsis,
+                MaxLines = 1,
             };
             _gridProgress.Add(_textBlockVideoFileName, 0, 1, 1, 3);
             _textBlockVideoFileName.PointerPressed += (_, e) => { VideoFileNamePointerPressed?.Invoke(e); };
+
+            // Resize the file-name label with the window: cap its width to the space to the
+            // right of the centered position/duration text so it fills what's available
+            // without overlapping that text. Recompute both when the controls grow/shrink
+            // (window resize) and when the progress text changes size — the latter covers
+            // startup, where the progress text is still empty when the grid is first laid out.
+            _gridProgress.SizeChanged += (_, _) => UpdateVideoFileNameMaxWidth();
+            _textBlockProgress.SizeChanged += (_, _) => UpdateVideoFileNameMaxWidth();
 
             Content = mainGrid;
 
@@ -727,12 +742,31 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                 StartAutoHideControls();
             }
 
-            var shortName = System.IO.Path.GetFileName(videoFileName);
-            if (shortName.Length > 55)
+            _textBlockVideoFileName.Text = System.IO.Path.GetFileName(videoFileName);
+            UpdateVideoFileNameMaxWidth();
+        }
+
+        // Cap the file-name label to the width available to the right of the centered
+        // position/duration text. The label is right-aligned, so this lets it fill the
+        // free space and grow/shrink with the window while its PrefixCharacterEllipsis
+        // trims the start when the name is too long to fit.
+        private void UpdateVideoFileNameMaxWidth()
+        {
+            var gridWidth = _gridProgress.Bounds.Width;
+            if (gridWidth <= 0)
             {
-                shortName = "..." + shortName[^50..];
+                return;
             }
-            _textBlockVideoFileName.Text = shortName;
+
+            // Right edge of the centered progress text (falls back to the grid center
+            // before that text has been laid out).
+            var progressRight = _textBlockProgress.Bounds.Width > 0
+                ? _textBlockProgress.Bounds.Right
+                : gridWidth / 2;
+
+            const double gap = 8;
+            var available = gridWidth - progressRight - gap;
+            _textBlockVideoFileName.MaxWidth = available > 20 ? available : 20;
         }
 
         internal void Close()
@@ -802,6 +836,7 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
 
                 SetPositionDisplayOnly(pos);
 
+                var fullDuration = TimeCode.FromSeconds(Duration + Se.Settings.General.CurrentVideoOffsetInMs / 1000.0).ToDisplayString();
                 if (VideoPlayerDisplayTimeLeft)
                 {
                     var left = Duration - pos;
@@ -809,18 +844,18 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                     if (left > 0.001)
                     {
                         ProgressText =
-                            $"-{TimeCode.FromSeconds(left).ToShortDisplayString()}{postFix}";
+                            $"-{TimeCode.FromSeconds(left).ToDisplayString()} / {fullDuration}{postFix}";
                     }
                     else
                     {
                         ProgressText =
-                            $"{TimeCode.FromSeconds(0).ToShortDisplayString()}{postFix}";
+                            $"{TimeCode.FromSeconds(0).ToDisplayString()} / {fullDuration}{postFix}";
                     }
                 }
                 else
                 {
                     ProgressText =
-                        $"{TimeCode.FromSeconds(pos + Se.Settings.General.CurrentVideoOffsetInMs / 1000.0).ToShortDisplayString()} / {TimeCode.FromSeconds(Duration + Se.Settings.General.CurrentVideoOffsetInMs / 1000.0).ToShortDisplayString()}{postFix}";
+                        $" {TimeCode.FromSeconds(pos + Se.Settings.General.CurrentVideoOffsetInMs / 1000.0).ToDisplayString()} / {fullDuration}{postFix}";
                 }
             };
             _positionTimer.Start();

@@ -30,6 +30,7 @@ public class SeTools
     public string NvidiaPrompt { get; set; }
     public bool JoinKeepTimeCodes { get; set; }
     public int JoinAppendMilliseconds { get; set; }
+    public bool BinEditAppendKeepTimeCodes { get; set; }
 
     public string MergeTwoSubtitlesOutputFormat { get; set; }
     public string MergeTwoSubtitlesFontName1 { get; set; }
@@ -124,6 +125,7 @@ public class SeTools
 
     public List<string> FindHistory { get; set; } = new List<string>();
     public bool AllowSingleLetterShortcutsInTextbox { get; set; }
+    public bool SpellCheckEnglishTreatInApostropheAsIng { get; set; } = true;
     public bool WriteToolsLog { get; set; } = false;
 
     public SeTools()
@@ -163,7 +165,7 @@ public class SeTools
         SplitOddLinesAction = nameof(SplitOddLinesActionType.Smart);
         UnicodeSymbolsToInsert = "♪;♫;—;…;°;∙;©;®;☺;☹;♥;☮;☯;Σ;∞;≡;⇒;π";
         MusicSymbol = "♪";
-        MusicSymbolReplace = "â™ª,â™," + // ♪ + ♫ in UTF-8 opened as ANSI
+        MusicSymbolReplace = "â™ª,â™«," + // ♪ + ♫ in UTF-8 opened as ANSI
                              "<s M/>,<s m/>," + // music symbols by subtitle creator
                              "#,*,¶"; // common music symbols
 

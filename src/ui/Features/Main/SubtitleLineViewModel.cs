@@ -58,6 +58,13 @@ public partial class SubtitleLineViewModel : ObservableObject
     public string Extra { get; set; }
     public string Language { get; set; }
     public string Region { get; set; }
+    public string Effect { get; set; }
+    public bool IsComment { get; set; }
+    public string MarginL { get; set; }
+    public string MarginR { get; set; }
+    public string MarginV { get; set; }
+    public bool NewSection { get; set; }
+    public bool Forced { get; set; }
     public Guid Id { get; set; }
     public bool IsCpsColumnVisible { get; set; } = true;
     public bool IsDefault => Text == string.Empty && Number == 0 && Duration == TimeSpan.Zero && StartTime == TimeSpan.Zero;
@@ -84,6 +91,10 @@ public partial class SubtitleLineViewModel : ObservableObject
         Extra = string.Empty;
         Language = string.Empty;
         Region = string.Empty;
+        Effect = string.Empty;
+        MarginL = string.Empty;
+        MarginR = string.Empty;
+        MarginV = string.Empty;
         Style = string.Empty;
         Actor = string.Empty;
         Layer = 0;
@@ -104,6 +115,13 @@ public partial class SubtitleLineViewModel : ObservableObject
         Layer = p.Layer;
         Number = p.Number;
         Extra = p.Extra;
+        Effect = p.Effect;
+        IsComment = p.IsComment;
+        MarginL = p.MarginL;
+        MarginR = p.MarginR;
+        MarginV = p.MarginV;
+        NewSection = p.NewSection;
+        Forced = p.Forced;
         Bookmark = p.Bookmark;
 
         Id = generateNewId ? Guid.NewGuid() : p.Id;
@@ -121,6 +139,13 @@ public partial class SubtitleLineViewModel : ObservableObject
         Extra = paragraph.Extra;
         Language = paragraph.Language;
         Region = paragraph.Region;
+        Effect = paragraph.Effect;
+        IsComment = paragraph.IsComment;
+        MarginL = paragraph.MarginL;
+        MarginR = paragraph.MarginR;
+        MarginV = paragraph.MarginV;
+        NewSection = paragraph.NewSection;
+        Forced = paragraph.Forced;
         Style = paragraph.Style;
         Actor = paragraph.Actor;
         Layer = paragraph.Layer;
@@ -130,6 +155,7 @@ public partial class SubtitleLineViewModel : ObservableObject
         UpdateDuration();
         Id = Guid.TryParse(paragraph.Id, out var guid) ? guid : Guid.NewGuid();
         Paragraph = paragraph;
+        Bookmark = paragraph.Bookmark;
 
         if (subtitleFormat is AdvancedSubStationAlpha or SubStationAlpha)
         {
@@ -149,6 +175,13 @@ public partial class SubtitleLineViewModel : ObservableObject
             Style = Style,
             Language = Language,
             Region = Region,
+            Effect = Effect,
+            IsComment = IsComment,
+            MarginL = MarginL,
+            MarginR = MarginR,
+            MarginV = MarginV,
+            NewSection = NewSection,
+            Forced = Forced,
             Layer = Layer,
             Bookmark = Bookmark,
         };
@@ -173,6 +206,13 @@ public partial class SubtitleLineViewModel : ObservableObject
             Style = Style,
             Language = Language,
             Region = Region,
+            Effect = Effect,
+            IsComment = IsComment,
+            MarginL = MarginL,
+            MarginR = MarginR,
+            MarginV = MarginV,
+            NewSection = NewSection,
+            Forced = Forced,
             Layer = Layer,
             Bookmark = Bookmark,
         };
@@ -439,17 +479,52 @@ public partial class SubtitleLineViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Binding target for the start-time editor in "keep duration" mode (used when
+    /// no separate end-time editor is shown). Programmatic callers should use
+    /// <see cref="SetStartTimeKeepDuration"/> so the side effect reads as an action.
+    /// </summary>
+    public TimeSpan StartTimeKeepDuration
+    {
+        get => StartTime;
+        set
+        {
+            if (StartTime == value || _skipUpdate)
+            {
+                return;
+            }
+
+            SetStartTimeKeepDuration(value);
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// Sets the start time and shifts the end time by the same amount, preserving
+    /// the line's duration ("move the whole line"). Plain <see cref="StartTime"/>
+    /// assignment and <see cref="SetStartTimeOnly"/>, by contrast, keep the end fixed.
+    /// </summary>
+    internal void SetStartTimeKeepDuration(TimeSpan timeSpan)
+    {
+        // SetTimes applies start/end atomically (no transient start > end exposed
+        // to the bound editor controls); the span comes from the live times.
+        SetTimes(timeSpan, timeSpan + (EndTime - StartTime));
+    }
+
     partial void OnStartTimeChanged(TimeSpan value)
     {
         OnPropertyChanged(nameof(StartTimeOnly));
+        OnPropertyChanged(nameof(StartTimeKeepDuration));
 
         if (_skipUpdate)
         {
             return;
         }
 
+        // Plain, safe default: move the start and recompute duration, leaving the
+        // end time fixed. To move the whole line keeping its duration, assign
+        // StartTimeKeepDuration instead.
         _skipUpdate = true;
-        EndTime = value + Duration;
         UpdateDuration();
         _skipUpdate = false;
     }
@@ -545,6 +620,12 @@ public partial class SubtitleLineViewModel : ObservableObject
         OnPropertyChanged(nameof(WpmBackgroundBrush));
         OnPropertyChanged(nameof(GapBackgroundBrush));
         OnPropertyChanged(nameof(PixelWidth));
+
+        // The grid Text/OriginalText columns render through a converter that honors the
+        // "single line" + separator appearance settings, so re-notify them too; otherwise
+        // toggling single-line (or applying the SE4 look) wouldn't refresh the grid live.
+        OnPropertyChanged(nameof(Text));
+        OnPropertyChanged(nameof(OriginalText));
     }
 
     /// <summary>Updates all display properties from a fixed <see cref="Paragraph"/> in-place.</summary>
@@ -556,6 +637,16 @@ public partial class SubtitleLineViewModel : ObservableObject
         Style = p.Style;
         Layer = p.Layer;
         Extra = p.Extra;
+        Language = p.Language;
+        Region = p.Region;
+        Effect = p.Effect;
+        IsComment = p.IsComment;
+        MarginL = p.MarginL;
+        MarginR = p.MarginR;
+        MarginV = p.MarginV;
+        NewSection = p.NewSection;
+        Forced = p.Forced;
+        Bookmark = p.Bookmark;
         if (subtitleFormat is AdvancedSubStationAlpha or SubStationAlpha)
         {
             Style = p.Extra;
@@ -579,6 +670,16 @@ public partial class SubtitleLineViewModel : ObservableObject
         Style = src.Style;
         Layer = src.Layer;
         Extra = src.Extra;
+        Language = src.Language;
+        Region = src.Region;
+        Effect = src.Effect;
+        IsComment = src.IsComment;
+        MarginL = src.MarginL;
+        MarginR = src.MarginR;
+        MarginV = src.MarginV;
+        NewSection = src.NewSection;
+        Forced = src.Forced;
+        Bookmark = src.Bookmark;
         _skipUpdate = true;
         StartTime = src.StartTime;
         EndTime = src.EndTime;
@@ -595,6 +696,24 @@ public partial class SubtitleLineViewModel : ObservableObject
         UpdateDuration();
     }
 
+    /// <summary>
+    /// Sets start and end time together without ever publishing an invalid
+    /// intermediate state (e.g. start &gt; end / negative duration). Updating
+    /// the two times separately can briefly expose such a state to the live
+    /// editor controls bound to the selected line; the duration up/down clamps
+    /// the negative value and writes it back, corrupting the end time. Suppress
+    /// notifications while both values are assigned, then recompute duration once.
+    /// </summary>
+    internal void SetTimes(TimeSpan startTime, TimeSpan endTime)
+    {
+        _skipUpdate = true;
+        StartTime = startTime;
+        EndTime = endTime;
+        _skipUpdate = false;
+
+        UpdateDuration();
+    }
+
     internal void Adjust(double factor, double adjustmentInSeconds)
     {
         if (StartTime.IsMaxTime())
@@ -602,8 +721,12 @@ public partial class SubtitleLineViewModel : ObservableObject
             return;
         }
 
-        SetStartTimeOnly(TimeSpan.FromMilliseconds(StartTime.TotalMilliseconds * factor + adjustmentInSeconds * TimeCode.BaseUnit));
-        EndTime = TimeSpan.FromMilliseconds(EndTime.TotalMilliseconds * factor + adjustmentInSeconds * TimeCode.BaseUnit);
+        // Set both times atomically via SetTimes; updating start then end
+        // separately can briefly expose start > end to the bound editor
+        // controls, which clamp the negative duration and corrupt the end time.
+        var newStart = TimeSpan.FromMilliseconds(StartTime.TotalMilliseconds * factor + adjustmentInSeconds * TimeCode.BaseUnit);
+        var newEnd = TimeSpan.FromMilliseconds(EndTime.TotalMilliseconds * factor + adjustmentInSeconds * TimeCode.BaseUnit);
+        SetTimes(newStart, newEnd);
     }
 
     internal double GetCharactersPerSecond()

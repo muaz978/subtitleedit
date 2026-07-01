@@ -69,7 +69,7 @@ internal class SubtitleConverter
                         var outputFile = ResolveOutputFileName(inputFile, options);
                         if (!options.Quiet)
                         {
-                            AnsiConsole.Markup($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [dim]->[/] [green]{outputFile}[/]...");
+                            AnsiConsole.MarkupInterpolated($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [dim]->[/] [green]{outputFile}[/]...");
                         }
                         await ConvertFileAsync(inputFile, outputFile, options);
                         result.SuccessfulFiles++;
@@ -92,10 +92,10 @@ internal class SubtitleConverter
                         {
                             var outputFile = ResolveOutputFileName(inputFile, options, track.LanguageCode, track.TrackNumber);
                             var trackLabel = track.TrackNumber.HasValue ? $"#{track.TrackNumber.Value} " : string.Empty;
-                            var langLabel = string.IsNullOrEmpty(track.LanguageCode) ? string.Empty : $"[[{track.LanguageCode.EscapeMarkup()}]] ";
+                            var langLabel = string.IsNullOrEmpty(track.LanguageCode) ? string.Empty : $"[{track.LanguageCode}] ";
                             if (!options.Quiet)
                             {
-                                AnsiConsole.Markup($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [yellow]{trackLabel.EscapeMarkup()}[/][blue]{langLabel}[/][dim]->[/] [green]{outputFile}[/]...");
+                                AnsiConsole.MarkupInterpolated($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [yellow]{trackLabel}[/][blue]{langLabel}[/][dim]->[/] [green]{outputFile}[/]...");
                             }
                             await ConvertTrackAsync(track, outputFile, options);
                             result.SuccessfulFiles++;
@@ -116,7 +116,7 @@ internal class SubtitleConverter
 
                     if (!options.Quiet)
                     {
-                        AnsiConsole.MarkupLine($" [red]error: {msg.EscapeMarkup()}[/]");
+                        AnsiConsole.MarkupLineInterpolated($" [red]error: {msg}[/]");
                     }
                 }
 
@@ -143,7 +143,7 @@ internal class SubtitleConverter
         {
             result.Errors.Add(
                 "VOB input is currently only supported with target format 'VobSub'. "
-                + "Re-run with --format VobSub to extract subtitles to .sub + .idx; the GUI is still required for OCR to text.");
+                + "Re-run with --format VobSub to extract subtitles to .sub + .idx, then convert that .sub to a text format (e.g. seconv movie.sub subrip) to OCR it.");
             result.FailedFiles = vobFiles.Count;
             return result;
         }
@@ -202,7 +202,7 @@ internal class SubtitleConverter
             var label = vobFiles.Count == 1
                 ? Path.GetFileName(vobFiles[0])
                 : $"{vobFiles.Count} VOB files";
-            AnsiConsole.Markup($"[dim]vob:[/] [cyan]{label.EscapeMarkup()}[/] [dim]->[/] [green]{outputBase.EscapeMarkup()}[/]...");
+            AnsiConsole.MarkupInterpolated($"[dim]vob:[/] [cyan]{label}[/] [dim]->[/] [green]{outputBase}[/]...");
         }
 
         try
@@ -232,7 +232,7 @@ internal class SubtitleConverter
                     AnsiConsole.MarkupLine($" [green]done ({totalWritten} subtitle(s) across {outputs.Count} streams).[/]");
                     foreach (var o in outputs)
                     {
-                        AnsiConsole.MarkupLine($"  [dim]stream 0x{o.StreamId:X2}:[/] [green]{o.Path.EscapeMarkup()}[/] ({o.Written})");
+                        AnsiConsole.MarkupLineInterpolated($"  [dim]stream 0x{o.StreamId:X2}:[/] [green]{o.Path}[/] ({o.Written})");
                     }
                 }
             }
@@ -248,7 +248,7 @@ internal class SubtitleConverter
             }
             if (!options.Quiet)
             {
-                AnsiConsole.MarkupLine($" [red]error: {msg.EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLineInterpolated($" [red]error: {msg}[/]");
             }
         }
 
@@ -275,11 +275,21 @@ internal class SubtitleConverter
 
         if (ext == ".sub")
         {
-            // Treat .sub as VobSub input only when an .idx companion exists — otherwise
-            // (e.g. a text MicroDVD .sub) leave it for the text loader to detect via IsMine.
+            // Treat .sub as VobSub input when an .idx companion exists, or when the .sub is a
+            // binary VobSub stream even without one (read directly, default palette). A text
+            // MicroDVD .sub starts with text, not the MPEG pack header, so it's left for the
+            // text loader to detect via IsMine.
             var idxPath = Path.ChangeExtension(inputFile, ".idx");
-            if (File.Exists(idxPath))
+            var hasIdx = File.Exists(idxPath);
+            if (hasIdx || BitmapSubtitleLoader.IsBinaryVobSub(inputFile))
             {
+                if (!hasIdx && !options.Quiet)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]Note: VobSub '.sub' has no '.idx' companion ({Path.GetFileName(idxPath).EscapeMarkup()}); "
+                        + "reading timing from the stream and using a default color palette.[/]");
+                }
+
                 // IsPal: default to PAL to match VobSubExtractor. The .idx "size:" field
                 // could disambiguate per-file, but a wrong guess only affects timing scale,
                 // not bitmap content.
@@ -312,7 +322,7 @@ internal class SubtitleConverter
         var outputFile = ResolveOutputFileName(inputFile, options);
         if (!options.Quiet)
         {
-            AnsiConsole.Markup($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile).EscapeMarkup()}[/] [dim](img→img)→[/] [green]{outputFile.EscapeMarkup()}[/]...");
+            AnsiConsole.MarkupInterpolated($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [dim](img→img)→[/] [green]{outputFile}[/]...");
         }
 
         IReadOnlyList<BitmapSubtitleLoader.BitmapSubtitleItem>? items = null;
@@ -335,7 +345,7 @@ internal class SubtitleConverter
             result.Files.Add(new FileConversionResult(inputFile, null, false, msg));
             if (!options.Quiet)
             {
-                AnsiConsole.MarkupLine($" [red]error: {msg.EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLineInterpolated($" [red]error: {msg}[/]");
             }
         }
         finally
@@ -389,7 +399,7 @@ internal class SubtitleConverter
             if (!options.Quiet)
             {
                 var trackLabel = $"#{track.TrackNumber} ";
-                AnsiConsole.Markup($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile).EscapeMarkup()}[/] [yellow]{trackLabel}[/][dim](PGS img→img)→[/] [green]{outputFile.EscapeMarkup()}[/]...");
+                AnsiConsole.MarkupInterpolated($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [yellow]{trackLabel}[/][dim](PGS img→img)→[/] [green]{outputFile}[/]...");
             }
 
             IReadOnlyList<BitmapSubtitleLoader.BitmapSubtitleItem>? items = null;
@@ -412,7 +422,7 @@ internal class SubtitleConverter
                 result.Files.Add(new FileConversionResult(inputFile, null, false, msg));
                 if (!options.Quiet)
                 {
-                    AnsiConsole.MarkupLine($" [red]error: {msg.EscapeMarkup()}[/]");
+                    AnsiConsole.MarkupLineInterpolated($" [red]error: {msg}[/]");
                 }
             }
             finally
@@ -468,7 +478,7 @@ internal class SubtitleConverter
 
             if (!options.Quiet)
             {
-                AnsiConsole.Markup($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile).EscapeMarkup()}[/] [yellow]PID {pid} [/][dim](DVB img→img)→[/] [green]{outputFile.EscapeMarkup()}[/]...");
+                AnsiConsole.MarkupInterpolated($"[dim]{fileIndex}:[/] [cyan]{Path.GetFileName(inputFile)}[/] [yellow]PID {pid} [/][dim](DVB img→img)→[/] [green]{outputFile}[/]...");
             }
 
             try
@@ -489,7 +499,7 @@ internal class SubtitleConverter
                 result.Files.Add(new FileConversionResult(inputFile, null, false, msg));
                 if (!options.Quiet)
                 {
-                    AnsiConsole.MarkupLine($" [red]error: {msg.EscapeMarkup()}[/]");
+                    AnsiConsole.MarkupLineInterpolated($" [red]error: {msg}[/]");
                 }
             }
             finally
@@ -671,6 +681,14 @@ internal class SubtitleConverter
 
         if (options.Operations.Count > 0)
         {
+            // Wire the shared spell-check / OCR-fix engine (libuilogic) to seconv's options so the
+            // "Fix common OCR errors" pass can run headless. Use --dictionary-folder when given, else
+            // fall back to the dictionaries bundled into seconv (English out of the box) (#11744).
+            Nikse.SubtitleEdit.Features.SpellCheck.SpellCheckConfig.DictionariesFolder = () =>
+                !string.IsNullOrEmpty(options.DictionaryFolder) ? options.DictionaryFolder : BundledDictionaries.GetFolder();
+            Nikse.SubtitleEdit.Features.SpellCheck.SpellCheckConfig.UseWordSplitList = () => true;
+            Nikse.SubtitleEdit.Features.SpellCheck.SpellCheckConfig.TreatInApostropheAsIng = () => false;
+
             LibSEIntegration.ApplyOperations(
                 subtitle,
                 options.Operations,
@@ -838,6 +856,18 @@ internal record class ConversionOptions
     /// <summary>Path to a <c>.nocr</c> database file (required when <c>OcrEngine == "nocr"</c>).</summary>
     public string? OcrDb { get; init; }
 
+    /// <summary>Folder with Hunspell dictionaries + *_OCRFixReplaceList.xml, enabling the "Fix common OCR errors" pass.</summary>
+    public string? DictionaryFolder { get; init; }
+
+    /// <summary>
+    /// When true, image-based sources (Blu-Ray <c>.sup</c>, VobSub <c>.sub</c>+<c>.idx</c>,
+    /// MKV PGS/VobSub, MP4 VobSub, TS DVB-sub) are converted to a text format keeping only
+    /// their time codes — OCR is skipped entirely and each entry's text is left empty. No
+    /// OCR engine is created, so this works without Tesseract/Paddle/etc. installed. Ignored
+    /// for text inputs and image output targets.
+    /// </summary>
+    public bool TimeCodesOnly { get; init; }
+
     /// <summary>Ollama API endpoint (default <c>http://localhost:11434/api/chat</c>).</summary>
     public string? OllamaUrl { get; init; }
 
@@ -847,6 +877,15 @@ internal record class ConversionOptions
     public bool TeletextOnly { get; init; }
     public bool SkipTeletext { get; init; }
     public int? TeletextOnlyPage { get; init; }
+
+    /// <summary>Plain text output: merge every paragraph into one space-separated block (no blank lines).</summary>
+    public bool PlainTextMerge { get; init; }
+
+    /// <summary>Plain text output: unbreak each paragraph, joining its lines into one.</summary>
+    public bool PlainTextUnbreak { get; init; }
+
+    /// <summary>Plain text output: emit a blank line between consecutive paragraphs. Default true (legacy behaviour).</summary>
+    public bool PlainTextLineBetweenSubtitles { get; init; } = true;
 
     public bool Quiet { get; init; }
     public bool Verbose { get; init; }

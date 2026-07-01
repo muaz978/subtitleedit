@@ -25,10 +25,44 @@ namespace Nikse.SubtitleEdit.Core.Common
         /// </summary>
         public static readonly char[] NewLineChars = { '\r', '\n' };
 
+        /// <summary>
+        /// French typography puts a space before <c>! ? : ;</c>. Inserts that space where a
+        /// letter is immediately followed by one of those marks (e.g. <c>"Quoi?"</c> -> <c>"Quoi ?"</c>).
+        /// A non-letter before the mark (digit, existing space, etc.) is left untouched, so
+        /// time codes like <c>12:30</c> are not changed.
+        /// </summary>
+        public static string AddSpaceBeforeFrenchPunctuation(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
+            var newText = text;
+            var j = 1;
+            while (j < newText.Length)
+            {
+                if ("!?:;".Contains(newText[j]) && char.IsLetter(newText[j - 1]))
+                {
+                    newText = newText.Insert(j++, " ");
+                }
+
+                j++;
+            }
+
+            return newText;
+        }
+
         private static readonly Regex NumberSeparatorNumberRegEx = new Regex(@"\b\d+[\.:;] \d+\b", RegexOptions.Compiled);
         private static readonly Regex RegexIsNumber = new Regex("^\\d+$", RegexOptions.Compiled);
         private static readonly Regex RegexIsEpisodeNumber = new Regex("^\\d+x\\d+$", RegexOptions.Compiled);
         private static readonly Regex RegexNumberSpacePeriod = new Regex(@"(\d) (\.)", RegexOptions.Compiled);
+        private static readonly Regex RegexOrdinalSt = new Regex(@"(1) (st)\b", RegexOptions.Compiled);
+        private static readonly Regex RegexOrdinalNd = new Regex(@"(2) (nd)\b", RegexOptions.Compiled);
+        private static readonly Regex RegexOrdinalRd = new Regex(@"(3) (rd)\b", RegexOptions.Compiled);
+        private static readonly Regex RegexOrdinalTh = new Regex(@"([0456789]) (th)\b", RegexOptions.Compiled);
+        private static readonly Regex RegexArabicWawSpace = new Regex(@"\bو ", RegexOptions.Compiled);
+        private static readonly Regex RegexLetterSpacePeriodSpaceLetter = new Regex(@"[a-z] \. [A-Z]", RegexOptions.Compiled);
 
         public static string[] VideoFileExtensions { get; } = { ".avi", ".mkv", ".wmv", ".mpg", ".mpeg", ".divx", ".mp4", ".asf", ".flv", ".mov", ".m4v", ".vob", ".ogv", ".webm", ".ts", ".tts", ".m2ts", ".mts", ".avs", ".mxf" };
         public static string[] AudioFileExtensions { get; } = { ".mp3", ".wav", ".wma", ".ogg", ".mpa", ".m4a", ".ape", ".aiff", ".flac", ".aac", ".ac3", ".eac3", ".mka", ".opus", ".adts", ".m4b" };
@@ -69,9 +103,10 @@ namespace Nikse.SubtitleEdit.Core.Common
 
         public static SubtitleFormat GetSubtitleFormatByFriendlyName(string friendlyName)
         {
-            if (friendlyName.IndexOf('(') > 0)
+            var parenIndex = friendlyName.IndexOf('(');
+            if (parenIndex > 0)
             {
-                friendlyName = friendlyName.Substring(0, friendlyName.IndexOf('(')).TrimEnd();
+                friendlyName = friendlyName.Substring(0, parenIndex).TrimEnd();
             }
 
             foreach (var format in SubtitleFormat.AllSubtitleFormats)
@@ -111,7 +146,7 @@ namespace Nikse.SubtitleEdit.Core.Common
             {
                 if (double.TryParse(displayFileSize.Replace("bytes", string.Empty).Trim(), NumberStyles.AllowDecimalPoint, CultureInfo.CurrentCulture, out var n))
                 {
-                    return (int)Math.Round(n);
+                    return (long)Math.Round(n);
                 }
             }
 
@@ -119,7 +154,7 @@ namespace Nikse.SubtitleEdit.Core.Common
             {
                 if (double.TryParse(displayFileSize.Replace("kb", string.Empty).Trim(), NumberStyles.AllowDecimalPoint, CultureInfo.CurrentCulture, out var n))
                 {
-                    return (int)Math.Round(n * 1024);
+                    return (long)Math.Round(n * 1024);
                 }
             }
 
@@ -127,7 +162,7 @@ namespace Nikse.SubtitleEdit.Core.Common
             {
                 if (double.TryParse(displayFileSize.Replace("mb", string.Empty).Trim(), NumberStyles.AllowDecimalPoint, CultureInfo.CurrentCulture, out var n))
                 {
-                    return (int)Math.Round(n * 1024 * 1024);
+                    return (long)Math.Round(n * 1024 * 1024);
                 }
             }
 
@@ -135,7 +170,7 @@ namespace Nikse.SubtitleEdit.Core.Common
             {
                 if (double.TryParse(displayFileSize.Replace("gb", string.Empty).Trim(), NumberStyles.AllowDecimalPoint, CultureInfo.CurrentCulture, out var n))
                 {
-                    return (int)Math.Round(n * 1024 * 1024 * 1024);
+                    return (long)Math.Round(n * 1024.0 * 1024.0 * 1024.0);
                 }
             }
 
@@ -295,15 +330,19 @@ namespace Nikse.SubtitleEdit.Core.Common
             while (six < s.Length)
             {
                 var letter = s[six];
-                var tagFound = letter == '<' &&
-                               (s.Substring(six).StartsWith("<font", StringComparison.OrdinalIgnoreCase)
-                                || s.Substring(six).StartsWith("</font", StringComparison.OrdinalIgnoreCase)
-                                || s.Substring(six).StartsWith("<u", StringComparison.OrdinalIgnoreCase)
-                                || s.Substring(six).StartsWith("</u", StringComparison.OrdinalIgnoreCase)
-                                || s.Substring(six).StartsWith("<b", StringComparison.OrdinalIgnoreCase)
-                                || s.Substring(six).StartsWith("</b", StringComparison.OrdinalIgnoreCase)
-                                || s.Substring(six).StartsWith("<i", StringComparison.OrdinalIgnoreCase)
-                                || s.Substring(six).StartsWith("</i", StringComparison.OrdinalIgnoreCase));
+                var tagFound = false;
+                if (letter == '<')
+                {
+                    var span = s.AsSpan(six);
+                    tagFound = span.StartsWith("<font".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                               || span.StartsWith("</font".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                               || span.StartsWith("<u".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                               || span.StartsWith("</u".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                               || span.StartsWith("<b".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                               || span.StartsWith("</b".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                               || span.StartsWith("<i".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                               || span.StartsWith("</i".AsSpan(), StringComparison.OrdinalIgnoreCase);
+                }
                 int endIndex = -1;
                 if (tagFound)
                 {
@@ -505,7 +544,7 @@ namespace Nikse.SubtitleEdit.Core.Common
                             }
                         }
                     }
-                    if (sanitizedLines[0].StartsWith('♪') && sanitizedLines[0].EndsWith('♪') || sanitizedLines[1].StartsWith('♪') && sanitizedLines[0].EndsWith('♪'))
+                    if (sanitizedLines[0].StartsWith('♪') && sanitizedLines[0].EndsWith('♪') || sanitizedLines[1].StartsWith('♪') && sanitizedLines[1].EndsWith('♪'))
                     {
                         return input;
                     }
@@ -556,15 +595,15 @@ namespace Nikse.SubtitleEdit.Core.Common
                 var tagFound = false;
                 if (letter == '<')
                 {
-                    var tagString = s.Substring(six);
-                    tagFound = tagString.StartsWith("<font", StringComparison.OrdinalIgnoreCase)
-                            || tagString.StartsWith("</font", StringComparison.OrdinalIgnoreCase)
-                            || tagString.StartsWith("<u", StringComparison.OrdinalIgnoreCase)
-                            || tagString.StartsWith("</u", StringComparison.OrdinalIgnoreCase)
-                            || tagString.StartsWith("<b", StringComparison.OrdinalIgnoreCase)
-                            || tagString.StartsWith("</b", StringComparison.OrdinalIgnoreCase)
-                            || tagString.StartsWith("<i", StringComparison.OrdinalIgnoreCase)
-                            || tagString.StartsWith("</i", StringComparison.OrdinalIgnoreCase);
+                    var tagSpan = s.AsSpan(six);
+                    tagFound = tagSpan.StartsWith("<font".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                            || tagSpan.StartsWith("</font".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                            || tagSpan.StartsWith("<u".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                            || tagSpan.StartsWith("</u".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                            || tagSpan.StartsWith("<b".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                            || tagSpan.StartsWith("</b".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                            || tagSpan.StartsWith("<i".AsSpan(), StringComparison.OrdinalIgnoreCase)
+                            || tagSpan.StartsWith("</i".AsSpan(), StringComparison.OrdinalIgnoreCase);
                 }
                 else if (letter == '{' && s.Substring(six).StartsWith("{\\"))
                 {
@@ -747,95 +786,68 @@ namespace Nikse.SubtitleEdit.Core.Common
             }
 
             // Fast check: if no tags or backslashes, return immediately
-            var firstBrace = input.IndexOf('{');
-            var firstSlash = input.IndexOf('\\');
-            if (firstBrace == -1 && firstSlash == -1) return input;
+            if (input.AsSpan().IndexOfAny('{', '\\') == -1)
+            {
+                return input;
+            }
 
-            // Use a pooled buffer to avoid allocations
-            char[] rented = ArrayPool<char>.Shared.Rent(input.Length * 2);
+            // Single forward pass. The previous version re-scanned the remainder with
+            // IndexOf('{') and IndexOf('\\') on every iteration, which degrades to O(n^2)
+            // on slash-heavy input (e.g. many \h / \N and no braces). Copy non-tag
+            // characters directly and only branch when we actually hit '{' or '\'.
+            // Output is never longer than the input ('\n'->NewLine is 2->NewLine.Length,
+            // '\h'->space is 2->1, tags are removed), so input.Length (+small margin) fits.
+            char[] rented = ArrayPool<char>.Shared.Rent(input.Length + 2);
             try
             {
                 var writeIdx = 0;
-                var currentIdx = 0;
+                var i = 0;
+                var len = input.Length;
 
-                while (currentIdx < input.Length)
+                while (i < len)
                 {
-                    // Find the next interesting character
-                    var nextBrace = input.IndexOf('{', currentIdx);
-                    var nextSlash = input.IndexOf('\\', currentIdx);
-
-                    // Determine which one comes first
-                    var nextInterest = -1;
-                    if (nextBrace != -1 && nextSlash != -1)
-                    {
-                        nextInterest = Math.Min(nextBrace, nextSlash);
-                    }
-                    else if (nextBrace != -1)
-                    {
-                        nextInterest = nextBrace;
-                    }
-                    else if (nextSlash != -1)
-                    {
-                        nextInterest = nextSlash;
-                    }
-
-                    // If no more tags/slashes, copy the rest and break
-                    if (nextInterest == -1)
-                    {
-                        int remaining = input.Length - currentIdx;
-                        input.CopyTo(currentIdx, rented, writeIdx, remaining);
-                        writeIdx += remaining;
-                        break;
-                    }
-
-                    // Copy the clean text up to the point of interest
-                    var cleanLength = nextInterest - currentIdx;
-                    if (cleanLength > 0)
-                    {
-                        input.CopyTo(currentIdx, rented, writeIdx, cleanLength);
-                        writeIdx += cleanLength;
-                    }
-
-                    currentIdx = nextInterest;
+                    var c = input[i];
 
                     // Handle Tag {
-                    if (input[currentIdx] == '{')
+                    if (c == '{')
                     {
-                        var closingBrace = input.IndexOf('}', currentIdx + 1);
+                        var closingBrace = input.IndexOf('}', i + 1);
                         if (closingBrace != -1)
                         {
-                            ReadOnlySpan<char> tagContent = input.AsSpan(currentIdx, closingBrace - currentIdx + 1);
-                            if (tagContent.StartsWith("{\\") || tagContent.StartsWith("{Kara Effector"))
+                            // {\...} (the common case) or {Kara Effector...}
+                            if (input[i + 1] == '\\' ||
+                                input.AsSpan(i, closingBrace - i + 1).StartsWith("{Kara Effector".AsSpan()))
                             {
-                                currentIdx = closingBrace + 1;
+                                i = closingBrace + 1;
                                 continue;
                             }
                         }
                     }
                     // Handle Escape \
-                    else if (input[currentIdx] == '\\' && currentIdx + 1 < input.Length)
+                    else if (c == '\\' && i + 1 < len)
                     {
-                        char next = input[currentIdx + 1];
+                        char next = input[i + 1];
                         if (next == 'n' || next == 'N')
                         {
-                            foreach (char c in Environment.NewLine)
+                            foreach (char nl in Environment.NewLine)
                             {
-                                rented[writeIdx++] = c;
+                                rented[writeIdx++] = nl;
                             }
 
-                            currentIdx += 2;
+                            i += 2;
                             continue;
                         }
                         if (next == 'h')
                         {
                             rented[writeIdx++] = ' ';
-                            currentIdx += 2;
+                            i += 2;
                             continue;
                         }
                     }
 
                     // If it wasn't a tag we care about, copy the char and move on
-                    rented[writeIdx++] = input[currentIdx++];
+                    rented[writeIdx++] = c;
+                    i++;
                 }
 
                 var result = new string(rented, 0, writeIdx);
@@ -1998,7 +2010,8 @@ namespace Nikse.SubtitleEdit.Core.Common
             {
                 return defaultColor;
             }
-            var colorStart = f.IndexOf(" color=", StringComparison.OrdinalIgnoreCase);
+            // f starts at 'start' within s, so offset f-relative index back into s
+            var colorStart = start + f.IndexOf(" color=", StringComparison.OrdinalIgnoreCase);
             if (s.IndexOf('"', colorStart + " color=".Length + 1) > 0)
             {
                 end = s.IndexOf('"', colorStart + " color=".Length + 1);
@@ -2443,16 +2456,16 @@ namespace Nikse.SubtitleEdit.Core.Common
             if (language == "en" && text.ContainsNumber())
             {
                 // 1 st => 1st
-                text = new Regex(@"(1) (st)\b").Replace(text, "$1$2");
+                text = RegexOrdinalSt.Replace(text, "$1$2");
 
                 // 2 nd => 2nd
-                text = new Regex(@"(2) (nd)\b").Replace(text, "$1$2");
+                text = RegexOrdinalNd.Replace(text, "$1$2");
 
                 // 3 rd => 2rd
-                text = new Regex(@"(3) (rd)\b").Replace(text, "$1$2");
+                text = RegexOrdinalRd.Replace(text, "$1$2");
 
                 // 4 th => 4th
-                text = new Regex(@"([0456789]) (th)\b").Replace(text, "$1$2");
+                text = RegexOrdinalTh.Replace(text, "$1$2");
             }
 
             if (language != null && "en-da-es-sv-de-nb-cz".Contains(language) && text.ContainsNumber())
@@ -2485,7 +2498,7 @@ namespace Nikse.SubtitleEdit.Core.Common
                     text = text.Replace(" \u060C", "\u060C");
                 }
 
-                text = new Regex(@"\bو ").Replace(text, "و");
+                text = RegexArabicWawSpace.Replace(text, "و");
 
                 while (text.Contains("ـ "))
                 {
@@ -2495,12 +2508,11 @@ namespace Nikse.SubtitleEdit.Core.Common
 
             if (text.Contains(" . "))
             {
-                var regex = new Regex(@"[a-z] \. [A-Z]");
-                var match = regex.Match(text);
+                var match = RegexLetterSpacePeriodSpaceLetter.Match(text);
                 while (match.Success)
                 {
                     text = text.Remove(match.Index + 1, 1);
-                    match = regex.Match(text);
+                    match = RegexLetterSpacePeriodSpaceLetter.Match(text);
                 }
             }
 
@@ -2811,7 +2823,9 @@ namespace Nikse.SubtitleEdit.Core.Common
             subtitle.Paragraphs.Clear();
 
             var isSsa = false;
+            var isVtt = false;
             SubtitleFormat format = new SubRip();
+            var codecId = matroskaSubtitleInfo.CodecId ?? string.Empty;
             var codecPrivate = matroskaSubtitleInfo.GetCodecPrivate();
             if (codecPrivate.Contains("[script info]", StringComparison.OrdinalIgnoreCase))
             {
@@ -2826,8 +2840,33 @@ namespace Nikse.SubtitleEdit.Core.Common
 
                 isSsa = true;
             }
+            else if (codecId.StartsWith("S_TEXT/WEBVTT", StringComparison.OrdinalIgnoreCase) ||
+                     codecId.StartsWith("D_WEBVTT", StringComparison.OrdinalIgnoreCase))
+            {
+                // Matroska stores WebVTT tracks as their own format - don't fall back to SubRip,
+                // which would parse the cue identifier/settings as part of the subtitle text.
+                format = new WebVTT();
+                isVtt = true;
+            }
 
-            if (isSsa)
+            if (isVtt)
+            {
+                // MakeMKV (codec id "D_WEBVTT/*") puts the cue identifier and the cue settings
+                // list in front of the payload inside each block. The standard "S_TEXT/WEBVTT"
+                // stores only the payload (identifier/settings live in block additions).
+                var hasCueHeader = codecId.StartsWith("D_WEBVTT", StringComparison.OrdinalIgnoreCase);
+                foreach (var p in sub)
+                {
+                    var text = p.GetText(matroskaSubtitleInfo);
+                    if (hasCueHeader)
+                    {
+                        text = RemoveMatroskaWebVttCueHeader(text);
+                    }
+
+                    subtitle.Paragraphs.Add(new Paragraph(text, p.Start, p.End));
+                }
+            }
+            else if (isSsa)
             {
                 foreach (var p in LoadMatroskaSSA(matroskaSubtitleInfo, matroska.Path, format, sub).Paragraphs)
                 {
@@ -2899,6 +2938,19 @@ namespace Nikse.SubtitleEdit.Core.Common
 
             subtitle.Renumber();
             return format;
+        }
+
+        /// <summary>
+        /// MakeMKV stores each WebVTT cue block as
+        /// "&lt;cue identifier&gt;\n&lt;cue settings list&gt;\n&lt;payload&gt;".
+        /// Strip those two header lines so only the displayable text remains;
+        /// otherwise the identifier (e.g. "1") and the settings (e.g. "align:middle line:90%")
+        /// end up in the subtitle text.
+        /// </summary>
+        private static string RemoveMatroskaWebVttCueHeader(string text)
+        {
+            var lines = text.SplitToLines();
+            return lines.Count <= 2 ? string.Empty : string.Join(Environment.NewLine, lines.Skip(2));
         }
 
         public static void ParseMatroskaTextSt(MatroskaTrackInfo trackInfo, List<MatroskaSubtitle> subtitleLines, Subtitle subtitle)
@@ -3103,9 +3155,10 @@ namespace Nikse.SubtitleEdit.Core.Common
                         return true;
                     }
 
+                    var lastChar = s[s.Length - 1];
                     var isLineContinuation = s.EndsWith("...", StringComparison.Ordinal) ||
                                               (AllLetters + "…,-$%").Contains(s.Substring(s.Length - 1)) ||
-                                              CalcCjk.IsCjk(s[s.Length - 1]);
+                                              (CalcCjk.IsCjk(lastChar) && !IsCjkSentenceEnding(lastChar));
 
                     if (s.EndsWith('♪') || nextText.StartsWith('♪'))
                     {
@@ -3126,6 +3179,27 @@ namespace Nikse.SubtitleEdit.Core.Common
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// CJK sentence-final punctuation. A line ending in one of these is a complete
+        /// sentence rather than a continuation, e.g. the ideographic full stop "。".
+        /// Needed because <see cref="CalcCjk.IsCjk"/> treats CJK punctuation as CJK,
+        /// which would otherwise make every "。"-terminated line look like a continuation.
+        /// </summary>
+        private static bool IsCjkSentenceEnding(char c)
+        {
+            switch (c)
+            {
+                case '。': // U+3002 ideographic full stop
+                case '．': // U+FF0E fullwidth full stop
+                case '｡': // U+FF61 halfwidth ideographic full stop
+                case '！': // U+FF01 fullwidth exclamation mark
+                case '？': // U+FF1F fullwidth question mark
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         public static string GetPathAndFileNameWithoutExtension(string fileName)
@@ -3283,7 +3357,8 @@ namespace Nikse.SubtitleEdit.Core.Common
                 return false;
             }
 
-            var numbers = array.OrderBy(p => p).ToList();
+            var numbers = (int[])array.Clone();
+            Array.Sort(numbers);
             var current = numbers[0];
             foreach (var n in numbers)
             {

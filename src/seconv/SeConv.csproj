@@ -15,13 +15,34 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Spectre.Console" Version="0.56.0" />
+    <PackageReference Include="Spectre.Console" Version="0.57.1" />
     <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
+
+    <!--
+      seconv uses SkiaSharp (FixCommonErrors pixel-width measurement, image output) and
+      SkiaSharp.HarfBuzz (image text shaping) via libse / libuilogic. The base SkiaSharp /
+      HarfBuzzSharp packages bundle the macOS/Windows natives but NOT Linux, so the Linux
+      publish shipped without libSkiaSharp.so / libHarfBuzzSharp.so and crashed with
+      DllNotFoundException (issue #11872). Reference the Linux native assets explicitly
+      (only deployed for the linux RID), pinned to the same versions as the managed
+      SkiaSharp / HarfBuzzSharp wrappers that Avalonia pulls in (3.119.4 / 8.3.1.5) to
+      avoid a native/managed ABI mismatch (cf. issues #11864, #11931).
+    -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="8.3.1.5" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\libse\LibSE.csproj" />
     <ProjectReference Include="..\libuilogic\LibUiLogic.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Bundle the dictionaries (Hunspell + *_OCRFixReplaceList.xml) so "Fix common OCR errors"
+         works out of the box (English) with no dictionary folder needed (#11744). -->
+    <EmbeddedResource Include="..\ui\Assets\Dictionaries.zip">
+      <LogicalName>SeConv.Dictionaries.zip</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

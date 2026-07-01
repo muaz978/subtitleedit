@@ -35,8 +35,11 @@ public class RemoveTextForHearingImpairedWindow : Window
         var fixesView = MakeFixesView(vm);
 
         var buttonOk = UiUtil.MakeButtonOk(vm.OkCommand);
+        var buttonApply = UiUtil.MakeButton(Se.Language.General.Apply, vm.ApplyCommand)
+            .WithBindIsVisible(nameof(vm.IsApplyVisible));
         var panelButtons = UiUtil.MakeButtonBar(
             buttonOk,
+            buttonApply,
             UiUtil.MakeButtonCancel(vm.CancelCommand)
         );
 
@@ -186,7 +189,22 @@ public class RemoveTextForHearingImpairedWindow : Window
     private static Border MakeUppercaseLineView(RemoveTextForHearingImpairedViewModel vm)
     {
         var comboBoxLineUppercase = UiUtil.MakeCheckBox(Se.Language.Tools.RemoveTextForHearingImpaired.IfLineIsUppercase, vm, nameof(vm.IsRemoveTextUppercaseLineOn));
-        return UiUtil.MakeBorderForControl(comboBoxLineUppercase).WithMarginBottom(5);
+        var textBoxWhitelist = UiUtil.MakeTextBox(160, vm, nameof(vm.UppercaseWhitelist)).WithMarginLeft(5);
+        if (Se.Settings.Appearance.ShowHints)
+        {
+            ToolTip.SetTip(textBoxWhitelist, Se.Language.Tools.RemoveTextForHearingImpaired.KeepUppercaseWords);
+        }
+        var panel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Children =
+            {
+                comboBoxLineUppercase,
+                textBoxWhitelist,
+            }
+        };
+
+        return UiUtil.MakeBorderForControl(panel).WithMarginBottom(5);
     }
 
     private static Border MakeLineContainsView(RemoveTextForHearingImpairedViewModel vm)
@@ -267,7 +285,7 @@ public class RemoveTextForHearingImpairedWindow : Window
         return UiUtil.MakeBorderForControl(grid);
     }
 
-    private Border MakeFixesView(RemoveTextForHearingImpairedViewModel vm)
+    private Grid MakeFixesView(RemoveTextForHearingImpairedViewModel vm)
     {
         var dataGrid = new DataGrid
         {
@@ -329,7 +347,29 @@ public class RemoveTextForHearingImpairedWindow : Window
         new DataGridCheckboxMultiSelect<RemoveItem>(dataGrid,
             item => item.Apply, (item, v) => item.Apply = v);
 
-        return UiUtil.MakeBorderForControl(dataGrid);
+        var labelLinesFound = UiUtil.MakeLabel().WithBindText(vm, nameof(vm.LinesFoundText));
+
+        var grid = new Grid
+        {
+            RowDefinitions =
+            {
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) },
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
+            },
+            ColumnDefinitions =
+            {
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+            },
+            RowSpacing = 5,
+            Width = double.NaN,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+        };
+
+        grid.Add(UiUtil.MakeBorderForControl(dataGrid), 0, 0);
+        grid.Add(labelLinesFound, 1, 0);
+
+        return grid;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

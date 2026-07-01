@@ -204,7 +204,9 @@ public class AudioVisualizer : Control
     public double ShotChangeSnapSeconds { get; set; } = 0.05;
     public WaveformDrawStyle WaveformDrawStyle { get; set; } = WaveformDrawStyle.Classic;
 
-    public bool SnapToShotChanges { get; set; } = true;
+    // Reads the user setting directly (like SnapToFrames) so the "Snap to shot changes"
+    // checkbox actually takes effect, and does so live without re-wiring at every call site.
+    public bool SnapToShotChanges => Se.Settings.Waveform.SnapToShotChanges;
     public bool FocusOnMouseOver { get; set; } = true;
     public int WaveformHeightPercentage { get; set; } = 50;
     public Color WaveformFancyHighColor { get; set; } = Colors.Orange;
@@ -338,6 +340,11 @@ public class AudioVisualizer : Control
     private double _originalDurationSeconds;
     private double _originalPreviousEndSeconds;
     private double _originalNextStartSeconds;
+
+    // Snapshot of every selected paragraph's start/duration captured when a bulk
+    // (multi-selection) move starts, so the whole block can be shifted by one delta.
+    private readonly List<(SubtitleLineViewModel Paragraph, double StartSeconds, double DurationSeconds)> _selectionMoveSnapshot = new();
+
     private bool _preventNextTap;
     private long _audioVisualizerLastScroll;
     private SubtitleLineViewModel? _cachedHitParagraph;
@@ -351,6 +358,7 @@ public class AudioVisualizer : Control
     {
         None,
         Moving,
+        MovingSelection,
         ResizingLeft,
         ResizingLeftOr,
         ResizingRight,
@@ -363,6 +371,11 @@ public class AudioVisualizer : Control
     private InteractionMode _interactionMode = InteractionMode.None;
 
     public readonly double ResizeMargin = 5.0; // Margin for resizing paragraphs
+
+    // Horizontal pixels the pointer must travel between press and release before an
+    // interaction counts as a real drag (move/resize). Below this it is a plain
+    // click, so the follow-up Tapped (select/seek) must NOT be suppressed.
+    private const double ClickDragSlopPixels = 3.0;
     public bool IsScrolling => (Environment.TickCount64 - _audioVisualizerLastScroll) < 100;
 
     public class PositionEventArgs : EventArgs
@@ -393,6 +406,17 @@ public class AudioVisualizer : Control
     public event ParagraphNullableEventHandler? OnPrimarySingleClicked;
     public event ParagraphNullableEventHandler? OnPrimaryDoubleClicked;
     public event PositionEventHandler? OnSetStartAndOffsetTheRest;
+
+    /// <summary>Raised when the user clicks the empty waveform to generate it on demand
+    /// (shown only when auto-generate is off and there are no cached peaks).</summary>
+    public event EventHandler? OnGenerateWaveformRequested;
+
+    /// <summary>When true and there are no <see cref="WavePeaks"/>, a "click to generate"
+    /// hint is drawn and a click raises <see cref="OnGenerateWaveformRequested"/>.</summary>
+    public bool ShowClickToGenerateHint { get; set; }
+
+    /// <summary>Localized hint text drawn over the empty waveform (see <see cref="ShowClickToGenerateHint"/>).</summary>
+    public string ClickToGenerateText { get; set; } = string.Empty;
 
     public AudioVisualizer()
     {
@@ -571,7 +595,7 @@ public class AudioVisualizer : Control
             var seconds = RelativeXPositionToSeconds(point.X);
             if (firstSelected != null)
             {
-                firstSelected.StartTime = TimeSpan.FromSeconds(seconds);
+                firstSelected.SetStartTimeKeepDuration(TimeSpan.FromSeconds(seconds));
                 e.Handled = true;
                 InvalidateVisual();
                 return;
@@ -759,7 +783,7 @@ public class AudioVisualizer : Control
             return;
         }
 
-        if (_interactionMode == InteractionMode.Moving)
+        if (_interactionMode is InteractionMode.Moving or InteractionMode.MovingSelection)
         {
             // click on paragraph, but with no move
             var ms = Environment.TickCount64 - _lastPointerPressed;
@@ -808,6 +832,7 @@ public class AudioVisualizer : Control
 
         if (_interactionMode is
             InteractionMode.Moving or
+            InteractionMode.MovingSelection or
             InteractionMode.ResizingLeft or
             InteractionMode.ResizingRight or
             InteractionMode.ResizingLeftOr or
@@ -815,11 +840,20 @@ public class AudioVisualizer : Control
             InteractionMode.ResizeLeftAnd or
             InteractionMode.ResizeRightAnd)
         {
-            _preventNextTap = true;
+            // Only suppress the follow-up Tapped (which selects/seeks) when the pointer
+            // actually dragged. A plain click that merely started within ResizeMargin of a
+            // paragraph edge is tagged as a resize on press but never moves; without this
+            // guard _preventNextTap would swallow OnTapped and the paragraph would not get
+            // selected (clicking near a boundary sometimes did not select).
+            if (Math.Abs(pos.X - _startPointerPosition.X) > ClickDragSlopPixels)
+            {
+                _preventNextTap = true;
+            }
         }
 
         _interactionMode = InteractionMode.None;
         _activeParagraph = null;
+        _selectionMoveSnapshot.Clear();
 
         InvalidateVisual();
     }
@@ -836,6 +870,15 @@ public class AudioVisualizer : Control
         e.Handled = true;
         var point = e.GetPosition(this);
         _startPointerPosition = point;
+
+        // No waveform yet and auto-generate is off: a click generates it on demand.
+        if (WavePeaks == null && ShowClickToGenerateHint &&
+            e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            OnGenerateWaveformRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         if (IsReadOnly)
         {
             InvalidateVisual();
@@ -950,7 +993,22 @@ public class AudioVisualizer : Control
                 return;
             }
 
-            _interactionMode = InteractionMode.Moving;
+            // A plain drag on a line that is part of a multi-selection shifts the whole
+            // selection together (SE4 parity for bulk time-offset in the waveform).
+            if (AllSelectedParagraphs is { Count: > 1 } && AllSelectedParagraphs.Contains(p))
+            {
+                _selectionMoveSnapshot.Clear();
+                foreach (var selected in AllSelectedParagraphs)
+                {
+                    _selectionMoveSnapshot.Add((selected, selected.StartTime.TotalSeconds, selected.Duration.TotalSeconds));
+                }
+
+                _interactionMode = InteractionMode.MovingSelection;
+            }
+            else
+            {
+                _interactionMode = InteractionMode.Moving;
+            }
         }
     }
 
@@ -998,6 +1056,40 @@ public class AudioVisualizer : Control
         if (_interactionMode == InteractionMode.New && newP != null && properties.IsLeftButtonPressed)
         {
             var seconds = RelativeXPositionToSeconds(point.X);
+
+            // Block overlap with neighbouring subtitles by default, like SE4 and the resize/move
+            // path: keep the dragged selection inside the empty gap around its anchor. Holding Shift
+            // or enabling "allow overlap" in settings bypasses the clamp.
+            if (!_isShiftDown && !Se.Settings.Waveform.AllowOverlap)
+            {
+                var lowerBound = 0.0;
+                var upperBound = double.MaxValue;
+                foreach (var p in _displayableParagraphs)
+                {
+                    if (p == newP)
+                    {
+                        continue;
+                    }
+
+                    var pEnd = p.EndTime.TotalSeconds;
+                    var pStart = p.StartTime.TotalSeconds;
+                    if (pEnd <= _newSelectionSeconds && pEnd + MinGapSeconds > lowerBound)
+                    {
+                        lowerBound = pEnd + MinGapSeconds;
+                    }
+
+                    if (pStart >= _newSelectionSeconds && pStart - MinGapSeconds < upperBound)
+                    {
+                        upperBound = pStart - MinGapSeconds;
+                    }
+                }
+
+                if (upperBound >= lowerBound)
+                {
+                    seconds = Math.Clamp(seconds, lowerBound, upperBound);
+                }
+            }
+
             if (seconds > _newSelectionSeconds)
             {
                 newP.StartTime = TimeSpan.FromSeconds(_newSelectionSeconds);
@@ -1142,6 +1234,37 @@ public class AudioVisualizer : Control
                     _activeParagraph.EndTime = TimeSpan.FromSeconds(newStart + _originalDurationSeconds);
                 }
                 break;
+            case InteractionMode.MovingSelection:
+            {
+                // Shift every selected paragraph by the same delta. Snap is anchored on the
+                // grabbed line so relative spacing is preserved, and the delta is clamped so
+                // the earliest selected line never moves before zero. Overlap with unselected
+                // neighbours is allowed - the user is repositioning the block as a whole.
+                var shift = SnapToFrame(_originalStartSeconds + deltaSeconds - StartPositionSeconds) - _originalStartSeconds;
+
+                var minOriginalStart = double.MaxValue;
+                foreach (var item in _selectionMoveSnapshot)
+                {
+                    if (item.StartSeconds < minOriginalStart)
+                    {
+                        minOriginalStart = item.StartSeconds;
+                    }
+                }
+
+                if (minOriginalStart + shift < 0)
+                {
+                    shift = -minOriginalStart;
+                }
+
+                foreach (var item in _selectionMoveSnapshot)
+                {
+                    var start = item.StartSeconds + shift;
+                    item.Paragraph.StartTime = TimeSpan.FromSeconds(start);
+                    item.Paragraph.EndTime = TimeSpan.FromSeconds(start + item.DurationSeconds);
+                }
+
+                break;
+            }
             case InteractionMode.ResizeLeftAnd:
                 newStart = _originalStartSeconds + deltaSeconds - StartPositionSeconds;
                 var newPrevEnd = _originalPreviousEndSeconds + deltaSeconds - StartPositionSeconds;
@@ -1589,6 +1712,18 @@ public class AudioVisualizer : Control
             DrawCurrentVideoPosition(context, ref renderCtx);
             DrawNewParagraph(context, ref renderCtx);
 
+            if (WavePeaks == null && ShowClickToGenerateHint && !string.IsNullOrEmpty(ClickToGenerateText))
+            {
+                var hint = new FormattedText(
+                    ClickToGenerateText,
+                    CultureInfo.CurrentCulture,
+                    FlowDirection.LeftToRight,
+                    Typeface.Default,
+                    14,
+                    Brushes.Gainsboro);
+                context.DrawText(hint, new Point((width - hint.Width) / 2, (height - hint.Height) / 2));
+            }
+
             if (IsFocused)
             {
                 context.DrawRectangle(null, _paintPenSelected, boundsRect);
@@ -1681,43 +1816,49 @@ public class AudioVisualizer : Control
             return;
         }
 
-        var seconds = Math.Ceiling(renderCtx.StartPositionSeconds) - renderCtx.StartPositionSeconds;
-        var position = SecondsToXPositionOptimized(seconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
+        // Hoist loop-invariants: renderCtx is a ref struct, and n (pixels per second) was being
+        // recomputed every iteration. With sampleRate != 0 guaranteed above, SecondsToXPositionOptimized
+        // reduces to Math.Round(seconds * n), so inline it.
+        var startPosSeconds = renderCtx.StartPositionSeconds;
+        var n = renderCtx.ZoomFactor * renderCtx.SampleRate;
         var imageHeight = renderCtx.Height;
         var width = renderCtx.Width;
+
+        var seconds = Math.Ceiling(startPosSeconds) - startPosSeconds;
+        var position = (int)Math.Round(seconds * n, MidpointRounding.AwayFromZero);
 
         var majorTicks = _timeLineMajorTicks;
         var minorTicks = _timeLineMinorTicks;
         majorTicks.Clear();
         minorTicks.Clear();
 
+        var drawMinor = n > 64;
+
         // Collect ticks first; draw text directly with cached FormattedText (single
         // DrawText call per label is fine — the per-frame cost was the FormattedText
         // allocation, not the DrawText call).
         while (position < width)
         {
-            var n = renderCtx.ZoomFactor * renderCtx.SampleRate;
-
-            if (n > 38 || (int)Math.Round(renderCtx.StartPositionSeconds + seconds) % 5 == 0)
+            if (n > 38 || (int)Math.Round(startPosSeconds + seconds) % 5 == 0)
             {
                 majorTicks.Add(new FancyLine(position, imageHeight - 10, imageHeight));
 
-                var timeText = GetDisplayTime(renderCtx.StartPositionSeconds + seconds);
+                var timeText = GetDisplayTime(startPosSeconds + seconds);
                 var formattedText = GetCachedTimeLineText(timeText);
                 var textY = Math.Max(0, imageHeight - formattedText.Height - 2);
                 context.DrawText(formattedText, new Point(position + 2, textY));
             }
 
             seconds += 0.5;
-            position = SecondsToXPositionOptimized(seconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
+            position = (int)Math.Round(seconds * n, MidpointRounding.AwayFromZero);
 
-            if (n > 64)
+            if (drawMinor)
             {
                 minorTicks.Add(new FancyLine(position, imageHeight - 5, imageHeight));
             }
 
             seconds += 0.5;
-            position = SecondsToXPositionOptimized(seconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
+            position = (int)Math.Round(seconds * n, MidpointRounding.AwayFromZero);
         }
 
         DrawVerticalLineBatch(context, _paintTimeLine, majorTicks);
@@ -1755,11 +1896,17 @@ public class AudioVisualizer : Control
             startFrame = 0;
         }
 
+        // The x position is linear in the frame index: x = absFrame * pixelsPerFrame -
+        // startPixelOffset. Precompute the invariants so each tick is a multiply-subtract instead of
+        // a per-tick division + SecondsToXPositionOptimized call (which re-reads the ref-struct
+        // renderCtx fields). invFps is only needed for the visible labels' time value.
+        var startPixelOffset = renderCtx.StartPositionSeconds * renderCtx.SampleRate * renderCtx.ZoomFactor;
+        var invFps = 1.0 / fps;
+
         var firstAbsFrame = startFrame - startFrame % majorStepFrames;
         for (var absFrame = firstAbsFrame; ; absFrame += majorStepFrames)
         {
-            var relSeconds = absFrame / fps - renderCtx.StartPositionSeconds;
-            var xPosition = SecondsToXPositionOptimized(relSeconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
+            var xPosition = (int)Math.Round(absFrame * pixelsPerFrame - startPixelOffset, MidpointRounding.AwayFromZero);
             if (xPosition >= width)
             {
                 break;
@@ -1769,7 +1916,7 @@ public class AudioVisualizer : Control
             {
                 majorTicks.Add(new FancyLine(xPosition, imageHeight - 10, imageHeight));
 
-                var timeText = GetFrameDisplayTime(absFrame / fps);
+                var timeText = GetFrameDisplayTime(absFrame * invFps);
                 var formattedText = GetCachedTimeLineText(timeText);
                 var textY = Math.Max(0, imageHeight - formattedText.Height - 2);
                 context.DrawText(formattedText, new Point(xPosition + 2, textY));
@@ -1777,8 +1924,7 @@ public class AudioVisualizer : Control
 
             if (minorStepFrames > 0)
             {
-                var minorRelSeconds = (absFrame + minorStepFrames) / fps - renderCtx.StartPositionSeconds;
-                var minorX = SecondsToXPositionOptimized(minorRelSeconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
+                var minorX = (int)Math.Round((absFrame + minorStepFrames) * pixelsPerFrame - startPixelOffset, MidpointRounding.AwayFromZero);
                 if (minorX >= 0 && minorX < width)
                 {
                     minorTicks.Add(new FancyLine(minorX, imageHeight - 5, imageHeight));
@@ -1863,12 +2009,19 @@ public class AudioVisualizer : Control
         var width = renderCtx.Width;
         var height = renderCtx.Height;
 
+        // Pixel spacing between adjacent vertical lines; reused for the horizontal lines so the
+        // grid stays square, matching the look users are familiar with from SE4.
+        double stepPixels;
+
         if (renderCtx.SampleRate == 0)
         {
-            for (var i = 0; i < width; i += 10)
+            stepPixels = 10;
+            for (var i = 0d; i < width; i += stepPixels)
             {
                 context.DrawLine(_paintGridLines, new Point(i, 0), new Point(i, height));
             }
+
+            DrawHorizontalGridLines(context, width, height, stepPixels);
             return;
         }
 
@@ -1882,6 +2035,7 @@ public class AudioVisualizer : Control
             }
 
             var framesPerStep = PickFramesPerStep(pixelsPerFrame, minPixelGap: 8);
+            stepPixels = framesPerStep * pixelsPerFrame;
 
             // First frame boundary (absolute frame index) at-or-before the visible start.
             // Compute the start frame in integer space — Math.Floor in double space can land
@@ -1917,6 +2071,7 @@ public class AudioVisualizer : Control
                 ? 0.1d
                 : // a pixel is 0.1 second
                 1.0d; // a pixel is 1.0 second
+            stepPixels = interval * renderCtx.SampleRate * renderCtx.ZoomFactor;
 
             while (xPosition < width)
             {
@@ -1924,6 +2079,21 @@ public class AudioVisualizer : Control
                 seconds += interval;
                 xPosition = SecondsToXPositionOptimized(seconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
             }
+        }
+
+        DrawHorizontalGridLines(context, width, height, stepPixels);
+    }
+
+    private void DrawHorizontalGridLines(DrawingContext context, double width, double height, double stepPixels)
+    {
+        if (stepPixels < 1)
+        {
+            return;
+        }
+
+        for (var y = stepPixels; y < height; y += stepPixels)
+        {
+            context.DrawLine(_paintGridLines, new Point(0, y), new Point(width, y));
         }
     }
 
@@ -1958,13 +2128,38 @@ public class AudioVisualizer : Control
             waveformHeight = renderCtx.WaveformHeight;
         }
 
-        if (WaveformDrawStyle == WaveformDrawStyle.Classic)
+        // Rebuild the cached geometry only when the view actually changed; otherwise (e.g. the
+        // cursor moved) just replay the existing draw ops. See _waveformCacheDraws.
+        var key = BuildWaveformCacheKey(waveformHeight, ref renderCtx);
+        if (!_waveformCacheValid || !ReferenceEquals(_waveformCachePeaks, WavePeaks) || !key.Equals(_waveformCacheKey))
         {
-            DrawWaveFormClassic(context, waveformHeight, ref renderCtx);
+            _waveformCacheDraws.Clear();
+            if (WaveformDrawStyle == WaveformDrawStyle.Classic)
+            {
+                BuildWaveFormClassic(waveformHeight, ref renderCtx);
+            }
+            else
+            {
+                BuildWaveFormFancy(waveformHeight, ref renderCtx);
+            }
+
+            _waveformCacheKey = key;
+            _waveformCachePeaks = WavePeaks;
+            _waveformCacheValid = true;
         }
-        else
+
+        // The fancy style draws a center line; it depends only on width/height (already in the
+        // key) so it's cheap to draw live each render rather than caching it.
+        if (WaveformDrawStyle != WaveformDrawStyle.Classic)
         {
-            DrawWaveFormFancy(context, waveformHeight, ref renderCtx);
+            var halfWaveformHeight = waveformHeight / 2;
+            context.DrawLine(_centerLinePen, new Point(0, halfWaveformHeight), new Point(renderCtx.Width, halfWaveformHeight));
+        }
+
+        for (var i = 0; i < _waveformCacheDraws.Count; i++)
+        {
+            var draw = _waveformCacheDraws[i];
+            context.DrawGeometry(null, draw.Pen, draw.Geometry);
         }
     }
 
@@ -2025,7 +2220,7 @@ public class AudioVisualizer : Control
     private readonly Dictionary<int, FancyBatch> _fancyBatches = new(64);
     private readonly List<int> _fancyBatchKeysInUse = new(64);
 
-    private void DrawWaveFormFancy(DrawingContext context, double waveformHeight, ref RenderContext renderCtx)
+    private void BuildWaveFormFancy(double waveformHeight, ref RenderContext renderCtx)
     {
         _isSelectedHelper.Reset(AllSelectedParagraphs, renderCtx.SampleRate);
         var isSelectedHelper = _isSelectedHelper;
@@ -2043,12 +2238,23 @@ public class AudioVisualizer : Control
         var peaksCount = peaks.Length;
         var highestPeak = renderCtx.HighestPeak;
 
-        // Draw center line first
-        context.DrawLine(_centerLinePen, new Point(0, halfWaveformHeight), new Point(renderCtx.Width, halfWaveformHeight));
+        // Hoist loop-invariant RenderContext fields into locals: it is a ref struct, so the JIT
+        // cannot cache these reads across the loop. Also turn the per-pixel sample position into a
+        // multiply (startSample + x * samplesPerPixel) instead of a division (x / div).
+        var width = renderCtx.Width;
+        var height = renderCtx.Height;
+        var verticalZoomFactor = renderCtx.VerticalZoomFactor;
+        var startSample = renderCtx.StartPositionSeconds * renderCtx.SampleRate;
+        var samplesPerPixel = renderCtx.SampleRate / div;
+        var yScaleHalf = verticalZoomFactor / highestPeak * halfWaveformHeight;
 
         // Calculate the threshold for color transitions (as a fraction of the highest peak)
         var lowThreshold = highestPeak * 0.3;
         var mediumThreshold = highestPeak * 0.6;
+        // Reciprocals of the (loop-invariant) blend ranges, so the per-pixel colour math multiplies
+        // instead of dividing.
+        var invMediumMinusLow = 1.0 / (mediumThreshold - lowThreshold);
+        var invHighMinusMedium = 1.0 / (highestPeak - mediumThreshold);
 
         // Reset pooled batches for this render
         var batches = _fancyBatches;
@@ -2059,9 +2265,9 @@ public class AudioVisualizer : Control
         }
         keysInUse.Clear();
 
-        for (var x = 0; x < renderCtx.Width; x++)
+        for (var x = 0; x < width; x++)
         {
-            var pos = (renderCtx.StartPositionSeconds + x / div) * renderCtx.SampleRate;
+            var pos = startSample + x * samplesPerPixel;
             var pos0 = (int)pos;
             var pos1 = pos0 + 1;
 
@@ -2077,8 +2283,8 @@ public class AudioVisualizer : Control
             var max = peak0.Max * pos0Weight + peak1.Max * pos1Weight;
             var min = peak0.Min * pos0Weight + peak1.Min * pos1Weight;
 
-            var yMax = CalculateYOptimized(max, halfWaveformHeight, renderCtx.HighestPeak, renderCtx.VerticalZoomFactor, renderCtx.Height);
-            var yMin = CalculateYOptimized(min, halfWaveformHeight, renderCtx.HighestPeak, renderCtx.VerticalZoomFactor, renderCtx.Height);
+            var yMax = CalculateYOptimized(max, halfWaveformHeight, yScaleHalf, height);
+            var yMin = CalculateYOptimized(min, halfWaveformHeight, yScaleHalf, height);
 
             if (yMin < yMax)
             {
@@ -2116,7 +2322,7 @@ public class AudioVisualizer : Control
             else if (amplitude < mediumThreshold)
             {
                 // Medium amplitude - blend from base to high color
-                var blend = (amplitude - lowThreshold) / (mediumThreshold - lowThreshold);
+                var blend = (amplitude - lowThreshold) * invMediumMinusLow;
                 var highColor = WaveformFancyHighColor;
                 var r = (byte)(baseColor.R + blend * (highColor.R - baseColor.R));
                 var g = (byte)(baseColor.G + blend * (highColor.G - baseColor.G));
@@ -2129,7 +2335,7 @@ public class AudioVisualizer : Control
             else
             {
                 // High amplitude - use high color with increased opacity
-                var blend = Math.Min(1.0, (amplitude - mediumThreshold) / (highestPeak - mediumThreshold));
+                var blend = Math.Min(1.0, (amplitude - mediumThreshold) * invHighMinusMedium);
                 var highColor = WaveformFancyHighColor;
                 var a = (byte)Math.Min(255, highColor.A + blend * (255 - highColor.A));
                 color = Color.FromArgb(a, highColor.R, highColor.G, highColor.B);
@@ -2152,7 +2358,7 @@ public class AudioVisualizer : Control
             // Add subtle glow for higher amplitudes
             if (amplitude > mediumThreshold)
             {
-                var glowAlpha = (byte)(50 * ((amplitude - mediumThreshold) / (highestPeak - mediumThreshold)));
+                var glowAlpha = (byte)(50 * ((amplitude - mediumThreshold) * invHighMinusMedium));
                 var glowColor = Color.FromArgb(glowAlpha, color.R, color.G, color.B);
                 // Quantize glow alpha to 5 steps for caching
                 var glowKey = 1000 + colorKey * 10 + (glowAlpha / 10);
@@ -2169,35 +2375,18 @@ public class AudioVisualizer : Control
             }
         }
 
-        // One DrawGeometry per pen, instead of two DrawLines per column.
+        // One cached geometry per pen, instead of two DrawLines per column.
         // The gradient brush bounds become the entire waveform area instead of each
         // individual line, so the gradient fades across the waveform vertically rather
         // than per column.
         for (var i = 0; i < keysInUse.Count; i++)
         {
             var batch = batches[keysInUse[i]];
-            var lines = batch.Lines;
-            if (lines.Count == 0)
-            {
-                continue;
-            }
-
-            var geom = new StreamGeometry();
-            using (var gctx = geom.Open())
-            {
-                for (var j = 0; j < lines.Count; j++)
-                {
-                    var l = lines[j];
-                    gctx.BeginFigure(new Point(l.X, l.YMax), false);
-                    gctx.LineTo(new Point(l.X, l.YMin));
-                    gctx.EndFigure(false);
-                }
-            }
-            context.DrawGeometry(null, batch.Pen, geom);
+            AddLineBatchToCache(batch.Pen, batch.Lines);
         }
     }
 
-    private void DrawWaveFormClassic(DrawingContext context, double waveformHeight, ref RenderContext renderCtx)
+    private void BuildWaveFormClassic(double waveformHeight, ref RenderContext renderCtx)
     {
         _isSelectedHelper.Reset(AllSelectedParagraphs, renderCtx.SampleRate);
         var isSelectedHelper = _isSelectedHelper;
@@ -2209,18 +2398,28 @@ public class AudioVisualizer : Control
             return;
         }
 
-        // See DrawWaveFormFancy: skip IList<T> interface dispatch in the per-pixel loop.
+        // See BuildWaveFormFancy: skip IList<T> interface dispatch in the per-pixel loop.
         var peaks = WavePeaks.AsSpan();
         var peaksCount = peaks.Length;
+
+        // Hoist loop-invariant RenderContext fields (it is a ref struct) and replace the per-pixel
+        // division for the sample position with a multiply. See BuildWaveFormFancy.
+        var width = renderCtx.Width;
+        var height = renderCtx.Height;
+        var highestPeak = renderCtx.HighestPeak;
+        var verticalZoomFactor = renderCtx.VerticalZoomFactor;
+        var startSample = renderCtx.StartPositionSeconds * renderCtx.SampleRate;
+        var samplesPerPixel = renderCtx.SampleRate / div;
+        var yScaleHalf = verticalZoomFactor / highestPeak * halfWaveformHeight;
 
         var unselectedLines = _classicUnselectedLines;
         var selectedLines = _classicSelectedLines;
         unselectedLines.Clear();
         selectedLines.Clear();
 
-        for (var x = 0; x < renderCtx.Width; x++)
+        for (var x = 0; x < width; x++)
         {
-            var pos = (renderCtx.StartPositionSeconds + x / div) * renderCtx.SampleRate;
+            var pos = startSample + x * samplesPerPixel;
             var pos0 = (int)pos;
             var pos1 = pos0 + 1;
 
@@ -2236,8 +2435,8 @@ public class AudioVisualizer : Control
             var max = peak0.Max * pos0Weight + peak1.Max * pos1Weight;
             var min = peak0.Min * pos0Weight + peak1.Min * pos1Weight;
 
-            var yMax = CalculateYOptimized(max, halfWaveformHeight, renderCtx.HighestPeak, renderCtx.VerticalZoomFactor, renderCtx.Height);
-            var yMin = CalculateYOptimized(min, halfWaveformHeight, renderCtx.HighestPeak, renderCtx.VerticalZoomFactor, renderCtx.Height);
+            var yMax = CalculateYOptimized(max, halfWaveformHeight, yScaleHalf, height);
+            var yMin = CalculateYOptimized(min, halfWaveformHeight, yScaleHalf, height);
 
             // Ensure yMin is below yMax and both are within bounds
             if (yMin < yMax)
@@ -2262,13 +2461,137 @@ public class AudioVisualizer : Control
             }
         }
 
-        DrawVerticalLineBatch(context, _paintWaveform, unselectedLines);
-        DrawVerticalLineBatch(context, _paintPenSelected, selectedLines);
+        AddLineBatchToCache(_paintWaveform, unselectedLines);
+        AddLineBatchToCache(_paintPenSelected, selectedLines);
     }
 
     // Pooled buffers for the classic waveform's two pens.
     private readonly List<FancyLine> _classicUnselectedLines = new(2048);
     private readonly List<FancyLine> _classicSelectedLines = new(2048);
+
+    // Cached waveform draw ops. Building the waveform is a per-pixel CPU loop that allocates
+    // geometry every render; doing it on every cursor tick (CurrentVideoPositionSeconds has
+    // AffectsRender) made playback stutter, worst over loud audio (extra glow geometry). We
+    // build the geometry once per view-state and just replay the draw calls while only the
+    // cursor moves. The key captures everything that changes the waveform pixels, so any real
+    // change (scroll, zoom, resize, selection, peaks, colors, style) rebuilds automatically.
+    private readonly List<(IPen Pen, Geometry Geometry)> _waveformCacheDraws = new(64);
+    private WaveformCacheKey _waveformCacheKey;
+    private bool _waveformCacheValid;
+    private object? _waveformCachePeaks;
+
+    private readonly struct WaveformCacheKey : IEquatable<WaveformCacheKey>
+    {
+        public readonly int Width;
+        public readonly double Height;
+        public readonly double WaveformHeight;
+        public readonly double StartPositionSeconds;
+        public readonly double ZoomFactor;
+        public readonly double VerticalZoomFactor;
+        public readonly double HighestPeak;
+        public readonly int SampleRate;
+        public readonly int DisplayMode;
+        public readonly int DrawStyle;
+        public readonly uint ColorMain;
+        public readonly uint ColorSelected;
+        public readonly uint ColorHigh;
+        public readonly int SelectionCount;
+        public readonly long SelectionHash;
+
+        public WaveformCacheKey(int width, double height, double waveformHeight, double startPositionSeconds,
+            double zoomFactor, double verticalZoomFactor, double highestPeak, int sampleRate, int displayMode,
+            int drawStyle, uint colorMain, uint colorSelected, uint colorHigh, int selectionCount, long selectionHash)
+        {
+            Width = width;
+            Height = height;
+            WaveformHeight = waveformHeight;
+            StartPositionSeconds = startPositionSeconds;
+            ZoomFactor = zoomFactor;
+            VerticalZoomFactor = verticalZoomFactor;
+            HighestPeak = highestPeak;
+            SampleRate = sampleRate;
+            DisplayMode = displayMode;
+            DrawStyle = drawStyle;
+            ColorMain = colorMain;
+            ColorSelected = colorSelected;
+            ColorHigh = colorHigh;
+            SelectionCount = selectionCount;
+            SelectionHash = selectionHash;
+        }
+
+        public bool Equals(WaveformCacheKey other) =>
+            Width == other.Width &&
+            Height.Equals(other.Height) &&
+            WaveformHeight.Equals(other.WaveformHeight) &&
+            StartPositionSeconds.Equals(other.StartPositionSeconds) &&
+            ZoomFactor.Equals(other.ZoomFactor) &&
+            VerticalZoomFactor.Equals(other.VerticalZoomFactor) &&
+            HighestPeak.Equals(other.HighestPeak) &&
+            SampleRate == other.SampleRate &&
+            DisplayMode == other.DisplayMode &&
+            DrawStyle == other.DrawStyle &&
+            ColorMain == other.ColorMain &&
+            ColorSelected == other.ColorSelected &&
+            ColorHigh == other.ColorHigh &&
+            SelectionCount == other.SelectionCount &&
+            SelectionHash == other.SelectionHash;
+
+        public override bool Equals(object? obj) => obj is WaveformCacheKey other && Equals(other);
+        public override int GetHashCode() => 0; // unused; cache does an exact Equals comparison
+    }
+
+    private static uint ToKeyColor(Color c) => ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
+
+    private WaveformCacheKey BuildWaveformCacheKey(double waveformHeight, ref RenderContext renderCtx)
+    {
+        long selectionHash = 17;
+        var selection = AllSelectedParagraphs;
+        for (var i = 0; i < selection.Count; i++)
+        {
+            var p = selection[i];
+            selectionHash = selectionHash * 31 + p.StartTime.Ticks;
+            selectionHash = selectionHash * 31 + p.EndTime.Ticks;
+        }
+
+        return new WaveformCacheKey(
+            (int)Math.Ceiling(renderCtx.Width),
+            renderCtx.Height,
+            waveformHeight,
+            renderCtx.StartPositionSeconds,
+            renderCtx.ZoomFactor,
+            renderCtx.VerticalZoomFactor,
+            renderCtx.HighestPeak,
+            renderCtx.SampleRate,
+            (int)_displayMode,
+            (int)WaveformDrawStyle,
+            ToKeyColor(WaveformColor),
+            ToKeyColor(WaveformSelectedColor),
+            ToKeyColor(WaveformFancyHighColor),
+            selection.Count,
+            selectionHash);
+    }
+
+    private void AddLineBatchToCache(IPen pen, List<FancyLine> lines)
+    {
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        var geom = new StreamGeometry();
+        using (var gctx = geom.Open())
+        {
+            for (var i = 0; i < lines.Count; i++)
+            {
+                var l = lines[i];
+                gctx.BeginFigure(new Point(l.X, l.YMax), false);
+                gctx.LineTo(new Point(l.X, l.YMin));
+                gctx.EndFigure(false);
+            }
+        }
+
+        _waveformCacheDraws.Add((pen, geom));
+    }
 
     private static void DrawVerticalLineBatch(DrawingContext context, IPen pen, List<FancyLine> lines)
     {
@@ -2306,6 +2629,56 @@ public class AudioVisualizer : Control
         }
     }
 
+    // Subtitle text is otherwise re-shaped on every frame. At 60 fps the FormattedText shaping
+    // plus RemoveHtmlTags (regex) and SplitToLines for each visible paragraph churns enough
+    // short-lived garbage to trigger GC pauses, which show up as the cursor briefly freezing and
+    // then jumping. Cache the prepared text and the shaped FormattedText; both are cleared in
+    // ResetCache() when the waveform font/colors change.
+    private readonly Dictionary<string, FormattedText> _paragraphFormattedTextCache = new(512);
+    private readonly Dictionary<string, (List<string> Lines, string Unwrapped)> _paragraphTextCache = new(512);
+
+    private FormattedText GetCachedParagraphText(string text)
+    {
+        if (!_paragraphFormattedTextCache.TryGetValue(text, out var formatted))
+        {
+            if (_paragraphFormattedTextCache.Count > 8000)
+            {
+                _paragraphFormattedTextCache.Clear();
+            }
+
+            formatted = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                _typeface, _fontSize, _paintText);
+            _paragraphFormattedTextCache[text] = formatted;
+        }
+
+        return formatted;
+    }
+
+    private (List<string> Lines, string Unwrapped) GetPreparedParagraphText(string rawText)
+    {
+        if (!_paragraphTextCache.TryGetValue(rawText, out var prepared))
+        {
+            var text = HtmlUtil.RemoveHtmlTags(rawText, true);
+            if (text.Length > 200)
+            {
+                text = text.Substring(0, 100).TrimEnd() + "...";
+            }
+
+            var lines = text.SplitToLines();
+            var unwrapped = string.Join("  ", lines);
+            prepared = (lines, unwrapped);
+
+            if (_paragraphTextCache.Count > 8000)
+            {
+                _paragraphTextCache.Clear();
+            }
+
+            _paragraphTextCache[rawText] = prepared;
+        }
+
+        return prepared;
+    }
+
     private void DrawParagraph(SubtitleLineViewModel paragraph, DrawingContext context, ref RenderContext renderCtx)
     {
         var currentRegionLeft = SecondsToXPositionOptimized(paragraph.StartTime.TotalSeconds - renderCtx.StartPositionSeconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
@@ -2327,32 +2700,24 @@ public class AudioVisualizer : Control
         context.DrawLine(_paintLeft, new Point(currentRegionLeft, 0), new Point(currentRegionLeft, height));
         context.DrawLine(_paintRight, new Point(currentRegionRight - 1, 0), new Point(currentRegionRight - 1, height));
 
-        // Draw clipped text
-        var text = HtmlUtil.RemoveHtmlTags(paragraph.Text, true);
-        if (text.Length > 200)
-        {
-            text = text.Substring(0, 100).TrimEnd() + "...";
-        }
+        // Draw clipped text (prepared text + shaped FormattedText are cached; see GetCachedParagraphText)
+        var prepared = GetPreparedParagraphText(paragraph.Text);
 
         var textBounds = new Rect(currentRegionLeft + 1, 0, currentRegionWidth - 3, height);
 
         using (context.PushClip(textBounds))
         {
-            var arr = text.SplitToLines();
             if (Se.Settings.Waveform.WaveformUnwrapText)
             {
-                text = string.Join("  ", arr);
-                var formattedText = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                    _typeface, _fontSize, _paintText);
+                var formattedText = GetCachedParagraphText(prepared.Unwrapped);
                 context.DrawText(formattedText, new Point(currentRegionLeft + 3, 14));
             }
             else
             {
                 double addY = 0;
-                foreach (var line in arr)
+                foreach (var line in prepared.Lines)
                 {
-                    var formattedText = new FormattedText(line, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                        _typeface, _fontSize, _paintText);
+                    var formattedText = GetCachedParagraphText(line);
                     context.DrawText(formattedText, new Point(currentRegionLeft + 3, 14 + addY));
                     addY += formattedText.Height;
                 }
@@ -2405,8 +2770,7 @@ public class AudioVisualizer : Control
                 // the frame form ("00:00:02:12") without an explicit branch here.
                 var durationText = new TimeCode(paragraph.Duration.TotalMilliseconds).ToShortDisplayString();
                 var withDuration = $"#{paragraph.Number}  {durationText}";
-                var probe = new FormattedText(withDuration, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                    _typeface, _fontSize, _paintText);
+                var probe = GetCachedParagraphText(withDuration);
 
                 baseLine = probe.Width >= availableWidth
                     ? $"#{paragraph.Number}"
@@ -2431,22 +2795,19 @@ public class AudioVisualizer : Control
 
         if (baseLine != null)
         {
-            var baseText = new FormattedText(baseLine, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                _typeface, _fontSize, _paintText);
+            var baseText = GetCachedParagraphText(baseLine);
             var baseY = bottomY - baseText.Height;
             context.DrawText(baseText, new Point(x, baseY));
 
             if (cpsLine != null)
             {
-                var cpsText = new FormattedText(cpsLine, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                    _typeface, _fontSize, _paintText);
+                var cpsText = GetCachedParagraphText(cpsLine);
                 context.DrawText(cpsText, new Point(x, baseY - cpsText.Height));
             }
         }
         else if (cpsLine != null)
         {
-            var cpsText = new FormattedText(cpsLine, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                _typeface, _fontSize, _paintText);
+            var cpsText = GetCachedParagraphText(cpsLine);
             context.DrawText(cpsText, new Point(x, bottomY - cpsText.Height));
         }
     }
@@ -2544,14 +2905,11 @@ public class AudioVisualizer : Control
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static double CalculateYOptimized(double value, double halfWaveformHeight, double highestPeak, double verticalZoomFactor, double boundsHeight)
+    // yScaleHalf folds the loop-invariant verticalZoomFactor / highestPeak * halfWaveformHeight into
+    // one factor the caller computes once, so the per-pixel call is a single multiply (no division).
+    private static double CalculateYOptimized(double value, double halfWaveformHeight, double yScaleHalf, double boundsHeight)
     {
-        // Normalize the value to the control's height
-        var normalizedValue = value / highestPeak * verticalZoomFactor;
-        var yOffset = normalizedValue * halfWaveformHeight;
-
-        // Ensure Y stays within bounds
-        var y = halfWaveformHeight - yOffset;
+        var y = halfWaveformHeight - value * yScaleHalf;
         return Math.Max(0, Math.Min(boundsHeight, y));
     }
 
@@ -3173,6 +3531,9 @@ public class AudioVisualizer : Control
         _fancyWaveformGlowPenCache.Clear();
         _fancyWaveformGradientCache.Clear();
         _timeLineTextCache.Clear();
+        _paragraphFormattedTextCache.Clear();
+        _paragraphTextCache.Clear();
+        _waveformCacheValid = false;
 
         _paintText = new SolidColorBrush(Se.Settings.Waveform.WaveformTextColor.FromHexToColor());
         _typeface = new Typeface(UiUtil.GetDefaultFontName(), FontStyle.Normal, Se.Settings.Waveform.WaveformTextFontBold ? FontWeight.Bold : FontWeight.Normal);

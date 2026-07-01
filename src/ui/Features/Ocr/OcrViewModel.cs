@@ -40,6 +40,7 @@ using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Dictionaries;
 using Nikse.SubtitleEdit.Logic.LlamaCpp;
 using Nikse.SubtitleEdit.Logic.Media;
+using Nikse.SubtitleEdit.Logic.Ocr;
 using Nikse.SubtitleEdit.Logic.Ocr.GoogleLens;
 using Nikse.SubtitleEdit.UiLogic.Ocr;
 using SkiaSharp;
@@ -78,6 +79,8 @@ public partial class OcrViewModel : ObservableObject
     [ObservableProperty] private string? _selectedOllamaLanguage;
     [ObservableProperty] private ObservableCollection<TesseractDictionary> _tesseractDictionaryItems;
     [ObservableProperty] private TesseractDictionary? _selectedTesseractDictionaryItem;
+    [ObservableProperty] private ObservableCollection<TesseractEngineModeItem> _tesseractEngineModes;
+    [ObservableProperty] private TesseractEngineModeItem? _selectedTesseractEngineMode;
     [ObservableProperty] private string _ollamaModel;
     [ObservableProperty] private string _ollamaUrl;
     [ObservableProperty] private string _llamaCppUrl;
@@ -157,6 +160,7 @@ public partial class OcrViewModel : ObservableObject
     private readonly ISpellCheckManager _spellCheckManager;
     private readonly IOcrFixEngine _ocrFixEngine;
     private readonly IBinaryOcrMatcher _binaryOcrMatcher;
+    private readonly IOcrImageSourceHolder _ocrImageSourceHolder;
     private PreProcessingSettings? _preProcessingSettings;
     private bool _isCtrlDown;
     private bool _textBoxFontIsCustom;
@@ -182,7 +186,8 @@ public partial class OcrViewModel : ObservableObject
         IFileHelper fileHelper,
         ISpellCheckManager spellCheckManager,
         IOcrFixEngine ocrFixEngine,
-        IBinaryOcrMatcher binaryOcrMatcher)
+        IBinaryOcrMatcher binaryOcrMatcher,
+        IOcrImageSourceHolder ocrImageSourceHolder)
     {
         _nOcrCaseFixer = nOcrCaseFixer;
         _windowService = windowService;
@@ -190,6 +195,7 @@ public partial class OcrViewModel : ObservableObject
         _spellCheckManager = spellCheckManager;
         _ocrFixEngine = ocrFixEngine;
         _binaryOcrMatcher = binaryOcrMatcher;
+        _ocrImageSourceHolder = ocrImageSourceHolder;
 
         Title = Se.Language.Ocr.Ocr;
         OcrEngines = new ObservableCollection<OcrEngineItem>(OcrEngineItem.GetOcrEngines());
@@ -215,6 +221,9 @@ public partial class OcrViewModel : ObservableObject
         LlamaCppOcrModels = new ObservableCollection<LlamaCppModelDisplay>();
         LlamaCppOcrServerButtonText = "Start server";
         TesseractDictionaryItems = new ObservableCollection<TesseractDictionary>();
+        TesseractEngineModes = new ObservableCollection<TesseractEngineModeItem>(TesseractEngineModeItem.List());
+        SelectedTesseractEngineMode = TesseractEngineModes.FirstOrDefault(p => p.Oem == Se.Settings.Ocr.TesseractEngineMode)
+                                      ?? TesseractEngineModes.Last();
         GoogleVisionApiKey = string.Empty;
         MistralApiKey = string.Empty;
         GoogleVisionLanguages = new ObservableCollection<OcrLanguage>(GoogleVisionOcr.GetLanguages().OrderBy(p => p.ToString()));
@@ -314,6 +323,8 @@ public partial class OcrViewModel : ObservableObject
         ocr.GoogleVisionApiKey = GoogleVisionApiKey;
         ocr.MistralApiKey = MistralApiKey;
         ocr.GoogleVisionLanguage = SelectedGoogleVisionLanguage?.Code ?? "en";
+        ocr.TesseractLastLanguage = SelectedTesseractDictionaryItem?.Code ?? "eng";
+        ocr.TesseractEngineMode = SelectedTesseractEngineMode?.Oem ?? 3;
         ocr.DoFixOcrErrors = DoFixOcrErrors;
         ocr.DoPromptForUnknownWords = DoPromptForUnknownWords;
         ocr.DoTryToGuessUnknownWords = DoTryToGuessUnknownWords;
@@ -351,7 +362,7 @@ public partial class OcrViewModel : ObservableObject
             Name = GetDictionaryNameNone(),
             DictionaryFileName = string.Empty,
         });
-        Dictionaries.AddRange(spellCheckLanguages);
+        Dictionaries.AddRange(LanguageFavoritesHelper.Order(spellCheckLanguages, d => SpellCheckDictionaryDisplay.GetTwoLetterLanguageCode(d)));
         if (Dictionaries.Count > 0)
         {
             if (!string.IsNullOrEmpty(Se.Settings.Ocr.LastLanguageDictionaryFile))
@@ -371,6 +382,46 @@ public partial class OcrViewModel : ObservableObject
     private static string GetDictionaryNameNone()
     {
         return "[" + Se.Language.General.None + "]";
+    }
+
+    // When the OCR language changes, point the spell-check dictionary at the matching installed
+    // dictionary (SE4 parity, #11907). No-op if none is installed, so the user's choice is kept
+    // when there's nothing to switch to.
+    partial void OnSelectedTesseractDictionaryItemChanged(TesseractDictionary? value) => AutoSelectDictionaryForOcrLanguage(value?.Code);
+    partial void OnSelectedPaddleOcrLanguageChanged(OcrLanguage2? value) => AutoSelectDictionaryForOcrLanguage(value?.Code);
+    partial void OnSelectedGoogleLensLanguageChanged(OcrLanguage2 value) => AutoSelectDictionaryForOcrLanguage(value?.Code);
+    partial void OnSelectedGoogleVisionLanguageChanged(OcrLanguage? value) => AutoSelectDictionaryForOcrLanguage(value?.Code);
+
+    private void AutoSelectDictionaryForOcrLanguage(string? languageCode)
+    {
+        // Dictionaries is null while the constructor is still running (the language combo boxes are
+        // populated before it is created), and the OCR-language setters fire this via OnChanged - so
+        // guard against null or it NREs in the ctor and the OCR window fails to open (#11907 follow-up).
+        if (string.IsNullOrEmpty(languageCode) || Dictionaries is null || Dictionaries.Count == 0)
+        {
+            return;
+        }
+
+        // Normalize Tesseract-style script suffixes ("chi_sim", "srp_latn") to the base code.
+        var code = languageCode;
+        var underscore = code.IndexOf('_');
+        if (underscore > 0)
+        {
+            code = code.Substring(0, underscore);
+        }
+
+        var threeLetter = code.Length == 3 ? code : Iso639Dash2LanguageCode.GetThreeLetterCodeFromTwoLetterCode(code);
+        var twoLetter = code.Length == 2 ? code : Iso639Dash2LanguageCode.GetTwoLetterCodeFromThreeLetterCode(code);
+
+        var match = Dictionaries.FirstOrDefault(d =>
+            d.Name != GetDictionaryNameNone() &&
+            ((!string.IsNullOrEmpty(threeLetter) && d.GetThreeLetterCode() == threeLetter) ||
+             (!string.IsNullOrEmpty(twoLetter) && SpellCheckDictionaryDisplay.GetTwoLetterLanguageCode(d) == twoLetter)));
+
+        if (match != null && !ReferenceEquals(match, SelectedDictionary))
+        {
+            SelectedDictionary = match;
+        }
     }
 
     private string? GetNOcrLanguageFileName()
@@ -576,7 +627,14 @@ public partial class OcrViewModel : ObservableObject
             return;
         }
 
-        var result = await _windowService.ShowDialogAsync<BinaryEditWindow, BinaryEditViewModel>(Window, vm => { vm.Initialize(_sourceFileName, _ocrSubtitle); });
+        if (OcrSubtitleItems.Count > 0)
+        {
+            await _windowService.ShowDialogAsync<BinaryEditWindow, BinaryEditViewModel>(Window, vm => { vm.Initialize(OcrSubtitleItems.ToList(), _sourceFileName); });
+        }
+        else
+        {
+            await _windowService.ShowDialogAsync<BinaryEditWindow, BinaryEditViewModel>(Window, vm => { vm.Initialize(_sourceFileName, _ocrSubtitle); });
+        }
         _isCtrlDown = false;
     }
 
@@ -1756,6 +1814,10 @@ public partial class OcrViewModel : ObservableObject
     {
         OkPressed = true;
 
+        // Remember the image source so spell check can show the original images (#11719)
+        _ocrImageSourceHolder.Source = _ocrSubtitle;
+        _ocrImageSourceHolder.FileName = _sourceFileName;
+
         OcredSubtitle.Clear();
         var number = 1;
         for (var i = 0; i < OcrSubtitleItems.Count; i++)
@@ -1961,7 +2023,13 @@ public partial class OcrViewModel : ObservableObject
         if (SelectedDictionary != null && DoFixOcrErrors && SelectedDictionary.Name != GetDictionaryNameNone())
         {
             var threeLetterCode = SelectedDictionary.GetThreeLetterCode();
-            _ocrFixEngine.Initialize(OcrSubtitleItems.ToList(), threeLetterCode, SelectedDictionary);
+            var fixSubtitle = new Subtitle();
+            foreach (var ocrItem in OcrSubtitleItems)
+            {
+                fixSubtitle.Paragraphs.Add(new Paragraph(new TimeCode(ocrItem.StartTime), new TimeCode(ocrItem.EndTime), ocrItem.Text));
+            }
+
+            _ocrFixEngine.Initialize(fixSubtitle, threeLetterCode, SelectedDictionary);
         }
         else
         {
@@ -2213,6 +2281,7 @@ public partial class OcrViewModel : ObservableObject
             }
         }
 
+        var uiStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var ocrProgress = new Progress<PaddleOcrBatchProgress>(p =>
         {
             if (cancellationToken.IsCancellationRequested)
@@ -2238,7 +2307,10 @@ public partial class OcrViewModel : ObservableObject
                 }
 
                 item.Text = p.Text;
+                var fixStart = uiStopwatch.Elapsed;
                 OcrFixLineAndSetText(number, item);
+                Se.WriteToolsLog(
+                    $"Paddle OCR UI line {currentItemNumber} (index {number}) shown at {uiStopwatch.Elapsed.TotalSeconds:F1}s, fix took {(uiStopwatch.Elapsed - fixStart).TotalMilliseconds:F0} ms");
             }
         });
 
@@ -2247,6 +2319,11 @@ public partial class OcrViewModel : ObservableObject
             try
             {
                 await ocrEngine.OcrBatch(engineType, batchImages, language, mode, ocrProgress, cancellationToken);
+
+                if (!string.IsNullOrEmpty(ocrEngine.Error) && !cancellationToken.IsCancellationRequested)
+                {
+                    ShowPaddleOcrError(engineType, ocrEngine.Error);
+                }
             }
             catch (Exception exception)
             {
@@ -2256,6 +2333,38 @@ public partial class OcrViewModel : ObservableObject
             {
                 IsOcrRunning = false;
             }
+        });
+    }
+
+    private void ShowPaddleOcrError(OcrEngineType engineType, string error)
+    {
+        var message = error;
+
+        // The "paddleocr" pip package needs the "paddlepaddle" backend installed separately.
+        if (engineType == OcrEngineType.PaddleOcrPython &&
+            error.Contains("No module named 'paddle'", StringComparison.OrdinalIgnoreCase))
+        {
+            message = "Paddle OCR Python is missing the \"paddlepaddle\" backend." + Environment.NewLine +
+                      Environment.NewLine +
+                      "Install it into the SAME Python that has \"paddleocr\":" + Environment.NewLine +
+                      "    python -m pip install --upgrade paddlepaddle" + Environment.NewLine +
+                      Environment.NewLine +
+                      "Note: paddlepaddle may not have a wheel for the very latest Python yet" + Environment.NewLine +
+                      "(e.g. 3.14) - if the install fails, use a Python 3.11/3.12/3.13 environment." + Environment.NewLine +
+                      "For a CUDA GPU build, see https://www.paddlepaddle.org.cn/en/install" + Environment.NewLine +
+                      Environment.NewLine +
+                      "Details:" + Environment.NewLine +
+                      error;
+        }
+
+        Dispatcher.UIThread.Post(async void () =>
+        {
+            await MessageBox.Show(
+                Window!,
+                Se.Language.General.Error,
+                message,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
         });
     }
 
@@ -2318,7 +2427,7 @@ public partial class OcrViewModel : ObservableObject
                 var lines = p.Text.Trim().SplitToLines();
                 if (lines.Count > 1 && p.Text.Length < 40)
                 {
-                    var bmp = item.GetSkBitmapClean();
+                    using var bmp = item.GetSkBitmapClean(); // fresh bitmap each call; dispose to avoid a native leak
                     var nbmp = new NikseBitmap2(bmp);
                     nbmp.MakeOneColor(SKColors.White);
                     var lineImages = NikseBitmapImageSplitter2.SplitToLinesTransparentOrBlack(nbmp);
@@ -2400,7 +2509,7 @@ public partial class OcrViewModel : ObservableObject
                 var lines = p.Text.Trim().SplitToLines();
                 if (lines.Count > 1 && p.Text.Length < 40)
                 {
-                    var bmp = item.GetSkBitmapClean();
+                    using var bmp = item.GetSkBitmapClean(); // fresh bitmap each call; dispose to avoid a native leak
                     var nbmp = new NikseBitmap2(bmp);
                     nbmp.MakeOneColor(SKColors.White);
                     var lineImages = NikseBitmapImageSplitter2.SplitToLinesTransparentOrBlack(nbmp);
@@ -3056,7 +3165,7 @@ public partial class OcrViewModel : ObservableObject
             return;
         }
 
-        var updatedResult = _ocrFixEngine.FixOcrErrors(lineIndex, item, DoTryToGuessUnknownWords);
+        var updatedResult = _ocrFixEngine.FixOcrErrors(lineIndex, item.Text, DoTryToGuessUnknownWords);
         item.FixResult = updatedResult;
     }
 
@@ -3084,7 +3193,7 @@ public partial class OcrViewModel : ObservableObject
             return null;
         }
 
-        var updatedResult = _ocrFixEngine.FixOcrErrors(lineIndex, item, DoTryToGuessUnknownWords);
+        var updatedResult = _ocrFixEngine.FixOcrErrors(lineIndex, item.Text, DoTryToGuessUnknownWords);
         item.FixResult = updatedResult;
 
         foreach (var unknownWord in GetUnknownWordItems(item, updatedResult))
@@ -3258,8 +3367,7 @@ public partial class OcrViewModel : ObservableObject
         else
         {
             // fallback, try to find the word in text using regex using word boundary 
-            var pattern = @"\b" + Regex.Escape(unknownWord.Word.FixedWord) + @"\b";
-            var regex = new Regex(pattern);
+            var regex = new Regex(RegexUtils.BuildWholeWordPattern(unknownWord.Word.FixedWord));
             var match = regex.Match(item.Text);
             if (match.Success)
             {
@@ -3294,7 +3402,7 @@ public partial class OcrViewModel : ObservableObject
             SelectedDictionary.Name != GetDictionaryNameNone() &&
             _ocrFixEngine.IsLoaded() && DoFixOcrErrors)
         {
-            result.OcrFixLineResult = _ocrFixEngine.FixOcrErrors(i, item, DoTryToGuessUnknownWords);
+            result.OcrFixLineResult = _ocrFixEngine.FixOcrErrors(i, item.Text, DoTryToGuessUnknownWords);
             var correctedText = result.OcrFixLineResult.GetText();
             var alignment = GetAlignment(item, correctedText);
             result.ResultText = alignment.AlignmentAdded ? alignment.Text : correctedText;
@@ -3386,7 +3494,7 @@ public partial class OcrViewModel : ObservableObject
             SelectedDictionary.Name != GetDictionaryNameNone() &&
             _ocrFixEngine.IsLoaded() && DoFixOcrErrors)
         {
-            var result = _ocrFixEngine.FixOcrErrors(i, item, DoTryToGuessUnknownWords);
+            var result = _ocrFixEngine.FixOcrErrors(i, item.Text, DoTryToGuessUnknownWords);
             var correctedText = result.GetText();
             var alignment = GetAlignment(item, correctedText);
             var resultText = alignment.AlignmentAdded ? alignment.Text : correctedText;
@@ -3468,44 +3576,104 @@ public partial class OcrViewModel : ObservableObject
     {
         var tesseractOcr = new TesseractOcr();
         var language = SelectedTesseractDictionaryItem?.Code ?? "eng";
+        var tessDataFolder = Se.TesseractModelFolder;
+        var engineMode = SelectedTesseractEngineMode?.Oem ?? 3;
 
         _ = Task.Run(async () =>
         {
-            for (var processedIndex = 0; processedIndex < selectedIndices.Count; processedIndex++)
+            var processedCount = 0;
+            var producedAnyText = false;
+            try
             {
-                var i = selectedIndices[processedIndex];
-                if (cancellationToken.IsCancellationRequested)
+                for (var processedIndex = 0; processedIndex < selectedIndices.Count; processedIndex++)
                 {
-                    return;
-                }
-
-                UpdateOcrProgress(processedIndex + 1, selectedIndices.Count);
-
-                var item = OcrSubtitleItems[i];
-                var bitmap = item.GetSkBitmap();
-
-                var text = await tesseractOcr.Ocr(bitmap, language, cancellationToken);
-                item.Text = text;
-
-                var unknownWords = OcrFixLineAndSetText(i, item);
-
-                if (DoPromptForUnknownWords && unknownWords.Count > 0)
-                {
-                    var keepRunning = await PromptForUnknownWordsAsync(i, item);
-                    if (!keepRunning)
+                    var i = selectedIndices[processedIndex];
+                    if (cancellationToken.IsCancellationRequested)
                     {
                         return;
                     }
+
+                    UpdateOcrProgress(processedIndex + 1, selectedIndices.Count);
+
+                    var item = OcrSubtitleItems[i];
+                    var bitmap = item.GetSkBitmap();
+
+                    var text = await tesseractOcr.Ocr(bitmap, language, tessDataFolder, cancellationToken, engineMode);
+
+                    // Surface a real Tesseract failure instead of silently filling the grid with blank lines.
+                    if (string.IsNullOrEmpty(text) && !string.IsNullOrEmpty(tesseractOcr.Error))
+                    {
+                        await ShowTesseractErrorAsync(tesseractOcr.Error);
+                        return;
+                    }
+
+                    processedCount++;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        producedAnyText = true;
+                    }
+
+                    item.Text = text;
+
+                    var unknownWords = OcrFixLineAndSetText(i, item);
+
+                    if (DoPromptForUnknownWords && unknownWords.Count > 0)
+                    {
+                        var keepRunning = await PromptForUnknownWordsAsync(i, item);
+                        if (!keepRunning)
+                        {
+                            return;
+                        }
+                    }
+                }
+
+                // Tesseract exited cleanly but every line came back empty — that is almost never the
+                // intent, so tell the user instead of leaving a grid full of blank lines.
+                if (processedCount >= 1 && !producedAnyText && !cancellationToken.IsCancellationRequested)
+                {
+                    await ShowTesseractErrorAsync(
+                        "Tesseract returned no text for " +
+                        (processedCount == 1 ? "the line." : "any of the " + processedCount + " lines.") + Environment.NewLine +
+                        "The subtitle images may not suit Tesseract (e.g. coloured text), or the selected language (" +
+                        language + ") may be wrong. Try another OCR engine or language." + Environment.NewLine +
+                        "Enable Options > Tools > write tools log for details.");
                 }
             }
-
-            PauseOcr();
+            catch (OperationCanceledException)
+            {
+                // Cancelled by the user.
+            }
+            catch (Exception ex)
+            {
+                SeLogger.Error(ex, "Error running Tesseract OCR");
+                await ShowTesseractErrorAsync(tesseractOcr.Error is { Length: > 0 } e ? e : ex.Message);
+            }
+            finally
+            {
+                PauseOcr();
+            }
         });
+    }
+
+    private async Task ShowTesseractErrorAsync(string error)
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+            await MessageBox.Show(
+                Window!,
+                Se.Language.General.Error,
+                "Tesseract OCR failed:" + Environment.NewLine + Environment.NewLine + error,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error));
     }
 
     private void RunOllamaOcr(List<int> selectedIndices, CancellationToken cancellationToken)
     {
-        var ollamaOcr = new OllamaOcr();
+        var ollamaOcr = new OllamaOcr(Se.Settings.Ocr.OllamaOcrTimeoutMinutes);
 
         _ = Task.Run(async () =>
         {
@@ -3802,14 +3970,7 @@ public partial class OcrViewModel : ObservableObject
             }
 
             var dictionary = allDictionaries.FirstOrDefault(p => p.Code == name);
-            if (dictionary != null)
-            {
-                items.Add(dictionary);
-            }
-            else
-            {
-                items.Add(new TesseractDictionary { Code = name, Name = name, Url = string.Empty });
-            }
+            items.Add(dictionary ?? new TesseractDictionary { Code = name, Name = name, Url = string.Empty });
         }
 
         TesseractDictionaryItems.AddRange(items.OrderBy(p => p.ToString()));
@@ -4149,7 +4310,8 @@ public partial class OcrViewModel : ObservableObject
             LoadActiveTesseractDictionaries();
             if (SelectedTesseractDictionaryItem == null)
             {
-                SelectedTesseractDictionaryItem = TesseractDictionaryItems.FirstOrDefault(p => p.Code == "eng") ??
+                SelectedTesseractDictionaryItem = TesseractDictionaryItems.FirstOrDefault(p => p.Code == Se.Settings.Ocr.TesseractLastLanguage) ??
+                                                  TesseractDictionaryItems.FirstOrDefault(p => p.Code == "eng") ??
                                                   TesseractDictionaryItems.FirstOrDefault();
             }
         }
@@ -4473,7 +4635,7 @@ public partial class OcrViewModel : ObservableObject
             // Get image position and screen dimensions
             var position = item.GetPosition();
             var screenSize = item.GetScreenSize();
-            var bitmap = item.GetSkBitmapClean();
+            using var bitmap = item.GetSkBitmapClean(); // fresh bitmap each call; dispose to avoid a native leak
 
             if (bitmap == null || screenSize.Width == 0 || screenSize.Height == 0)
             {
@@ -4591,14 +4753,16 @@ public partial class OcrViewModel : ObservableObject
 
     private List<OcrSubtitleItem> SplitImageToLines(OcrSubtitleItem item)
     {
-        if (!HasCaptureAlignment || item.GetSkBitmapClean() == null)
+        // (GetSkBitmapClean never returns null - it substitutes a 1x1 - so the old "== null"
+        //  check only allocated and leaked a native bitmap.)
+        if (!HasCaptureAlignment)
         {
             return new List<OcrSubtitleItem> { item };
         }
 
         try
         {
-            var bitmap = item.GetSkBitmapClean();
+            using var bitmap = item.GetSkBitmapClean(); // fresh bitmap each call; dispose to avoid a native leak
             var lines = new List<OcrSubtitleItem>();
 
             // Simple line detection: split image horizontally based on text regions

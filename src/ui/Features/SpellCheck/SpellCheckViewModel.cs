@@ -2,16 +2,27 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Nikse.SubtitleEdit.Core.BluRaySup;
+using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
+using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
+using Nikse.SubtitleEdit.Core.SubtitleFormats;
+using Nikse.SubtitleEdit.Core.VobSub;
+using Nikse.SubtitleEdit.Features.Ocr.OcrSubtitle;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Features.Main;
+using Nikse.SubtitleEdit.Features.Shared;
 using Nikse.SubtitleEdit.Features.SpellCheck.EditWholeText;
 using Nikse.SubtitleEdit.Features.SpellCheck.GetDictionaries;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
+using Nikse.SubtitleEdit.Logic.Media;
+using Nikse.SubtitleEdit.Logic.Ocr;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
@@ -43,10 +54,17 @@ public partial class SpellCheckViewModel : ObservableObject
     [ObservableProperty] private bool _isPrompting;
     [ObservableProperty] private ObservableCollection<SubtitleLineViewModel> _paragraphs;
     [ObservableProperty] private SubtitleLineViewModel? _selectedParagraph;
+    [ObservableProperty] private Bitmap? _sourceImage;
+    [ObservableProperty] private bool _hasSourceImage;
+    [ObservableProperty] private bool _isUndoVisible;
+    [ObservableProperty] private string _undoText;
 
     public Window? Window { get; set; }
     public int TotalChangedWords { get; set; }
     public int TotalSkippedWords { get; set; }
+    public int TotalCorrectWords { get; set; }
+    public int TotalNames { get; set; }
+    public int TotalAddedWords { get; set; }
 
     public bool OkPressed { get; private set; }
     public StackPanel PanelWholeText { get; internal set; }
@@ -54,15 +72,34 @@ public partial class SpellCheckViewModel : ObservableObject
 
     private readonly ISpellCheckManager _spellCheckManager;
     private readonly IWindowService _windowService;
+    private readonly IFileHelper _fileHelper;
+    private readonly IBluRayHelper _bluRayHelper;
+    private readonly IOcrImageSourceHolder _ocrImageSourceHolder;
     private IFocusSubtitleLine? _focusSubtitleLine;
+
+    // Optional source image (Blu-ray .sup) loaded via the context menu so the original
+    // bitmap of the current line can be compared while spell-checking OCR results (#11719).
+    private IOcrSubtitle? _ocrSourceImages;
 
     private SpellCheckWord _currentSpellCheckWord;
     private SpellCheckResult? _lastSpellCheckResult;
     private System.Timers.Timer? _statusTimer;
+    private readonly List<SpellCheckUndoItem> _undoList = new();
 
-    public SpellCheckViewModel(ISpellCheckManager spellCheckManager, IWindowService windowService)
+    // Where this run started scanning (0 = top). When the user chooses to start at the
+    // current line, the scan runs to the end and then offers to wrap back to the top;
+    // _stopBeforeLineIndex bounds that wrapped pass to the lines above the start so it
+    // does not re-check the part already covered. _hasWrapped guards against re-prompting.
+    private int _scanStartLineIndex;
+    private int? _stopBeforeLineIndex;
+    private bool _hasWrapped;
+
+    public SpellCheckViewModel(ISpellCheckManager spellCheckManager, IWindowService windowService, IFileHelper fileHelper, IBluRayHelper bluRayHelper, IOcrImageSourceHolder ocrImageSourceHolder)
     {
         _spellCheckManager = spellCheckManager;
+        _fileHelper = fileHelper;
+        _bluRayHelper = bluRayHelper;
+        _ocrImageSourceHolder = ocrImageSourceHolder;
         if (Se.Settings.SpellCheck.SpellCheckProvider == SeSpellCheck.SpellCheckMsWord && WordSpellCheck.IsWordInstalled())
         {
             _spellCheckManager.WordSpellChecker = new WordSpellCheck();
@@ -86,6 +123,7 @@ public partial class SpellCheckViewModel : ObservableObject
         PanelWholeText = new StackPanel();
         TextBoxWordNotFound = new TextBox();
         StatusText = string.Empty;
+        UndoText = string.Empty;
         Paragraphs = new ObservableCollection<SubtitleLineViewModel>();
         _currentSpellCheckWord = new SpellCheckWord();
 
@@ -104,6 +142,11 @@ public partial class SpellCheckViewModel : ObservableObject
 
     internal void OnDictionaryChanged()
     {
+        if (SelectedDictionary == null)
+        {
+            return;
+        }
+
         if (_spellCheckManager.WordSpellChecker != null)
         {
             if (Dictionaries.Count > 0)
@@ -116,6 +159,48 @@ public partial class SpellCheckViewModel : ObservableObject
                 }
             }
         }
+        else if (!string.IsNullOrEmpty(SelectedDictionary.DictionaryFileName))
+        {
+            // Hunspell provider: actually load the newly selected dictionary so switching
+            // dialect (e.g. British -> American) mid-session takes effect immediately.
+            // Previously this branch did nothing for Hunspell, so the spell checker kept
+            // using the dictionary it started with until the next run (issue #11731).
+            _spellCheckManager.Initialize(
+                SelectedDictionary.DictionaryFileName,
+                SpellCheckDictionaryDisplay.GetTwoLetterLanguageCode(SelectedDictionary));
+        }
+
+        ReCheckCurrentWordAfterDictionaryChange();
+    }
+
+    /// <summary>
+    /// Re-evaluates the word currently shown after the dictionary is switched mid-session.
+    /// If the word is now valid in the new dictionary the check advances to the next
+    /// misspelling; otherwise the suggestion list is refreshed for the new dictionary.
+    /// No-op until a check is underway and a flagged word is on screen.
+    /// </summary>
+    private void ReCheckCurrentWordAfterDictionaryChange()
+    {
+        if (_lastSpellCheckResult == null || SelectedParagraph == null || string.IsNullOrEmpty(WordNotFoundOriginal))
+        {
+            return;
+        }
+
+        if (_spellCheckManager.IsWordCorrect(_currentSpellCheckWord, SelectedParagraph.Text))
+        {
+            DoSpellCheck();
+            return;
+        }
+
+        var suggestions = _spellCheckManager.GetSuggestions(WordNotFoundOriginal);
+        Suggestions.Clear();
+        foreach (var suggestion in suggestions)
+        {
+            Suggestions.Add(suggestion);
+        }
+
+        AreSuggestionsAvailable = true;
+        SelectedSuggestion = suggestions.Count > 0 ? suggestions[0] : string.Empty;
     }
 
     private void LoadDictionaries()
@@ -152,7 +237,7 @@ public partial class SpellCheckViewModel : ObservableObject
 
         var spellCheckLanguages = _spellCheckManager.GetDictionaryLanguages(Se.DictionariesFolder);
         Dictionaries.Clear();
-        Dictionaries.AddRange(spellCheckLanguages);
+        Dictionaries.AddRange(LanguageFavoritesHelper.Order(spellCheckLanguages, d => SpellCheckDictionaryDisplay.GetTwoLetterLanguageCode(d)));
         if (Dictionaries.Count > 0)
         {
             if (!string.IsNullOrEmpty(Se.Settings.SpellCheck.LastLanguageDictionaryFile))
@@ -174,13 +259,238 @@ public partial class SpellCheckViewModel : ObservableObject
         }
     }
 
+    // Lets the user attach the original Blu-ray .sup so the source image of the current
+    // line is shown while spell-checking OCR'd text (SE4 parity, #11719).
+    [RelayCommand]
+    private async Task LoadSourceImage()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var fileNames = await _fileHelper.PickOpenFiles(
+            Window, Se.Language.SpellCheck.LoadSourceImage,
+            "Image based subtitles", new List<string> { "*.sup", "*.sub", "*.idx", "*.xml", "*.ts", "*.m2ts", "*.mts", "*.mkv", "*.mks" },
+            string.Empty, new List<string>());
+        var fileName = fileNames.FirstOrDefault();
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return;
+        }
+
+        try
+        {
+            var source = LoadImageSource(fileName);
+            if (source == null || source.Count == 0)
+            {
+                return;
+            }
+
+            _ocrSourceImages = source;
+            HasSourceImage = true;
+            UpdateSourceImage();
+        }
+        catch
+        {
+            // Bad/unsupported file: leave the panel as-is.
+        }
+    }
+
+    // Loads an image-based subtitle file into an IOcrSubtitle for the source-image preview.
+    private IOcrSubtitle? LoadImageSource(string fileName)
+    {
+        var ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
+        switch (ext)
+        {
+            case ".sup":
+                var pcsList = BluRaySupParser.ParseBluRaySup(fileName, new System.Text.StringBuilder());
+                return pcsList.Count > 0 ? new OcrSubtitleBluRay(pcsList) : null;
+
+            case ".sub":
+            case ".idx":
+                var vobSubParser = new VobSubParser(true);
+                var subFileName = System.IO.Path.ChangeExtension(fileName, ".sub");
+                var idxFileName = System.IO.Path.ChangeExtension(fileName, ".idx");
+                vobSubParser.OpenSubIdx(subFileName, idxFileName);
+                var packs = vobSubParser.MergeVobSubPacks();
+                return packs.Count > 0 ? new OcrSubtitleVobSub(packs, vobSubParser.IdxPalette) : null;
+
+            case ".xml":
+                var bdnLines = System.IO.File.ReadAllLines(fileName).ToList();
+                var bdn = new BdnXml();
+                if (!bdn.IsMine(bdnLines, fileName))
+                {
+                    return null;
+                }
+
+                var bdnSubtitle = new Subtitle();
+                bdn.LoadSubtitle(bdnSubtitle, bdnLines, fileName);
+                return bdnSubtitle.Paragraphs.Count > 0
+                    ? new OcrSubtitleBdn(bdnSubtitle, fileName, isSon: false)
+                    : null;
+
+            case ".ts":
+            case ".m2ts":
+            case ".mts":
+                var tsParser = new TransportStreamParser();
+                tsParser.Parse(fileName, (_, _) => { });
+                if (tsParser.SubtitlePacketIds.Count == 0)
+                {
+                    return null;
+                }
+
+                var subtitles = tsParser.GetDvbSubtitles(tsParser.SubtitlePacketIds[0]);
+                return subtitles.Count > 0 ? new OcrSubtitleTransportStream(tsParser, subtitles, fileName) : null;
+
+            case ".mkv":
+            case ".mks":
+                using (var matroska = new MatroskaFile(fileName))
+                {
+                    if (!matroska.IsValid)
+                    {
+                        return null;
+                    }
+
+                    // Only Blu-ray (PGS) tracks are handled for manual load here; VobSub/DVB
+                    // tracks need the async Matroska extraction in the OCR window, and those
+                    // are covered automatically via the auto-attach path after OCR (#11719).
+                    var track = matroska.GetTracks(true)
+                        .FirstOrDefault(t => t.CodecId.Equals("S_HDMV/PGS", StringComparison.OrdinalIgnoreCase));
+                    if (track == null)
+                    {
+                        return null;
+                    }
+
+                    var pcsData = _bluRayHelper.LoadBluRaySubFromMatroska(track, matroska, out _);
+                    return pcsData.Count > 0 ? new OcrSubtitleMkvBluRay(track, pcsData) : null;
+                }
+
+            default:
+                return null;
+        }
+    }
+
+    partial void OnSelectedParagraphChanged(SubtitleLineViewModel? value)
+    {
+        UpdateSourceImage();
+    }
+
+    // Shows the source bitmap whose start time is closest to the current line (SE4 matched
+    // by timecode, which survives merges/deletes better than a plain index).
+    private void UpdateSourceImage()
+    {
+        // Dispose the previously shown bitmap before replacing it; UpdateSourceImage runs on every
+        // line change during a spell-check pass, and both the Avalonia Bitmap and the SKBitmap hold
+        // unmanaged memory, so without this a long pass leaks one bitmap per line (#11719).
+        if (_ocrSourceImages == null || SelectedParagraph == null || _ocrSourceImages.Count == 0)
+        {
+            var previousEmpty = SourceImage;
+            SourceImage = null;
+            previousEmpty?.Dispose();
+            return;
+        }
+
+        var targetMs = SelectedParagraph.StartTime.TotalMilliseconds;
+        var bestIndex = 0;
+        var bestDistance = double.MaxValue;
+        for (var i = 0; i < _ocrSourceImages.Count; i++)
+        {
+            var distance = Math.Abs(_ocrSourceImages.GetStartTime(i).TotalMilliseconds - targetMs);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+
+        var previous = SourceImage;
+        try
+        {
+            using var sourceBitmap = _ocrSourceImages.GetBitmap(bestIndex);
+            SourceImage = sourceBitmap.ToAvaloniaBitmap();
+        }
+        catch
+        {
+            SourceImage = null;
+        }
+
+        previous?.Dispose();
+    }
+
     public void Initialize(ObservableCollection<SubtitleLineViewModel> paragraphs, int? selectedSubtitleIndex, IFocusSubtitleLine focusSubtitleLine, string? dictionaryFileName)
     {
         _focusSubtitleLine = focusSubtitleLine;
         Paragraphs.Clear();
         Paragraphs.AddRange(paragraphs);
         SetLanguage(dictionaryFileName);
-        Dispatcher.UIThread.Post(DoSpellCheck, DispatcherPriority.Background);
+
+        // Auto-attach the image source from the most recent OCR session so the original
+        // bitmaps show up automatically when spell-checking OCR'd text - no manual load
+        // needed. Works for every format OCR can read (sup, VobSub, BDN, TS, MKV, ...) (#11719).
+        if (_ocrImageSourceHolder.Source is { Count: > 0 } ocrSource)
+        {
+            _ocrSourceImages = ocrSource;
+            HasSourceImage = true;
+        }
+
+        // Posted to run after the window exists (Window is assigned in the window ctor),
+        // so the "continue from current line?" prompt and the close hook have an owner.
+        Dispatcher.UIThread.Post(() => _ = StartSpellCheckAsync(selectedSubtitleIndex), DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// Decides where the scan begins. When a line other than the first is selected, the user
+    /// is asked whether to continue from that line or start from the top (SE4 parity); Cancel
+    /// closes the dialog without checking. The chosen start line is remembered so the scan can
+    /// later offer to wrap back to the top.
+    /// </summary>
+    private async Task StartSpellCheckAsync(int? selectedSubtitleIndex)
+    {
+        // Make sure a summary of changes is reported even when the user closes early (Esc / X),
+        // not only when the run completes or "Done" is pressed.
+        if (Window != null)
+        {
+            Window.Closing += (_, _) => CaptureTotals();
+        }
+
+        var startLine = 0;
+        if (Window != null && selectedSubtitleIndex is int idx && idx > 0 && idx < Paragraphs.Count)
+        {
+            var answer = await MessageBox.Show(
+                Window,
+                Se.Language.SpellCheck.SpellCheck,
+                Se.Language.SpellCheck.ContinueFromCurrentLine,
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (answer == MessageBoxResult.Cancel || answer == MessageBoxResult.None)
+            {
+                Dispatcher.UIThread.Invoke(() => Window?.Close());
+                return;
+            }
+
+            if (answer == MessageBoxResult.Yes)
+            {
+                startLine = idx;
+            }
+        }
+
+        _scanStartLineIndex = startLine;
+        _lastSpellCheckResult = startLine > 0
+            ? new SpellCheckResult { LineIndex = startLine, WordIndex = -1 }
+            : null;
+
+        DoSpellCheck();
+    }
+
+    private void CaptureTotals()
+    {
+        TotalChangedWords = _spellCheckManager.NoOfChangedWords;
+        TotalSkippedWords = _spellCheckManager.NoOfSkippedWords;
+        TotalCorrectWords = _spellCheckManager.NoOfCorrectWords;
+        TotalNames = _spellCheckManager.NoOfNames;
+        TotalAddedWords = _spellCheckManager.NoOfAddedWords;
     }
 
     private void SetLanguage(string? dictionaryFileName)
@@ -294,6 +604,7 @@ public partial class SpellCheckViewModel : ObservableObject
             return;
         }
 
+        PushUndo(Se.Language.SpellCheck.EditWholeText, SpellCheckUndoAction.ChangeWholeText, string.Empty);
         selectedParagraph.Text = result.WholeText;
         DoSpellCheck();
     }
@@ -309,8 +620,10 @@ public partial class SpellCheckViewModel : ObservableObject
             return;
         }
 
+        var status = string.Format(Se.Language.SpellCheck.ChangeWordFromXToY, WordNotFoundOriginal, CurrentWord);
+        PushUndo(status, SpellCheckUndoAction.Change, WordNotFoundOriginal);
         _spellCheckManager.ChangeWord(WordNotFoundOriginal, CurrentWord, _currentSpellCheckWord, SelectedParagraph!);
-        ShowStatus(string.Format(Se.Language.SpellCheck.ChangeWordFromXToY, WordNotFoundOriginal, CurrentWord));
+        ShowStatus(status);
         DoSpellCheck();
     }
 
@@ -324,23 +637,29 @@ public partial class SpellCheckViewModel : ObservableObject
             return;
         }
 
+        var status = string.Format(Se.Language.SpellCheck.ChangeAllWordsFromXToY, WordNotFoundOriginal, CurrentWord);
+        PushUndo(status, SpellCheckUndoAction.ChangeAll, WordNotFoundOriginal);
         _spellCheckManager.ChangeAllWord(WordNotFoundOriginal, CurrentWord, _currentSpellCheckWord, selectedParagraph);
-        ShowStatus(string.Format(Se.Language.SpellCheck.ChangeAllWordsFromXToY, WordNotFoundOriginal, CurrentWord));
+        ShowStatus(status);
         DoSpellCheck();
     }
 
     [RelayCommand]
     private void SkipWord()
     {
-        ShowStatus(string.Format(Se.Language.SpellCheck.IgnoreWordXOnce, WordNotFoundOriginal));
+        var status = string.Format(Se.Language.SpellCheck.IgnoreWordXOnce, WordNotFoundOriginal);
+        PushUndo(status, SpellCheckUndoAction.SkipOnce, WordNotFoundOriginal);
+        ShowStatus(status);
         DoSpellCheck();
     }
 
     [RelayCommand]
     private void SkipWordAll()
     {
+        var status = string.Format(Se.Language.SpellCheck.IgnoreWordXAlways, WordNotFoundOriginal);
+        PushUndo(status, SpellCheckUndoAction.SkipAll, WordNotFoundOriginal);
         _spellCheckManager.AddIgnoreWord(WordNotFoundOriginal);
-        ShowStatus(string.Format(Se.Language.SpellCheck.IgnoreWordXAlways, WordNotFoundOriginal));
+        ShowStatus(status);
         DoSpellCheck();
     }
 
@@ -353,8 +672,11 @@ public partial class SpellCheckViewModel : ObservableObject
             return;
         }
 
+        var status = string.Format(Se.Language.SpellCheck.WordXAddedToNamesList, CurrentWord);
+        PushUndo(status, SpellCheckUndoAction.AddToNames, CurrentWord);
         _spellCheckManager.AddToNames(CurrentWord);
-        ShowStatus(string.Format(Se.Language.SpellCheck.WordXAddedToNamesList, CurrentWord));
+        _spellCheckManager.NoOfNames++;
+        ShowStatus(status);
         DoSpellCheck();
     }
 
@@ -367,8 +689,11 @@ public partial class SpellCheckViewModel : ObservableObject
             return;
         }
 
+        var status = string.Format(Se.Language.SpellCheck.WordXAddedToUserDictionary, CurrentWord);
+        PushUndo(status, SpellCheckUndoAction.AddToDictionary, CurrentWord);
         _spellCheckManager.AdToUserDictionary(CurrentWord);
-        ShowStatus(string.Format(Se.Language.SpellCheck.WordXAddedToUserDictionary, CurrentWord));
+        _spellCheckManager.NoOfAddedWords++;
+        ShowStatus(status);
         DoSpellCheck();
     }
 
@@ -402,8 +727,10 @@ public partial class SpellCheckViewModel : ObservableObject
             return;
         }
 
+        var status = string.Format(Se.Language.SpellCheck.UseSuggestionX, SelectedSuggestion);
+        PushUndo(status, SpellCheckUndoAction.Change, WordNotFoundOriginal);
         _spellCheckManager.ChangeWord(WordNotFoundOriginal, SelectedSuggestion, _currentSpellCheckWord, SelectedParagraph);
-        ShowStatus(string.Format(Se.Language.SpellCheck.UseSuggestionX, SelectedSuggestion));
+        ShowStatus(status);
         DoSpellCheck();
     }
 
@@ -415,8 +742,10 @@ public partial class SpellCheckViewModel : ObservableObject
             return;
         }
 
+        var status = string.Format(Se.Language.SpellCheck.UseSuggestionXAlways, SelectedSuggestion);
+        PushUndo(status, SpellCheckUndoAction.ChangeAll, WordNotFoundOriginal);
         _spellCheckManager.ChangeAllWord(WordNotFoundOriginal, SelectedSuggestion, _currentSpellCheckWord, SelectedParagraph);
-        ShowStatus(string.Format(Se.Language.SpellCheck.UseSuggestionXAlways, SelectedSuggestion));
+        ShowStatus(status);
         DoSpellCheck();
     }
 
@@ -425,6 +754,9 @@ public partial class SpellCheckViewModel : ObservableObject
     {
         TotalChangedWords = _spellCheckManager.NoOfChangedWords;
         TotalSkippedWords = _spellCheckManager.NoOfSkippedWords;
+        TotalCorrectWords = _spellCheckManager.NoOfCorrectWords;
+        TotalNames = _spellCheckManager.NoOfNames;
+        TotalAddedWords = _spellCheckManager.NoOfAddedWords;
         OkPressed = true;
         Se.Settings.SpellCheck.LastLanguageDictionaryName = SelectedDictionary?.Name;
         Se.Settings.SpellCheck.LastLanguageDictionaryFile = SelectedDictionary?.DictionaryFileName;
@@ -445,6 +777,94 @@ public partial class SpellCheckViewModel : ObservableObject
         }
     }
 
+    private bool CanUndo() => _undoList.Count > 0;
+
+    private void PushUndo(string description, SpellCheckUndoAction action, string actionWord)
+    {
+        _undoList.Add(new SpellCheckUndoItem
+        {
+            Description = description,
+            Action = action,
+            ActionWord = actionWord,
+            NoOfChangedWords = _spellCheckManager.NoOfChangedWords,
+            NoOfSkippedWords = _spellCheckManager.NoOfSkippedWords,
+            NoOfCorrectWords = _spellCheckManager.NoOfCorrectWords,
+            NoOfNames = _spellCheckManager.NoOfNames,
+            NoOfAddedWords = _spellCheckManager.NoOfAddedWords,
+            ParagraphTexts = Paragraphs.Select(p => (p, p.Text)).ToList(),
+
+            // Re-scan from just before the acted-on word so it is shown again after undo.
+            ResumeFrom = _lastSpellCheckResult == null
+                ? null
+                : new SpellCheckResult
+                {
+                    LineIndex = _lastSpellCheckResult.LineIndex,
+                    WordIndex = _lastSpellCheckResult.WordIndex - 1,
+                },
+        });
+
+        UndoText = string.Format(Se.Language.SpellCheck.UndoX, description);
+        IsUndoVisible = true;
+        UndoCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void Undo()
+    {
+        if (_undoList.Count == 0)
+        {
+            return;
+        }
+
+        var item = _undoList[^1];
+        _undoList.RemoveAt(_undoList.Count - 1);
+
+        // Restore the text of every line as it was before the action (covers Change, ChangeAll and
+        // its silent cascade, and Edit-whole-text).
+        foreach (var (paragraph, text) in item.ParagraphTexts)
+        {
+            paragraph.Text = text;
+        }
+
+        // Reverse word-list / change-all dictionary mutations.
+        switch (item.Action)
+        {
+            case SpellCheckUndoAction.SkipAll:
+                _spellCheckManager.RemoveIgnoreWord(item.ActionWord);
+                break;
+            case SpellCheckUndoAction.ChangeAll:
+                _spellCheckManager.RemoveChangeAllWord(item.ActionWord);
+                break;
+            case SpellCheckUndoAction.AddToNames:
+                _spellCheckManager.RemoveFromNames(item.ActionWord);
+                break;
+            case SpellCheckUndoAction.AddToDictionary:
+                _spellCheckManager.RemoveFromUserDictionary(item.ActionWord);
+                break;
+        }
+
+        // Restore counters and the scan position, then re-check so the word reappears.
+        _spellCheckManager.NoOfChangedWords = item.NoOfChangedWords;
+        _spellCheckManager.NoOfSkippedWords = item.NoOfSkippedWords;
+        _spellCheckManager.NoOfCorrectWords = item.NoOfCorrectWords;
+        _spellCheckManager.NoOfNames = item.NoOfNames;
+        _spellCheckManager.NoOfAddedWords = item.NoOfAddedWords;
+        _lastSpellCheckResult = item.ResumeFrom;
+
+        if (_undoList.Count > 0)
+        {
+            UndoText = string.Format(Se.Language.SpellCheck.UndoX, _undoList[^1].Description);
+        }
+        else
+        {
+            IsUndoVisible = false;
+            UndoText = string.Empty;
+        }
+
+        UndoCommand.NotifyCanExecuteChanged();
+        DoSpellCheck();
+    }
+
     private void DoSpellCheck()
     {
         if (Dictionaries.Count == 0)
@@ -463,7 +883,7 @@ public partial class SpellCheckViewModel : ObservableObject
             return;
         }
 
-        var results = _spellCheckManager.CheckSpelling(Paragraphs, _lastSpellCheckResult);
+        var results = _spellCheckManager.CheckSpelling(Paragraphs, _lastSpellCheckResult, _stopBeforeLineIndex);
         if (results.Count > 0)
         {
             WordNotFoundOriginal = results[0].Word.Text;
@@ -491,6 +911,33 @@ public partial class SpellCheckViewModel : ObservableObject
             LineText = string.Format(Se.Language.SpellCheck.LineXofY, lineIndex, Paragraphs.Count);
 
             _focusSubtitleLine?.GoToAndFocusLine(SelectedParagraph);
+        }
+        else if (_scanStartLineIndex > 0 && !_hasWrapped)
+        {
+            // Reached the end after starting mid-list: offer to wrap back and check the top part.
+            Dispatcher.UIThread.Post(async () =>
+            {
+                var answer = Window == null
+                    ? MessageBoxResult.No
+                    : await MessageBox.Show(
+                        Window,
+                        Se.Language.SpellCheck.SpellCheck,
+                        Se.Language.SpellCheck.ContinueFromTop,
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+
+                if (answer == MessageBoxResult.Yes)
+                {
+                    _hasWrapped = true;
+                    _stopBeforeLineIndex = _scanStartLineIndex;
+                    _lastSpellCheckResult = null;
+                    DoSpellCheck();
+                }
+                else
+                {
+                    Ok();
+                }
+            }, DispatcherPriority.Background);
         }
         else
         {

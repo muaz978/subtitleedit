@@ -3,6 +3,7 @@ using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Features.Video.EmbeddedSubtitlesEdit;
+using Nikse.SubtitleEdit.Logic.Config;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -68,7 +69,7 @@ public class FfmpegGenerator
     /// <summary>
     /// Generate ffmpeg parameters for a video with a burned-in Advanced Sub Station Alpha subtitle.
     /// </summary>
-    public static string GenerateHardcodedVideoFile(string inputVideoFileName, string assaSubtitleFileName, string outputVideoFileName, int width, int height, string videoEncoding, string preset, string pixelFormat, string crf, string audioEncoding, bool forceStereo, string sampleRate, string tune, string audioBitRate, string pass, string twoPassBitRate, string? cutStart = null, string? cutEnd = null, string audioCutTrack = "", Features.Video.BurnIn.BurnInLogo? burnInLogo = null)
+    public static string GenerateHardcodedVideoFile(string inputVideoFileName, string assaSubtitleFileName, string outputVideoFileName, int width, int height, string videoEncoding, string preset, string pixelFormat, string crf, string audioEncoding, bool forceStereo, string sampleRate, string tune, string audioBitRate, string pass, string twoPassBitRate, string? cutStart = null, string? cutEnd = null, string audioCutTrack = "", Features.Video.BurnIn.BurnInLogo? burnInLogo = null, bool inputIsAudioOnly = false)
     {
         if (width % 2 == 1)
         {
@@ -213,6 +214,21 @@ public class FfmpegGenerator
             cutEnd = " ";
         }
 
+        // Audio-only input (e.g. karaoke from an audio + subtitle file) has no video stream to
+        // burn subtitles into, so synthesize a black canvas at the requested resolution and stop
+        // encoding when the audio ends (the lavfi color source runs forever).
+        var canvasInput = string.Empty;
+        var shortestParameter = string.Empty;
+        var mainVideoStream = "[0:v]";
+        var logoVideoStream = "[1:v]";
+        if (inputIsAudioOnly)
+        {
+            canvasInput = $" -f lavfi -i color=c=black:s={width}x{height}:r=25";
+            shortestParameter = " -shortest";
+            mainVideoStream = "[1:v]";
+            logoVideoStream = "[2:v]";
+        }
+
         // Add logo overlay if specified
         var logoInput = string.Empty;
         var filterParameter = $"-vf \"scale={width}:{height},ass={Path.GetFileName(assaSubtitleFileName)}\"";
@@ -226,18 +242,18 @@ public class FfmpegGenerator
             var sizePercent = burnInLogo.Size.ToString(CultureInfo.InvariantCulture);
 
             // Build filter_complex for video with logo overlay
-            // 1. Scale main video and apply subtitles
+            // 1. Scale main video (or the generated canvas for audio-only input) and apply subtitles
             // 2. Scale logo by size percentage and apply alpha transparency
             // 3. Overlay logo at specified X, Y position
-            var filterComplex = $"[0:v]scale={width}:{height},ass={Path.GetFileName(assaSubtitleFileName)}[withsubs];" +
-                               $"[1:v]scale=iw*{sizePercent}/100:ih*{sizePercent}/100,format=rgba,colorchannelmixer=aa={alphaValue}[logo];" +
+            var filterComplex = $"{mainVideoStream}scale={width}:{height},ass={Path.GetFileName(assaSubtitleFileName)}[withsubs];" +
+                               $"{logoVideoStream}scale=iw*{sizePercent}/100:ih*{sizePercent}/100,format=rgba,colorchannelmixer=aa={alphaValue}[logo];" +
                                $"[withsubs][logo]overlay={burnInLogo.X}:{burnInLogo.Y}";
 
             filterParameter = $"-filter_complex \"{filterComplex}\"";
         }
 
         return
-            $"{cutStart}-i \"{inputVideoFileName}\"{logoInput}{cutEnd} {filterParameter} -g 30 -bf 2 -s {width}x{height} {videoEncodingSettings} {passSettings} {presetSettings} {crfSettings} {pixelFormat} {audioSettings}{tuneParameter} -use_editlist 0 -movflags +faststart {outputVideoFileName}";
+            $"{cutStart}-i \"{inputVideoFileName}\"{canvasInput}{logoInput}{cutEnd} {filterParameter} -g 30 -bf 2 -s {width}x{height} {videoEncodingSettings} {passSettings} {presetSettings} {crfSettings} {pixelFormat} {audioSettings}{tuneParameter} -use_editlist 0 -movflags +faststart{shortestParameter} {outputVideoFileName}";
     }
 
     private static Process GetFFmpegProcess(string imageFileName, string outputFileName, int videoWidth, int videoHeight, int seconds, decimal frameRate, bool addTimeCode = false, string addTimeColor = "white")
@@ -305,14 +321,38 @@ public class FfmpegGenerator
             vfMatrix = $"-vf colormatrix={colorMatrix}";
         }
 
+        // Fast path: input seeking ("-ss" before "-i"). For some containers/codecs this can land
+        // between keyframes and produce no frame, so fall back to accurate output seeking.
+        var stderr = RunFfmpegScreenShot($"-y -ss {timeCode} -i \"{inputFileName}\" {vfMatrix} -frames:v 1 -c:v png \"{outputFileName}\"");
+        if (HasFrame(outputFileName))
+        {
+            return outputFileName;
+        }
+
+        var stderr2 = RunFfmpegScreenShot($"-y -i \"{inputFileName}\" -ss {timeCode} {vfMatrix} -frames:v 1 -c:v png \"{outputFileName}\"");
+        if (HasFrame(outputFileName))
+        {
+            return outputFileName;
+        }
+
+        Se.LogError("FfmpegGenerator.GetScreenShot: no frame extracted from \"" + inputFileName +
+                    "\" at " + timeCode + Environment.NewLine +
+                    "input-seek: " + stderr + Environment.NewLine +
+                    "output-seek: " + stderr2);
+        return outputFileName;
+    }
+
+    private static string RunFfmpegScreenShot(string arguments)
+    {
         var process = new Process
         {
             StartInfo =
             {
                 FileName = GetFfmpegLocation(),
-                Arguments = $"-ss {timeCode} -i \"{inputFileName}\" {vfMatrix} -frames:v 1 -c:v png \"{outputFileName}\"",
+                Arguments = arguments,
                 UseShellExecute = false,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                RedirectStandardError = true,
             }
         };
 
@@ -320,8 +360,14 @@ public class FfmpegGenerator
         _ = process.Start();
 #pragma warning restore CA1416
 
+        var stderr = process.StandardError.ReadToEnd();
         process.WaitForExit();
-        return outputFileName;
+        return stderr;
+    }
+
+    private static bool HasFrame(string fileName)
+    {
+        return File.Exists(fileName) && new FileInfo(fileName).Length > 0;
     }
 
     internal static string? GetScreenShotWithSubtitle(Subtitle previewSubtitle, int width, int height)

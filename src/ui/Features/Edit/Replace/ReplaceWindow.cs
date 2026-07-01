@@ -197,16 +197,31 @@ public class ReplaceWindow : Window
 
         Content = grid;
 
-        Activated += delegate 
-        { 
+        vm.FocusSearchBox = () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            textBoxFind.GetVisualDescendants()
+                       .OfType<TextBox>()
+                       .FirstOrDefault()?
+                       .Focus();
+        });
+
+        Opened += delegate
+        {
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
-                textBoxFind.GetVisualDescendants()
-                           .OfType<TextBox>()
-                           .FirstOrDefault()?
-                           .Focus();
+                if (vm.FocusReplaceOnOpen)
+                {
+                    textBoxReplace.Focus();
+                }
+                else
+                {
+                    textBoxFind.GetVisualDescendants()
+                               .OfType<TextBox>()
+                               .FirstOrDefault()?
+                               .Focus();
+                }
             });
-        }; // hack to make OnKeyDown work
+        };
         AddHandler(KeyDownEvent, vm.OnKeyDown, RoutingStrategies.Tunnel);
         Closing += (_, _) => vm.SaveSettings();
     }

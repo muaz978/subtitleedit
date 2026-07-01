@@ -1,117 +1,29 @@
-﻿using Nikse.SubtitleEdit.Core.Interfaces;
 using Nikse.SubtitleEdit.Features.Main;
-using Nikse.SubtitleEdit.Logic.Config;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Globalization;
-using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
-using WeCantSpell.Hunspell;
 
 namespace Nikse.SubtitleEdit.Features.SpellCheck;
 
-public class SpellCheckManager : ISpellCheckManager, IDoSpell
+/// <summary>
+/// Interactive spell-check flow for the spell-check window: scans an observable collection of
+/// subtitle line view-models and applies word changes back onto them. The framework-agnostic core
+/// (Hunspell, word lists, word classification) lives in the <see cref="SpellChecker"/> base in
+/// libuilogic so it can be shared with seconv. (#11744)
+/// </summary>
+public class SpellCheckManager : SpellChecker, ISpellCheckManager
 {
     public delegate void SpellCheckWordChangedHandler(object sender, SpellCheckWordChangedEvent e);
     public event SpellCheckWordChangedHandler? OnWordChanged;
     public int NoOfChangedWords { get; set; }
-    public int NoOfSkippedWords { get; set; }
-    public WordSpellCheck? WordSpellChecker { get; set; }
+    public int NoOfCorrectWords { get; set; }
+    public int NoOfNames { get; set; }
+    public int NoOfAddedWords { get; set; }
 
-    private static readonly Regex EmailRegex = new(@"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", RegexOptions.Compiled);
-    private static readonly Regex UrlRegex = new(@"^(http:\/\/www\.|https:\/\/www\.|http:\/\/|https:\/\/)?[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,5}(:[0-9]{1,5})?(\/.*)?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private static readonly Regex HashtagRegex = new(@"^#[a-zA-Z0-9_]+$", RegexOptions.Compiled);
-
-    private static readonly Regex NumberRegex = new(@"^-?(?:\d+|\d{1,3}(?:,\d{3})+)?(?:\.\d+)?$", RegexOptions.Compiled);
-    private static readonly Regex PercentageRegex = new(@"^-?(?:\d+|\d{1,3}(?:,\d{3})+)?(?:\.\d+)?%$", RegexOptions.Compiled);
-    private static readonly Regex CurrencyRegex = new(@"^[$£€]?-?(?:\d+|\d{1,3}(?:,\d{3})+)?(?:\.\d+)?$", RegexOptions.Compiled);
-
-    private WordList? _hunspellWeCantSpell;
     private SpellCheckResult? _currentResult;
-    private SpellCheckWordLists? _spellCheckWordLists;
-    private readonly List<string> _skipAllList;
-    private readonly Dictionary<string, string> _changeAllDictionary;
 
-    public SpellCheckManager()
-    {
-        _skipAllList = new List<string>();
-        _changeAllDictionary = new Dictionary<string, string>();
-    }
-
-    public List<SpellCheckDictionaryDisplay> GetDictionaryLanguages(string dictionaryFolder)
-    {
-        var list = new List<SpellCheckDictionaryDisplay>();
-        if (!Directory.Exists(dictionaryFolder))
-        {
-            return list;
-        }
-
-        foreach (var dic in Directory.GetFiles(dictionaryFolder, "*.dic"))
-        {
-            var name = Path.GetFileNameWithoutExtension(dic);
-            if (!name.StartsWith("hyph", StringComparison.Ordinal))
-            {
-                try
-                {
-                    var ci = CultureInfo.GetCultureInfo(name.Replace('_', '-'));
-                    name = ci.DisplayName + " [" + name + "]";
-                }
-                catch (Exception exception)
-                {
-                    System.Diagnostics.Debug.WriteLine(exception.Message);
-                    name = "[" + name + "]";
-                }
-
-                var item = new SpellCheckDictionaryDisplay
-                {
-                    DictionaryFileName = dic,
-                    Name = name,
-                };
-                list.Add(item);
-            }
-        }
-
-        return list;
-    }
-
-    public bool Initialize(string dictionaryFile, string twoLetterLanguageCode)
-    {
-        _skipAllList.Clear();
-
-        if (!File.Exists(dictionaryFile))
-        {
-            return false;
-        }
-
-        var affixFile = Path.ChangeExtension(dictionaryFile, ".aff");
-        _hunspellWeCantSpell = WordList.CreateFromFiles(dictionaryFile, affixFile);
-
-        if (string.IsNullOrEmpty(twoLetterLanguageCode))
-        {
-            _spellCheckWordLists = null;
-        }
-        else
-        {
-            var name = Path.GetFileNameWithoutExtension(dictionaryFile);
-            var fiveLetterCode = SpellCheckDictionaryDisplay.GetFiveLetterLanguageName(name);
-
-            try
-            {
-                _spellCheckWordLists = new SpellCheckWordLists(fiveLetterCode ?? "en_US", this);
-            }
-            catch (Exception exception)
-            {
-                Se.LogError("Error loading names for SpellCheckManager: " + exception.Message);
-                _spellCheckWordLists = new SpellCheckWordLists(string.Empty, this);
-            }
-        }
-
-        return true;
-    }
-
-    public List<SpellCheckResult> CheckSpelling(ObservableCollection<SubtitleLineViewModel> subtitles, SpellCheckResult? startFrom = null)
+    public List<SpellCheckResult> CheckSpelling(ObservableCollection<SubtitleLineViewModel> subtitles, SpellCheckResult? startFrom = null, int? stopBeforeLineIndex = null)
     {
         var results = new List<SpellCheckResult>();
 
@@ -122,7 +34,12 @@ public class SpellCheckManager : ISpellCheckManager, IDoSpell
             startWordIndex++;
         }
 
-        for (var lineIndex = startLineIndex; lineIndex < subtitles.Count; lineIndex++)
+        // When wrapping back to the top, scan only the lines above where this run started.
+        var endLineIndex = stopBeforeLineIndex.HasValue
+            ? Math.Min(stopBeforeLineIndex.Value, subtitles.Count)
+            : subtitles.Count;
+
+        for (var lineIndex = startLineIndex; lineIndex < endLineIndex; lineIndex++)
         {
             var p = subtitles[lineIndex];
             var words = SpellCheckWordLists.Split(p.Text);
@@ -151,58 +68,6 @@ public class SpellCheckManager : ISpellCheckManager, IDoSpell
         }
 
         return results;
-    }
-
-    public List<string> GetSuggestions(string word)
-    {
-        if (WordSpellChecker != null)
-        {
-            return WordSpellChecker.GetSuggestions(word);
-        }
-
-        if (_hunspellWeCantSpell == null)
-        {
-            return new List<string>();
-        }
-
-        var suggestions = _hunspellWeCantSpell.Suggest(word);
-        return suggestions.ToList();
-    }
-
-    public void AddIgnoreWord(string word)
-    {
-        if (string.IsNullOrWhiteSpace(word))
-        {
-            return;
-        }
-
-        NoOfSkippedWords++;
-
-        if (!_skipAllList.Contains(word))
-        {
-            _skipAllList.Add(word);
-        }
-
-        var lowerWord = word.ToLowerInvariant();
-        if (!_skipAllList.Contains(lowerWord))
-        {
-            _skipAllList.Add(lowerWord);
-        }
-
-        var upperWord = word.ToUpperInvariant();
-        if (!_skipAllList.Contains(upperWord))
-        {
-            _skipAllList.Add(upperWord);
-        }
-
-        if (word.Length > 1)
-        {
-            var titleWord = char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant();
-            if (!_skipAllList.Contains(titleWord))
-            {
-                _skipAllList.Add(titleWord);
-            }
-        }
     }
 
     public void ChangeWord(string fromWord, string toWord, SpellCheckWord spellCheckWord, SubtitleLineViewModel p)
@@ -241,97 +106,12 @@ public class SpellCheckManager : ISpellCheckManager, IDoSpell
             return;
         }
 
-        if (!_changeAllDictionary.ContainsKey(fromWord))
+        if (!ChangeAllDictionary.ContainsKey(fromWord))
         {
-            _changeAllDictionary.Add(fromWord, toWord);
+            ChangeAllDictionary.Add(fromWord, toWord);
         }
 
         ChangeWord(fromWord, toWord, spellCheckWord, p);
-    }
-
-    public void AddToNames(string word)
-    {
-        _spellCheckWordLists?.AddName(word);
-    }
-
-    public void AdToUserDictionary(string word)
-    {
-        _spellCheckWordLists?.AddUserWord(word);
-    }
-
-    private static readonly HashSet<string> _allowedTokens = new HashSet<string>
-    {
-        "&", "—", "–", "…"
-    };
-
-    public bool IsWordCorrect(string word)
-    {
-        if (string.IsNullOrWhiteSpace(word))
-        {
-            return true;
-        }
-
-        if (_allowedTokens.Contains(word))
-        {
-            return true;
-        }
-
-        if (WordSpellChecker != null)
-        {
-            return WordSpellChecker.DoSpell(word);
-        }
-
-        return _hunspellWeCantSpell != null && _hunspellWeCantSpell.Check(word);
-    }
-
-    public bool IsWordCorrect(SpellCheckWord spellCheckWord, string text)
-    {
-        var word = spellCheckWord.Text;
-
-        if (_skipAllList.Contains(word.ToUpperInvariant()) ||
-            (word.StartsWith('\'') || word.EndsWith('\'')) && _skipAllList.Contains(word.Trim('\'').ToUpperInvariant()))
-        {
-            NoOfSkippedWords++;
-            return true;
-        }
-
-        if (IsEmailUrlOrHashTag(word))
-        {
-            return true;
-        }
-
-        if (IsNumber(word))
-        {
-            return true;
-        }
-
-        if (IsName(word, text))
-        {
-            return true;
-        }
-
-        if (IsPartOfHtmlOrAssaTag(spellCheckWord, text))
-        {
-            return true;
-        }
-
-        if (_spellCheckWordLists != null && _spellCheckWordLists.HasUserWord(word))
-        {
-            return true;
-        }
-
-        var isCorrect = IsWordCorrect(word);
-        return isCorrect;
-    }
-
-    public bool DoSpell(string word)
-    {
-        if (WordSpellChecker != null)
-        {
-            return WordSpellChecker.DoSpell(word);
-        }
-
-        return _hunspellWeCantSpell != null && _hunspellWeCantSpell.Check(word);
     }
 
     private bool IsWordCorrect(SpellCheckWord spellCheckWord, SubtitleLineViewModel p, List<SpellCheckWord> words, int wordIndex)
@@ -339,8 +119,8 @@ public class SpellCheckManager : ISpellCheckManager, IDoSpell
         var word = spellCheckWord.Text;
         var text = p.Text;
 
-        if (_skipAllList.Contains(word.ToUpperInvariant()) ||
-            (word.StartsWith('\'') || word.EndsWith('\'')) && _skipAllList.Contains(word.Trim('\'').ToUpperInvariant()))
+        if (SkipAllList.Contains(word.ToUpperInvariant()) ||
+            (word.StartsWith('\'') || word.EndsWith('\'')) && SkipAllList.Contains(word.Trim('\'').ToUpperInvariant()))
         {
             NoOfSkippedWords++;
             return true;
@@ -358,6 +138,7 @@ public class SpellCheckManager : ISpellCheckManager, IDoSpell
 
         if (IsName(word, text))
         {
+            NoOfNames++;
             return true;
         }
 
@@ -366,123 +147,50 @@ public class SpellCheckManager : ISpellCheckManager, IDoSpell
             return true;
         }
 
-        if (_spellCheckWordLists != null && _spellCheckWordLists.HasUserWord(word))
+        if (WordLists != null && WordLists.HasUserWord(word))
         {
             return true;
         }
 
-        if (_spellCheckWordLists != null && _spellCheckWordLists.IsWordInUserPhrases(wordIndex, words))
+        if (WordLists != null && WordLists.IsWordInUserPhrases(wordIndex, words))
         {
             return true;
         }
 
-        var isCorrect = DoSpell(word);
+        var isCorrect = DoSpell(word) || IsEnglishInApostropheActuallyIng(word);
 
-        if (_changeAllDictionary.ContainsKey(word) && NotSameSpecialEnding(words[wordIndex], _changeAllDictionary[word], text))
+        // A word wrapped in single quotes used as quotation marks (e.g. 'Een ridder ...') keeps the
+        // leading/trailing apostrophe attached during splitting, so retry without them. The apostrophe
+        // is not a split char because it is part of contractions like 'n / don't. (#11975)
+        if (!isCorrect)
         {
-            ChangeWord(word, _changeAllDictionary[word], words[wordIndex], p);
-            return true;
-        }
-
-        if (word.EndsWith('\'') && _changeAllDictionary.ContainsKey(word.TrimEnd('\'')))
-        {
-            ChangeWord(word, _changeAllDictionary[word] + word.Remove(0, word.TrimEnd('\'').Length), words[wordIndex], p);
-            return true;
-        }
-
-        return isCorrect;
-    }
-
-    private static bool IsPartOfHtmlOrAssaTag(SpellCheckWord spellCheckWord, string text)
-    {
-        if (text.Contains('<') || text.Contains('{'))
-        {
-            var index = spellCheckWord.Index;
-            while (index >= 0)
+            var trimmed = word.Trim('\'');
+            if (trimmed.Length > 0 && trimmed != word &&
+                (DoSpell(trimmed) ||
+                 IsName(trimmed, text) ||
+                 (WordLists != null && WordLists.HasUserWord(trimmed))))
             {
-                var c = text[index];
-                if (c == '<')
-                {
-                    var nextIdx = text.IndexOf('>', index);
-                    if (nextIdx > index)
-                    {
-                        return true;
-                    }
-                    break;
-                }
-                else if (c == '{')
-                {
-                    var nextIdx = text.IndexOf('}', index);
-                    if (nextIdx > index)
-                    {
-                        return true;
-                    }
-                    break;
-                }
-
-                if (c == '>' || c == '}')
-                {
-                    break;
-                }
-
-                index--;
+                isCorrect = true;
             }
         }
 
-        return false;
-    }
-
-    private static bool IsEmailUrlOrHashTag(string word)
-    {
-        return EmailRegex.IsMatch(word) || UrlRegex.IsMatch(word) || HashtagRegex.IsMatch(word);
-    }
-
-    private static bool IsNumber(string word)
-    {
-        return NumberRegex.IsMatch(word) || PercentageRegex.IsMatch(word) || CurrencyRegex.IsMatch(word);
-    }
-
-    private bool IsName(string word, string text)
-    {
-        if (_spellCheckWordLists == null)
+        if (ChangeAllDictionary.ContainsKey(word) && NotSameSpecialEnding(words[wordIndex], ChangeAllDictionary[word], text))
         {
-            return false;
-        }
-
-        if (_spellCheckWordLists.HasName(word))
-        {
+            ChangeWord(word, ChangeAllDictionary[word], words[wordIndex], p);
             return true;
         }
 
-        return _spellCheckWordLists.HasNameExtended(word, text);
-    }
-
-    private bool IsCommonMisspelling(string word) //TODO: some auto corrections?
-    {
-        return false;
-    }
-
-    /// <summary>
-    /// Do not allow changing "Who is lookin' at X" with "lokin" word to "lokin'" via repalce word.
-    /// </summary>
-    private static bool NotSameSpecialEnding(SpellCheckWord spellCheckWord, string replaceWord, string text)
-    {
-        if (spellCheckWord.Index + spellCheckWord.Length + 1 >= text.Length)
+        if (word.EndsWith('\'') && ChangeAllDictionary.ContainsKey(word.TrimEnd('\'')))
         {
+            ChangeWord(word, ChangeAllDictionary[word] + word.Remove(0, word.TrimEnd('\'').Length), words[wordIndex], p);
             return true;
         }
 
-        var wordPlusOne = text.Substring(spellCheckWord.Index, spellCheckWord.Length + 1).TrimStart();
-        if (replaceWord.EndsWith('\'') && !replaceWord.EndsWith("''", StringComparison.Ordinal) && wordPlusOne == replaceWord)
+        if (isCorrect)
         {
-            return false;
+            NoOfCorrectWords++;
         }
 
-        if (replaceWord.EndsWith('"') && !replaceWord.EndsWith("\"\"", StringComparison.Ordinal) && wordPlusOne == replaceWord)
-        {
-            return false;
-        }
-
-        return true;
+        return isCorrect;
     }
 }

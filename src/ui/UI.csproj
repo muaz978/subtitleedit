@@ -20,15 +20,15 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Avalonia" Version="12.0.4" />
+		<PackageReference Include="Avalonia" Version="12.0.5" />
 		<PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
-		<PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.0" />
-		<PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
-		<PackageReference Include="Avalonia.Markup.Declarative" Version="12.0.1" />
-		<PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
-		<PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.4" />
+		<PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.1" />
+		<PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
+		<PackageReference Include="Avalonia.Markup.Declarative" Version="12.0.4" />
+		<PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
+		<PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
 		<!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
-		<PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.2">
+		<PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3">
 			<IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
 			<PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
 		</PackageReference>
@@ -38,14 +38,22 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="11.0.0-preview.2.26159.112" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="11.0.0-preview.2.26159.112" />
 		<PackageReference Include="Microsoft.Extensions.Http" Version="11.0.0-preview.2.26159.112" />
-		<PackageReference Include="Optris.Icons.Avalonia" Version="12.0.6" />
-		<PackageReference Include="Optris.Icons.Avalonia.FontAwesome" Version="12.0.6" />
-		<PackageReference Include="Optris.Icons.Avalonia.MaterialDesign" Version="12.0.6" />
+		<PackageReference Include="Optris.Icons.Avalonia" Version="12.0.7" />
+		<PackageReference Include="Optris.Icons.Avalonia.FontAwesome" Version="12.0.7" />
+		<PackageReference Include="Optris.Icons.Avalonia.MaterialDesign" Version="12.0.7" />
 		<PackageReference Include="SharpCompress" Version="0.49.1" />
 		<PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.4" />
 		<PackageReference Include="SkiaSharp.HarfBuzz" Version="3.119.4" />
+		<!--
+		  Pin the Linux native HarfBuzz to match the managed HarfBuzzSharp (8.3.1.5) that
+		  SkiaSharp.HarfBuzz 3.119.4 resolves to. Avalonia references HarfBuzzSharp.NativeAssets.Linux
+		  8.3.1.3, and without this NuGet leaves the Linux native behind while unifying the
+		  managed wrapper up - an ABI mismatch that crashes the BluRay (sup) text shaper with
+		  "double free or corruption" on Linux (issue #11864). macOS/Windows already get the
+		  matching native.
+		-->
+		<PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" Version="8.3.1.5" />
 		<PackageReference Include="TagLibSharp" Version="2.3.0" />
-		<PackageReference Include="WeCantSpell.Hunspell" Version="7.0.1" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -220,6 +228,10 @@
 		<AvaloniaResource Include="Assets\about3.png" />
 		<None Remove="Assets\SpeechToText\WhisperCTranslate2.txt" />
 		<AvaloniaResource Include="Assets\SpeechToText\WhisperCTranslate2.txt" />
+		<None Remove="Assets\SpeechToText\MLXWhisper.txt" />
+		<AvaloniaResource Include="Assets\SpeechToText\MLXWhisper.txt" />
+		<None Remove="Assets\SpeechToText\mlx_whisper_transcribe.py" />
+		<AvaloniaResource Include="Assets\SpeechToText\mlx_whisper_transcribe.py" />
 		<None Remove="Assets\Languages\Korean.json" />
 		<AvaloniaResource Include="Assets\Languages\Korean.json" />
 		<None Remove="Assets\Languages\Finnish.json" />

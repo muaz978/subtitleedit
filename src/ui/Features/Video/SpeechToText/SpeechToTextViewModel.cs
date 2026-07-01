@@ -128,6 +128,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     private string _audioFileName = string.Empty;
     private int _audioTrackNumber;
     private readonly List<string> _filesToDelete = new();
+    private string? _sttTempFolder;
     private readonly ConcurrentQueue<string> _outputText = new();
     private long _startTicks = 0;
     private double _endSeconds;
@@ -198,12 +199,22 @@ public partial class SpeechToTextViewModel : ObservableObject
             Engines.Add(new WhisperEngineCTranslate2());
         }
 
+        // MLX Whisper runs Whisper on the Apple GPU / Neural Engine and is arm64-only, so offer it
+        // only on Apple Silicon.
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) &&
+            RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+        {
+            Engines.Add(new MlxWhisperMac());
+        }
+
         Engines.Add(new WhisperEngineOpenAi());
 
         // Add OpenAI Compatible STT engine (available on all platforms)
         Engines.Add(new OpenAiCompatibleSttEngine());
 
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ||
+            RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ||
+            RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
             //Engines.Add(new ChatLlmCppEngine());
             Engines.Add(new Qwen3AsrCppEngine());
@@ -213,7 +224,7 @@ public partial class SpeechToTextViewModel : ObservableObject
 
         SelectedEngine = Engines[0];
 
-        Languages = new ObservableCollection<WhisperLanguage>(SelectedEngine.Languages);
+        Languages = new ObservableCollection<WhisperLanguage>(GetEngineLanguages(GetEffectiveSelectedEngine()));
         SelectedLanguage = PickDefaultLanguage(Languages);
 
         Models = new ObservableCollection<SpeechToTextModelDisplay>();
@@ -330,6 +341,35 @@ public partial class SpeechToTextViewModel : ObservableObject
             CrispAsrEngine crispAsrEngine => crispAsrEngine.SelectedBackend,
             _ => SelectedEngine,
         };
+    }
+
+    // The mainstream Whisper engines that can auto-detect the spoken language
+    // (useful for files with mixed languages). See issue #11848.
+    private static bool EngineSupportsAutoLanguageDetection(ISpeechToTextEngine engine)
+    {
+        return engine.Choice is WhisperChoice.Cpp
+            or WhisperChoice.CppCuBlas
+            or WhisperChoice.CppVulkan
+            or WhisperChoice.CppCuBlasLib
+            or WhisperChoice.ConstMe
+            or WhisperChoice.PurfviewFasterWhisperXxl
+            or WhisperChoice.CTranslate2
+            or WhisperChoice.OpenAi;
+    }
+
+    // Builds the language dropdown for an engine, prepending an "Auto detect" entry
+    // (code "auto") for engines that support automatic language detection.
+    private static IEnumerable<WhisperLanguage> GetEngineLanguages(ISpeechToTextEngine engine)
+    {
+        var result = new List<WhisperLanguage>();
+        if (EngineSupportsAutoLanguageDetection(engine))
+        {
+            result.Add(new WhisperLanguage("auto", "Auto detect"));
+        }
+
+        // Bubble the user's favorite languages to the top (the "Auto detect" entry stays first).
+        result.AddRange(LanguageFavoritesHelper.Order(engine.Languages, l => l.Code));
+        return result;
     }
 
     private static bool IsTranslateAvailable(ISpeechToTextEngine engine)
@@ -815,9 +855,14 @@ public partial class SpeechToTextViewModel : ObservableObject
             return;
         }
 
+        var rawJson = string.Empty;
         try
         {
-            var jsonText = File.ReadAllText(jsonPath);
+            rawJson = File.ReadAllText(jsonPath);
+            // qwen3-asr-cli can write raw control chars (e.g. a literal newline) inside JSON
+            // string values, which strict System.Text.Json rejects ("'0x0A' is invalid within a
+            // JSON string"). Escape those so a result is still produced (issue #11717).
+            var jsonText = JsonRepair.EscapeControlCharsInStrings(rawJson);
             var jsonDoc = JsonDocument.Parse(jsonText);
             var words = jsonDoc.RootElement.GetProperty("words");
 
@@ -887,9 +932,22 @@ public partial class SpeechToTextViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            Se.LogError(ex, $"Failed to read Qwen3 ASR CPP output JSON '{jsonPath}'");
+            // Persist the offending output so the failure is diagnosable — the temp .json is
+            // deleted below, so logging its raw content here is the only record (issue #11717,
+            // #11375). Force the write: the "write tools log" setting is off by default, so without
+            // this the JSON that caused the parse error never reaches the user's bug report.
+            var loggedJson = string.IsNullOrEmpty(rawJson)
+                ? "<output JSON could not be read>"
+                : rawJson;
+            Se.WriteToolsLog($"Qwen3 ASR CPP output JSON failed to parse ({ex.Message}):{Environment.NewLine}{loggedJson}", true);
             Dispatcher.UIThread.Invoke<Task>(async () =>
             {
                 LogToConsole($"Speech to text ({settings.WhisperChoice}) failed: {ex.Message}{Environment.NewLine}");
+                if (ex is JsonException)
+                {
+                    LogToConsole($"The Qwen3 ASR engine produced output that could not be read. This is usually a problem with the engine or the chosen forced aligner (e.g. with some non-Latin scripts). Try re-running, a different model/aligner, or report it at {new Qwen3AsrCppEngine().Url}{Environment.NewLine}");
+                }
                 ProgressValue = 100;
                 IsTranscribeEnabled = true;
                 await Task.CompletedTask;
@@ -1228,7 +1286,7 @@ public partial class SpeechToTextViewModel : ObservableObject
             cancellationToken.ThrowIfCancellationRequested();
 
             var boundary = boundaries[i];
-            var chunkPath = Path.Combine(Path.GetTempPath(), $"se-stt-chunk-{Guid.NewGuid()}{extension}");
+            var chunkPath = Path.Combine(GetSttTempFolder(), $"se-stt-chunk-{Guid.NewGuid()}{extension}");
             // Register before extraction so a throw mid-extract still drains
             // the (possibly partial) file via the outer _filesToDelete sweep.
             _filesToDelete.Add(chunkPath);
@@ -1968,6 +2026,23 @@ public partial class SpeechToTextViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Returns the dedicated temp subfolder for the current speech-to-text run,
+    /// creating it on first use. The extracted audio (and any chunk files) live
+    /// here so the whole folder - including engine output and stray .tmp files
+    /// written next to the input - can be removed in one go (#11837).
+    /// </summary>
+    private string GetSttTempFolder()
+    {
+        if (string.IsNullOrEmpty(_sttTempFolder))
+        {
+            _sttTempFolder = Path.Combine(Path.GetTempPath(), "se-stt-" + Guid.NewGuid());
+            Directory.CreateDirectory(_sttTempFolder);
+        }
+
+        return _sttTempFolder;
+    }
+
     public void DeleteTempFiles()
     {
         foreach (var file in _filesToDelete)
@@ -1983,6 +2058,23 @@ public partial class SpeechToTextViewModel : ObservableObject
             {
                 // ignore
             }
+        }
+
+        if (!string.IsNullOrEmpty(_sttTempFolder))
+        {
+            try
+            {
+                if (Directory.Exists(_sttTempFolder))
+                {
+                    Directory.Delete(_sttTempFolder, true);
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            _sttTempFolder = null;
         }
     }
 
@@ -2094,15 +2186,73 @@ public partial class SpeechToTextViewModel : ObservableObject
             crispVariant = linuxAnswer;
         }
 
+        var qwen3UseVulkan = false;
+        if (engine is Qwen3AsrCppEngine && Qwen3AsrCppDownloadService.IsVulkanBuildAvailable())
+        {
+            var pick = await PromptQwen3AsrGpuAsync(engine.Name);
+            if (pick == null)
+            {
+                return;
+            }
+
+            qwen3UseVulkan = pick.Value;
+        }
+
         await _windowService.ShowDialogAsync<DownloadSpeechToTextEngineWindow, DownloadSpeechToTextEngineViewModel>(
             Window, viewModel =>
             {
                 viewModel.Engine = engine;
                 viewModel.CrispAsrWindowsVariant = crispVariant;
+                viewModel.Qwen3AsrUseVulkan = qwen3UseVulkan;
                 viewModel.StartDownload();
             });
 
         RefreshEngineCombo?.Invoke();
+    }
+
+    /// <summary>
+    /// Qwen3 ASR build prompt (win64 / linux-x64, where a Vulkan build exists): CPU vs GPU (Vulkan).
+    /// Returns true for the Vulkan build, false for CPU, or null when the user cancels.
+    /// </summary>
+    private async Task<bool?> PromptQwen3AsrGpuAsync(string engineName)
+    {
+        var answer = await MessageBox.Show(
+            Window!,
+            $"Download {engineName}?",
+            $"{Environment.NewLine}\"{engineName}\" requires downloading the engine.{Environment.NewLine}{Environment.NewLine}Select a version to download:",
+            MessageBoxButtons.Cancel,
+            MessageBoxIcon.Question,
+            "CPU",
+            "GPU (Vulkan)");
+
+        if (answer == MessageBoxResult.None || answer == MessageBoxResult.Cancel)
+        {
+            return null;
+        }
+
+        var useVulkan = answer == MessageBoxResult.Custom2;
+        if (useVulkan && !VulkanHelper.IsInstalled())
+        {
+            var vulkanAnswer = await MessageBox.Show(
+                Window!,
+                "Vulkan may be required",
+                $"The GPU (Vulkan) build needs a Vulkan-capable GPU and runtime.{Environment.NewLine}{Environment.NewLine}You can get the Vulkan SDK from:{Environment.NewLine}https://vulkan.lunarg.com/sdk/home{Environment.NewLine}{Environment.NewLine}Continue with the GPU download?",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (vulkanAnswer == MessageBoxResult.No)
+            {
+                UiUtil.OpenUrl("https://vulkan.lunarg.com/sdk/home");
+                return null;
+            }
+
+            if (vulkanAnswer != MessageBoxResult.Yes)
+            {
+                return null;
+            }
+        }
+
+        return useVulkan;
     }
 
     /// <summary>
@@ -2440,6 +2590,16 @@ public partial class SpeechToTextViewModel : ObservableObject
 
             if (!engine.IsEngineInstalled())
             {
+                if (engine is MlxWhisperMac)
+                {
+                    // pip-managed engine - Subtitle Edit cannot download it.
+                    await MessageBox.Show(
+                        Window!,
+                        $"{engine.Name} not found",
+                        "mlx-whisper not found - install it with: pip3 install mlx-whisper");
+                    return;
+                }
+
                 if (engine is ICrispAsrEngine && Configuration.IsRunningOnWindows)
                 {
                     var answer = await MessageBox.Show(
@@ -2533,22 +2693,38 @@ public partial class SpeechToTextViewModel : ObservableObject
                 }
                 else
                 {
-                    var answer = await MessageBox.Show(
-                        Window!,
-                        $"Download {engine.Name}?",
-                        $"Download and use {engine.Name}?",
-                        MessageBoxButtons.YesNoCancel,
-                        MessageBoxIcon.Question);
-
-                    if (answer != MessageBoxResult.Yes)
+                    var qwen3UseVulkan = false;
+                    if (engine is Qwen3AsrCppEngine && Qwen3AsrCppDownloadService.IsVulkanBuildAvailable())
                     {
-                        return;
+                        // Qwen3 ASR has a Vulkan (GPU) build on win64/linux-x64 — let the user choose.
+                        var pick = await PromptQwen3AsrGpuAsync(engine.Name);
+                        if (pick == null)
+                        {
+                            return;
+                        }
+
+                        qwen3UseVulkan = pick.Value;
+                    }
+                    else
+                    {
+                        var answer = await MessageBox.Show(
+                            Window!,
+                            $"Download {engine.Name}?",
+                            $"Download and use {engine.Name}?",
+                            MessageBoxButtons.YesNoCancel,
+                            MessageBoxIcon.Question);
+
+                        if (answer != MessageBoxResult.Yes)
+                        {
+                            return;
+                        }
                     }
 
                     var vm = await _windowService.ShowDialogAsync<DownloadSpeechToTextEngineWindow, DownloadSpeechToTextEngineViewModel>(
                         Window!, viewModel =>
                         {
                             viewModel.Engine = engine;
+                            viewModel.Qwen3AsrUseVulkan = qwen3UseVulkan;
                             viewModel.StartDownload();
                         });
 
@@ -3212,6 +3388,71 @@ public partial class SpeechToTextViewModel : ObservableObject
             return p;
         }
 
+        if (engine is MlxWhisperMac mlxWhisperMac)
+        {
+            // mlx-whisper is a library, not a CLI, so we run a bundled helper script via python3.
+            // It writes "<audio-basename>.srt" into the audio's folder, which GetResultFromSrt then
+            // picks up. MLX runs Whisper on the Apple GPU / Neural Engine.
+            var python = mlxWhisperMac.GetExecutable();
+            var scriptPath = mlxWhisperMac.GetTranscribeScript();
+            var outputDir = Path.GetDirectoryName(waveFileName) ?? string.Empty;
+
+            var mlxLanguage = language;
+            if (mlxLanguage.Equals("english", StringComparison.OrdinalIgnoreCase))
+            {
+                mlxLanguage = "en";
+            }
+
+            var languagePart = !string.IsNullOrWhiteSpace(mlxLanguage) &&
+                               !mlxLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                ? $" --language {mlxLanguage}"
+                : string.Empty;
+            var taskPart = translate ? " --task translate" : string.Empty;
+            var mlxExtraArgs = engine.CommandLineParameter;
+            var extraPart = string.IsNullOrWhiteSpace(mlxExtraArgs) ? string.Empty : " " + mlxExtraArgs.Trim();
+
+            var mlxParameters =
+                $"\"{scriptPath}\" --audio \"{waveFileName}\" --model {mlxWhisperMac.GetModelForCmdLine(model)} " +
+                $"--output-format srt --output-dir \"{outputDir}\"{languagePart}{taskPart}{extraPart}";
+
+            Se.WriteToolsLog($"{python} {mlxParameters}");
+
+            var mlxProcess = new Process
+            {
+                StartInfo = new ProcessStartInfo(python, mlxParameters)
+                {
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                }
+            };
+
+            mlxProcess.StartInfo.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
+            mlxProcess.StartInfo.EnvironmentVariables["PYTHONUTF8"] = "1";
+
+            if (dataReceivedHandler != null)
+            {
+                mlxProcess.StartInfo.StandardOutputEncoding = Encoding.UTF8;
+                mlxProcess.StartInfo.StandardErrorEncoding = Encoding.UTF8;
+                mlxProcess.StartInfo.RedirectStandardOutput = true;
+                mlxProcess.StartInfo.RedirectStandardError = true;
+                mlxProcess.OutputDataReceived += dataReceivedHandler;
+                mlxProcess.ErrorDataReceived += dataReceivedHandler;
+            }
+
+#pragma warning disable CA1416
+            mlxProcess.Start();
+#pragma warning restore CA1416
+
+            if (dataReceivedHandler != null)
+            {
+                mlxProcess.BeginOutputReadLine();
+                mlxProcess.BeginErrorReadLine();
+            }
+
+            return mlxProcess;
+        }
+
         var settings = Se.Settings.Tools.AudioToText;
         var args = engine.CommandLineParameter;
         var cppVulkanDevice = string.Empty;
@@ -3255,8 +3496,22 @@ public partial class SpeechToTextViewModel : ObservableObject
 
         var w = engine.GetExecutable();
         var m = engine.GetModelForCmdLine(model);
+
+        // Automatic language detection (#11848). whisper.cpp/Const-me accept the literal
+        // "auto" (their default is "en", so the flag is required). The faster-whisper based
+        // engines (Purfview, CTranslate2) and OpenAI reject "auto" but auto-detect when no
+        // --language is given, so the flag is omitted there.
+        var languageArg = $"--language {language} ";
+        if (language.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            languageArg = settings.WhisperChoice is WhisperChoice.Cpp or WhisperChoice.CppCuBlas
+                or WhisperChoice.CppVulkan or WhisperChoice.CppCuBlasLib or WhisperChoice.ConstMe
+                ? "--language auto "
+                : string.Empty;
+        }
+
         var parameters =
-            $"--language {language} --model \"{m}\" {outputSrt}{translateToEnglish}{args} \"{waveFileName}\"{postParams}";
+            $"{languageArg}--model \"{m}\" {outputSrt}{translateToEnglish}{args} \"{waveFileName}\"{postParams}";
 
         if (engine is WhisperEngineCTranslate2)
         {
@@ -3401,7 +3656,11 @@ public partial class SpeechToTextViewModel : ObservableObject
             ? OpenAiCompatibleSttAudioFormat
             : "wav";
         var extension = OpenAiSttService.GetFileExtensionForFormat(sttAudioFormat);
-        _audioFileName = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "." + extension);
+        // Place the extracted audio in a dedicated per-run subfolder. Engines like
+        // Purfview Faster-Whisper-XXL write their output (.srt/.ass) and intermediate
+        // (.tmp) files next to the input, so keeping the input isolated lets us delete
+        // the whole folder afterwards and leave no leftovers in the temp directory (#11837).
+        _audioFileName = Path.Combine(GetSttTempFolder(), Guid.NewGuid() + "." + extension);
         _filesToDelete.Add(_audioFileName);
         _audioExtractProcess = GetFfmpegProcess(videoFileName, audioTrackNumber, _audioFileName, sttAudioFormat);
         if (_audioExtractProcess == null)
@@ -3699,7 +3958,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         UpdateBackendSelectionUi();
 
         Languages.Clear();
-        foreach (var l in engine.Languages)
+        foreach (var l in GetEngineLanguages(engine))
         {
             Languages.Add(l);
         }
@@ -3786,6 +4045,14 @@ public partial class SpeechToTextViewModel : ObservableObject
         // It opens a dialog with the installed backend, status and Re-download — which is
         // also the answer to issue #11022 (switch backend after the initial install).
         IsEngineSettingsButtonVisible = canDownload && isInstalled && IsSettingsCapable(engine);
+
+        if (engine is MlxWhisperMac && !isInstalled)
+        {
+            // pip-managed engine - Subtitle Edit cannot download it, so show install help instead.
+            EngineDownloadHint = "mlx-whisper not found - install it with: pip3 install mlx-whisper";
+            IsEngineDownloadButtonVisible = false;
+            return;
+        }
 
         if (!canDownload || isInstalled)
         {

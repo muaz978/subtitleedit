@@ -61,7 +61,11 @@ public class SpellCheckWindow : Window
         var panelSuggestions = MakeSuggestions(vm);
 
         var buttonDone = UiUtil.MakeButtonDone(vm.OkCommand).WithLeftAlignment();
-        var panelButtonsOk = UiUtil.MakeButtonBar(buttonDone);
+        // Icon button left of "Done" to attach/show the source image(s) — a context menu
+        // alone isn't reliable on macOS (panels without a background aren't hit-tested).
+        var buttonLoadSourceImage = UiUtil.MakeButton(vm.LoadSourceImageCommand, IconNames.Image);
+        ToolTip.SetTip(buttonLoadSourceImage, Se.Language.SpellCheck.LoadSourceImage);
+        var panelButtonsOk = UiUtil.MakeButtonBar(buttonLoadSourceImage, buttonDone);
 
         var grid = new Grid
         {
@@ -71,6 +75,7 @@ public class SpellCheckWindow : Window
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },  // source image (#11719)
             },
             ColumnDefinitions =
             {
@@ -93,6 +98,31 @@ public class SpellCheckWindow : Window
 
         grid.Add(labelDictionary, 0, 1);
         grid.Add(panelSuggestions, 1, 1, 2);
+
+        // Source image (e.g. Blu-ray .sup) of the current line, shown when the user has
+        // attached it (#11719) via the image button (left of Done) or by right-clicking the image.
+        var sourceImage = new Image
+        {
+            Stretch = Stretch.Uniform,
+            MaxHeight = 140,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Margin = new Thickness(0, 8, 0, 0),
+            [!Image.SourceProperty] = new Binding(nameof(SpellCheckViewModel.SourceImage)),
+        };
+        var sourceImageBorder = UiUtil.MakeBorderForControl(sourceImage);
+        sourceImageBorder.ContextMenu = new ContextMenu
+        {
+            ItemsSource = new[]
+            {
+                new MenuItem
+                {
+                    Header = Se.Language.SpellCheck.LoadSourceImage,
+                    Command = vm.LoadSourceImageCommand,
+                },
+            },
+        };
+        sourceImageBorder.Bind(Visual.IsVisibleProperty, new Binding(nameof(SpellCheckViewModel.HasSourceImage)));
+        grid.Add(sourceImageBorder, 4, 0, 2);
 
         Content = grid;
 
@@ -181,6 +211,17 @@ public class SpellCheckWindow : Window
             Margin = new Thickness(0, 5, 0, 0),
         };
 
+        var buttonUndo = new Button
+        {
+            [!Button.ContentProperty] = new Binding(nameof(SpellCheckViewModel.UndoText)) { Mode = BindingMode.OneWay },
+            [!Button.CommandProperty] = new Binding(nameof(SpellCheckViewModel.UndoCommand)) { Mode = BindingMode.OneWay },
+            [!Visual.IsVisibleProperty] = new Binding(nameof(SpellCheckViewModel.IsUndoVisible)) { Mode = BindingMode.OneWay },
+            Width = double.NaN,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 5, 0, 0),
+        };
+
         var buttonGoogleSearch = new Button
         {
             Content = Se.Language.General.GoogleIt,
@@ -207,6 +248,7 @@ public class SpellCheckWindow : Window
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // extra row for the Undo button so "Google it" (row 6) and Undo (row 7) don't overlap
             },
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Top,
@@ -223,7 +265,8 @@ public class SpellCheckWindow : Window
         grid.Add(buttonSkipAll, 3, 1);
         grid.Add(buttonAddToNames, 4, 0, 1, 2);
         grid.Add(buttonAddToDictionary, 5, 0, 1, 2);
-        grid.Add(buttonGoogleSearch, 7, 0, 1, 2);
+        grid.Add(buttonGoogleSearch, 6, 0, 1, 2);
+        grid.Add(buttonUndo, 7, 0, 1, 2);
 
         return grid;
     }

@@ -1,6 +1,5 @@
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -27,13 +26,11 @@ public partial class GetDictionariesViewModel : ObservableObject
 {
     [ObservableProperty] private ObservableCollection<GetSpellCheckDictionaryDisplay> _dictionaries;
     [ObservableProperty] private GetSpellCheckDictionaryDisplay? selectedDictionary;
-    [ObservableProperty] private string _description;
     [ObservableProperty] private double _progress;
     [ObservableProperty] private string _statusText;
     [ObservableProperty] private bool _isDownloadEnabled;
     [ObservableProperty] private bool _isProgressVisible;
     [ObservableProperty] private double _progressOpacity;
-    [ObservableProperty] private IBrush _selectedStatusBrush;
     [ObservableProperty] private string _selectedStatusText;
     [ObservableProperty] private string _downloadButtonText;
     [ObservableProperty] private string _dictionariesFolder;
@@ -51,9 +48,6 @@ public partial class GetDictionariesViewModel : ObservableObject
     private readonly ISpellCheckDictionaryDownloadService _spellCheckDictionaryDownloadService;
     private readonly IZipUnpacker _zipUnpacker;
     private readonly IFolderHelper _folderHelper;
-
-    private static readonly IBrush InstalledBrush = new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50));
-    private static readonly IBrush NotInstalledBrush = new SolidColorBrush(Color.FromRgb(0x9E, 0x9E, 0x9E));
 
     /// <summary>
     /// Legacy archive entries do not expose a .dic file name in their download URL, so the
@@ -85,7 +79,6 @@ public partial class GetDictionariesViewModel : ObservableObject
 
         Dictionaries = new ObservableCollection<GetSpellCheckDictionaryDisplay>();
         SelectedDictionary = null;
-        Description = string.Empty;
         IsDownloadEnabled = true;
         IsProgressVisible = false;
         StatusText = string.Empty;
@@ -94,7 +87,6 @@ public partial class GetDictionariesViewModel : ObservableObject
         _cancellationTokenSource = new CancellationTokenSource();
         _progressOpacity = 0;
 
-        SelectedStatusBrush = NotInstalledBrush;
         SelectedStatusText = string.Empty;
         DownloadButtonText = Se.Language.General.Download;
         DictionariesFolder = Se.DictionariesFolder;
@@ -166,10 +158,7 @@ public partial class GetDictionariesViewModel : ObservableObject
     private void Close()
     {
         _timer.Stop();
-        Dispatcher.UIThread.Post(() =>
-        {
-            Window?.Close();
-        });
+        Dispatcher.UIThread.Post(() => { Window?.Close(); });
     }
 
     /// <summary>
@@ -311,21 +300,11 @@ public partial class GetDictionariesViewModel : ObservableObject
             }
         }
 
-        if (selected != null)
-        {
-            SelectedDictionary = selected;
-            Description = selected.Description;
-        }
-        else
-        {
-            SelectedDictionary = Dictionaries.FirstOrDefault();
-            Description = string.Empty;
-        }
+        SelectedDictionary = selected ?? Dictionaries.FirstOrDefault();
     }
 
     partial void OnSelectedDictionaryChanged(GetSpellCheckDictionaryDisplay? value)
     {
-        Description = value?.Description ?? string.Empty;
         UpdateSelectedStatus();
     }
 
@@ -347,7 +326,6 @@ public partial class GetDictionariesViewModel : ObservableObject
         foreach (var dictionary in Dictionaries)
         {
             dictionary.IsInstalled = IsEntryInstalled(dictionary, installedDicFiles);
-            dictionary.StatusBrush = dictionary.IsInstalled ? InstalledBrush : NotInstalledBrush;
         }
 
         UpdateSelectedStatus();
@@ -358,13 +336,11 @@ public partial class GetDictionariesViewModel : ObservableObject
         var selected = SelectedDictionary;
         if (selected == null)
         {
-            SelectedStatusBrush = NotInstalledBrush;
             SelectedStatusText = string.Empty;
             DownloadButtonText = Se.Language.General.Download;
             return;
         }
-
-        SelectedStatusBrush = selected.IsInstalled ? InstalledBrush : NotInstalledBrush;
+        
         SelectedStatusText = selected.IsInstalled ? Se.Language.General.Installed : Se.Language.General.NotInstalled;
         DownloadButtonText = selected.IsInstalled ? Se.Language.General.Redownload : Se.Language.General.Download;
     }

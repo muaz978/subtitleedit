@@ -38,6 +38,7 @@ public class SeAudioToText
     public string CommandLineParameterCppVulkan { get; set; } = string.Empty;
     public string CommandLineParameterConstMe { get; set; } = string.Empty;
     public string CommandLineParameterCTranslate2 { get; set; } = "--vad_filter True";
+    public string CommandLineParameterMlxWhisperMac { get; set; } = string.Empty;
     public string CommandLineParameterPurfviewFasterWhisperXxl { get; set; } = "--standard";
     public string CommandLineParameterOpenAi { get; set; } = string.Empty;
     public string CommandLineParameterQwen3AsrCpp { get; set; } = string.Empty;
@@ -58,6 +59,7 @@ public class SeAudioToText
     public string CommandLineParameterCrispAsrKyutai { get; set; } = "--max-len 50 --split-on-punct";
     public string CommandLineParameterCrispAsrMega { get; set; } = "--max-len 50 --split-on-punct";
     public string CommandLineParameterCrispAsrSenseVoice { get; set; } = "--max-len 50 --split-on-punct";
+    public string CommandLineParameterCrispAsrArk { get; set; } = "--max-len 50 --split-on-punct";
     public string CrispAsrForcedAligner { get; set; } = "built-in";
 
     public string WhisperExtraSettingsHistory { get; set; } = string.Empty;

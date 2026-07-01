@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls.Primitives;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
@@ -11,12 +12,13 @@ using AvaloniaEdit;
 using AvaloniaEdit.Editing;
 using Nikse.SubtitleEdit.Logic.Config;
 using System;
+using System.Linq;
 
 namespace Nikse.SubtitleEdit.Logic;
 
 public static class UiTheme
 {
-    private static IStyle? _lighterDarkStyle;
+    private static IStyle? _themeOverrideStyle;
     private static IStyle? _layoutScaleMenuStyle;
     private static ResourceDictionary? _resourceOverrides;
     private static object? _themeChangeSubscription;
@@ -73,6 +75,15 @@ public static class UiTheme
             if (ThemeName == ThemeNameDark)
             {
                 ApplyLighterDark();
+            }
+            else
+            {
+                // When the OS switches dark→light, RequestedThemeVariant stays at Default so
+                // Avalonia's full theme re-evaluation is not triggered. AvaloniaEdit's TextArea
+                // caret renderer then falls into a stale state, retaining the bright brush from
+                // the now-removed dark style. Push an explicit black CaretBrush via a style so
+                // a clean property-changed notification fires and the caret renders correctly.
+                ApplyLightThemeCaretFix();
             }
 
             // Subscribe to theme changes
@@ -251,6 +262,75 @@ public static class UiTheme
         Application.Current.Styles.Add(styles);
     }
 
+    private static Styles? _scrollBarStyle;
+    private static bool _scrollBarAllowAutoHide;
+    private static bool _dataGridScrollBarHandlerRegistered;
+
+    /// <summary>
+    /// Applies scrollbar visibility styles based on the OS preference.
+    /// On macOS, reads "Show scroll bars" system setting. When set to "Always",
+    /// forces always-expanded scrollbars. ListBox/ScrollViewer scrollbars respond to
+    /// AllowAutoHide=false via the style system. DataGrid sets AllowAutoHide=true on
+    /// its scrollbars at LocalValue priority in OnApplyTemplate, so a class handler on
+    /// Control.LoadedEvent overrides it at LocalValue priority after the fact.
+    /// Designed to be called once at startup. The LoadedEvent handler reads
+    /// _scrollBarAllowAutoHide dynamically, so a second call would update the field
+    /// and affect future DataGrid loads — but already-open DataGrids would not update.
+    /// </summary>
+    public static void ApplyScrollBarStyle()
+    {
+        if (Application.Current == null)
+            return;
+
+        if (_scrollBarStyle != null)
+        {
+            Application.Current.Styles.Remove(_scrollBarStyle);
+            _scrollBarStyle = null;
+        }
+
+        var allowAutoHide = false;
+        if (OperatingSystem.IsMacOS())
+        {
+            var pref = MacHelper.GetShowScrollBarsPreference();
+            allowAutoHide = pref != "Always";
+        }
+
+        _scrollBarAllowAutoHide = allowAutoHide;
+
+        _scrollBarStyle = new Styles
+        {
+            new Style(x => x.OfType<ScrollViewer>())
+            {
+                Setters = { new Setter(ScrollViewer.AllowAutoHideProperty, allowAutoHide) }
+            },
+            new Style(x => x.OfType<Avalonia.Controls.Primitives.ScrollBar>())
+            {
+                Setters = { new Setter(Avalonia.Controls.Primitives.ScrollBar.AllowAutoHideProperty, allowAutoHide) }
+            },
+        };
+
+        if (!_dataGridScrollBarHandlerRegistered)
+        {
+            _dataGridScrollBarHandlerRegistered = true;
+            // DataGrid.OnApplyTemplate sets AllowAutoHide=true on its internal scrollbars at
+            // LocalValue priority (0), which no style can override. By hooking Loaded (which
+            // fires after OnApplyTemplate), we set AllowAutoHide at LocalValue priority too —
+            // overriding the DataGrid's value. This causes UpdateIsExpandedState() to run and
+            // set IsExpanded accordingly, which makes the Fluent [IsExpanded=True] style apply
+            // the full expanded appearance (correct thumb size, color, visible arrows).
+            Control.LoadedEvent.AddClassHandler<DataGrid>((dg, _) =>
+            {
+                foreach (var sb in dg.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ScrollBar>())
+                {
+                    sb.AllowAutoHide = _scrollBarAllowAutoHide;
+                }
+            });
+        }
+
+        Application.Current.Styles.Add(_scrollBarStyle);
+    }
+
+
     /// <summary>
     /// Walk all open windows, find Menu, ContextMenu, and MenuFlyout instances,
     /// and directly set FontSize/MinHeight on their items. Also register Opened
@@ -396,7 +476,7 @@ public static class UiTheme
         };
         Application.Current.Resources.MergedDictionaries.Add(_resourceOverrides);
 
-        _lighterDarkStyle = new Styles
+        _themeOverrideStyle = new Styles
         {
             // TextBox
             new Style(x => x.OfType<TextBox>())
@@ -601,7 +681,7 @@ public static class UiTheme
             },
         };
 
-        Application.Current.Styles.Add(_lighterDarkStyle);
+        Application.Current.Styles.Add(_themeOverrideStyle);
     }
 
     private static void RemoveLighterDark()
@@ -612,11 +692,26 @@ public static class UiTheme
             _resourceOverrides = null;
         }
 
-        if (_lighterDarkStyle != null)
+        if (_themeOverrideStyle != null)
         {
-            Application.Current!.Styles.Remove(_lighterDarkStyle);
-            _lighterDarkStyle = null;
+            Application.Current!.Styles.Remove(_themeOverrideStyle);
+            _themeOverrideStyle = null;
         }
+    }
+
+    private static void ApplyLightThemeCaretFix()
+    {
+        _themeOverrideStyle = new Styles
+        {
+            new Style(x => x.OfType<TextArea>())
+            {
+                Setters =
+                {
+                    new Setter(TextArea.CaretBrushProperty, Brushes.Black),
+                }
+            },
+        };
+        Application.Current!.Styles.Add(_themeOverrideStyle);
     }
 
     private static void ApplyWindowsClassicGray()
@@ -633,7 +728,7 @@ public static class UiTheme
         var headerColor = Color.FromRgb(192, 192, 192); // Classic silver header
         var inputColor = Color.FromRgb(255, 255, 250); // Slightly off-white (ivory) for input controls
 
-        _lighterDarkStyle = new Styles
+        _themeOverrideStyle = new Styles
         {
             // Window background
             new Style(x => x.OfType<Window>())
@@ -733,7 +828,7 @@ public static class UiTheme
             },
         };
 
-        Application.Current.Styles.Add(_lighterDarkStyle);
+        Application.Current.Styles.Add(_themeOverrideStyle);
     }
 
     private static void ApplyPastel()
@@ -751,7 +846,7 @@ public static class UiTheme
         var lightPurple = Color.FromRgb(245, 240, 255); // Lavender
         var borderColor = Color.FromRgb(200, 180, 200); // Soft lavender border
 
-        _lighterDarkStyle = new Styles
+        _themeOverrideStyle = new Styles
         {
             // Window background with soft lavender
             new Style(x => x.OfType<Window>())
@@ -847,7 +942,7 @@ public static class UiTheme
             },
         };
 
-        Application.Current.Styles.Add(_lighterDarkStyle);
+        Application.Current.Styles.Add(_themeOverrideStyle);
     }
 
     private static Color GetDarkThemeBackgroundColor()

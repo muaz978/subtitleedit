@@ -1,7 +1,6 @@
 ﻿using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Features.Ocr.FixEngine;
 using Nikse.SubtitleEdit.Features.SpellCheck;
-using Nikse.SubtitleEdit.Logic.Config;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -95,6 +94,51 @@ namespace Nikse.SubtitleEdit.Core.Dictionaries
                 }
             }
 
+            foreach (var kp in LoadReplaceList(userDoc, "RemovedPartialWords"))
+            {
+                if (_partialWordReplaceList.ContainsKey(kp.Key))
+                {
+                    _partialWordReplaceList.Remove(kp.Key);
+                }
+            }
+            foreach (var kp in LoadReplaceList(userDoc, "PartialWords"))
+            {
+                if (!_partialWordReplaceList.ContainsKey(kp.Key))
+                {
+                    _partialWordReplaceList.Add(kp.Key, kp.Value);
+                }
+            }
+
+            foreach (var kp in LoadReplaceList(userDoc, "RemovedPartialWordsAlways"))
+            {
+                if (_partialWordAlwaysReplaceList.ContainsKey(kp.Key))
+                {
+                    _partialWordAlwaysReplaceList.Remove(kp.Key);
+                }
+            }
+            foreach (var kp in LoadReplaceList(userDoc, "PartialWordsAlways"))
+            {
+                if (!_partialWordAlwaysReplaceList.ContainsKey(kp.Key))
+                {
+                    _partialWordAlwaysReplaceList.Add(kp.Key, kp.Value);
+                }
+            }
+
+            foreach (var kp in LoadReplaceList(userDoc, "RemovedPartialLinesAlways"))
+            {
+                if (_partialLineAlwaysReplaceList.ContainsKey(kp.Key))
+                {
+                    _partialLineAlwaysReplaceList.Remove(kp.Key);
+                }
+            }
+            foreach (var kp in LoadReplaceList(userDoc, "PartialLinesAlways"))
+            {
+                if (!_partialLineAlwaysReplaceList.ContainsKey(kp.Key))
+                {
+                    _partialLineAlwaysReplaceList.Add(kp.Key, kp.Value);
+                }
+            }
+
             foreach (var kp in LoadReplaceList(userDoc, "RemovedBeginLines"))
             {
                 if (_beginLineReplaceList.ContainsKey(kp.Key))
@@ -158,7 +202,7 @@ namespace Nikse.SubtitleEdit.Core.Dictionaries
 
         public static OcrFixReplaceList2 FromLanguageId(string languageId)
         {
-            return new OcrFixReplaceList2(Path.Combine(Se.DictionariesFolder, languageId + ReplaceListFileNamePostFix));
+            return new OcrFixReplaceList2(Path.Combine(SpellCheckConfig.DictionariesFolder(), languageId + ReplaceListFileNamePostFix));
         }
 
         private static Dictionary<string, string> LoadReplaceList(XmlDocument doc, string name)
@@ -262,7 +306,7 @@ namespace Nikse.SubtitleEdit.Core.Dictionaries
             return false;
         }
 
-        public string FixOcrErrorViaLineReplaceList(string input, Subtitle subtitle, int index, ISpellCheckManager spellCheckManager, List<string> wordsToIgnore, bool spelledOK)
+        public string FixOcrErrorViaLineReplaceList(string input, Subtitle subtitle, int index, ISpellChecker spellCheckManager, List<string> wordsToIgnore, bool spelledOK)
         {
             // Whole fromLine
             foreach (var from in _wholeLineReplaceList.Keys)
@@ -453,7 +497,7 @@ namespace Nikse.SubtitleEdit.Core.Dictionaries
                 var indexes = new List<int>();
                 for (var i = 0; i <= word.Length - letter.Length; i++)
                 {
-                    if (word.Substring(i).StartsWith(letter, StringComparison.Ordinal))
+                    if (word.AsSpan(i).StartsWith(letter, StringComparison.Ordinal))
                     {
                         if (i == word.Length - letter.Length && !_partialWordReplaceList[letter].Contains(' '))
                         {
@@ -767,8 +811,8 @@ namespace Nikse.SubtitleEdit.Core.Dictionaries
                 {
                     if (word[match.Index + 1] == 'I' || word[match.Index + 1] == '1')
                     {
-                        var doFix = word[match.Index + 1] != 'I' && match.Index >= 1 && word.Substring(match.Index - 1).StartsWith("Mc", StringComparison.Ordinal);
-                        if (word[match.Index + 1] == 'I' && match.Index >= 2 && word.Substring(match.Index - 2).StartsWith("Mac", StringComparison.Ordinal))
+                        var doFix = word[match.Index + 1] != 'I' && match.Index >= 1 && word.AsSpan(match.Index - 1).StartsWith("Mc", StringComparison.Ordinal);
+                        if (word[match.Index + 1] == 'I' && match.Index >= 2 && word.AsSpan(match.Index - 2).StartsWith("Mac", StringComparison.Ordinal))
                         {
                             doFix = false;
                         }

@@ -44,6 +44,7 @@ public class BinaryEditWindow : Window
 
         // Top menu bar
         var menu = MakeTopMenu(vm);
+        vm.Menu = menu;
         if (OperatingSystem.IsMacOS())
         {
             menu.IsVisible = false;
@@ -135,6 +136,7 @@ public class BinaryEditWindow : Window
             vm.Loaded();
         };
         Closing += vm.OnClosing;
+        Deactivated += vm.OnWindowDeactivated;
     }
 
     private static Menu MakeTopMenu(BinaryEditViewModel vm)
@@ -185,6 +187,11 @@ public class BinaryEditWindow : Window
                         },
                         new MenuItem
                         {
+                            Header = Se.Language.General.ImagesWithHtmlIndex,
+                            Command = vm.ExportHtmlIndexCommand,
+                        },
+                        new MenuItem
+                        {
                             Header = Se.Language.General.ImagesWithTimeCode,
                             Command = vm.ExportImagesWithTimeCodeCommand,
                         },
@@ -218,9 +225,57 @@ public class BinaryEditWindow : Window
         // Tools menu
         menu.Items.Add(new MenuItem
         {
-            Header = l.ToolsSelectedLines,
+            Header = l.Tools,
             Items =
             {
+                new MenuItem
+                {
+                    Header = Se.Language.General.AlignmentDotDotDot,
+                    Command = vm.AlignmentCommand,
+                },
+                new MenuItem
+                {
+                    Header = Se.Language.Tools.ImageBasedEdit.CenterHorizontally,
+                    Command = vm.CenterHorizontallyCommand,
+                },
+                new MenuItem
+                {
+                    Header = Se.Language.Tools.ImageBasedEdit.TopAlignLines,
+                    Command = vm.TopAlignCommand,
+                },
+                new MenuItem
+                {
+                    Header = Se.Language.Tools.ImageBasedEdit.BottomAlignLines,
+                    Command = vm.BottomAlignCommand,
+                },
+                new Separator(),
+                new MenuItem
+                {
+                    Header = Se.Language.Tools.ImageBasedEdit.ResizeImagesDotDotDot,
+                    Command = vm.ResizeImagesCommand,
+                },
+                new MenuItem
+                {
+                    Header = Se.Language.Tools.ImageBasedEdit.CropImages,
+                    Command = vm.CropCommand,
+                },
+                new Separator(),
+                new MenuItem
+                {
+                    Header = Se.Language.Tools.ImageBasedEdit.AdjustBrightnessDotDotDot,
+                    Command = vm.AdjustBrightnessCommand,
+                },
+                new MenuItem
+                {
+                    Header = Se.Language.Tools.ImageBasedEdit.AdjustAlphaDotDotDot,
+                    Command = vm.AdjustAlphaCommand,
+                },
+                new MenuItem
+                {
+                    Header = Se.Language.Tools.ImageBasedEdit.AdjustColorDotDotDot,
+                    Command = vm.AdjustColorCommand,
+                },
+                new Separator(),
                 new MenuItem
                 {
                     Header = l.AdjustDurations,
@@ -231,35 +286,16 @@ public class BinaryEditWindow : Window
                     Header = l.ApplyDurationLimits,
                     Command = vm.ApplyDurationLimitsCommand,
                 },
+                new Separator(),
                 new MenuItem
                 {
-                    Header = Se.Language.General.AlignmentDotDotDot,
-                    Command = vm.AlignmentCommand,
+                    Header = Se.Language.Tools.ImageBasedEdit.SortByStartTime,
+                    Command = vm.SortByStartTimeCommand,
                 },
                 new MenuItem
                 {
-                    Header = Se.Language.Tools.ImageBasedEdit.ResizeImagesDotDotDot,
-                    Command = vm.ResizeImagesCommand,
-                },
-                new MenuItem
-                {
-                    Header = Se.Language.Tools.ImageBasedEdit.AdjustBrightnessDotDotDot,
-                    Command = vm.AdjustBrightnessCommand,
-                },
-                new MenuItem
-                {
-                    Header =  Se.Language.Tools.ImageBasedEdit.AdjustAlphaDotDotDot,
-                    Command = vm.AdjustAlphaCommand,
-                },
-                new MenuItem
-                {
-                    Header =  Se.Language.Tools.ImageBasedEdit.CenterHorizontally,
-                    Command = vm.CenterHorizontallyCommand,
-                },
-                new MenuItem
-                {
-                    Header =  Se.Language.Tools.ImageBasedEdit.CropImages,
-                    Command = vm.CropCommand,
+                    Header = Se.Language.Tools.ImageBasedEdit.AppendSubtitleDotDotDot,
+                    Command = vm.AppendSubtitleCommand,
                 },
             },
         });
@@ -388,19 +424,6 @@ public class BinaryEditWindow : Window
         UiUtil.AttachMacContextFlyoutHandler(dataGrid);
         flyout.Opening += (_, _) => vm.OnContextMenuOpening();
 
-        var menuItemDelete = new MenuItem
-        {
-            Header = Se.Language.General.Delete,
-            DataContext = vm,
-            Command = vm.DeleteSectedLinesCommand,
-        };
-        flyout.Items.Add(menuItemDelete);
-        menuItemDelete.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsDeleteVisible)));
-
-        var separatorInsert = new Separator() { DataContext = vm };
-        flyout.Items.Add(separatorInsert);
-        separatorInsert.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsInsertBeforeVisible)));
-
         var menuItemInsertBefore = new MenuItem
         {
             Header = Se.Language.General.InsertBefore,
@@ -418,6 +441,50 @@ public class BinaryEditWindow : Window
         };
         flyout.Items.Add(menuItemInsertAfter);
         menuItemInsertAfter.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsInsertAfterVisible)));
+
+        var separatorAlignment = new Separator() { DataContext = vm };
+        flyout.Items.Add(separatorAlignment);
+        separatorAlignment.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemAlign = new MenuItem
+        {
+            Header = Se.Language.General.AlignmentDotDotDot,
+            DataContext = vm,
+            Command = vm.AlignmentSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemAlign);
+        menuItemAlign.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemCenterH = new MenuItem
+        {
+            Header = Se.Language.Tools.ImageBasedEdit.CenterHorizontally,
+            DataContext = vm,
+            Command = vm.CenterHorizontallySelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemCenterH);
+        menuItemCenterH.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemTopAlign = new MenuItem
+        {
+            Header = Se.Language.Tools.ImageBasedEdit.TopAlignLines,
+            DataContext = vm,
+            Command = vm.TopAlignSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemTopAlign);
+        menuItemTopAlign.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemBottomAlign = new MenuItem
+        {
+            Header = Se.Language.Tools.ImageBasedEdit.BottomAlignLines,
+            DataContext = vm,
+            Command = vm.BottomAlignSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemBottomAlign);
+        menuItemBottomAlign.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var separatorForced = new Separator() { DataContext = vm };
+        flyout.Items.Add(separatorForced);
+        separatorForced.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
 
         var menuItemToggleForced = new MenuItem
         {
@@ -444,18 +511,100 @@ public class BinaryEditWindow : Window
         };
         flyout.Items.Add(menuItemSelectNonForcedLines);
 
-        var separatorInsertSubtitle = new Separator() { DataContext = vm };
-        flyout.Items.Add(separatorInsertSubtitle);
-        separatorInsertSubtitle.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsInsertSubtitleVisible)));
+        var separatorVisualOps = new Separator() { DataContext = vm };
+        flyout.Items.Add(separatorVisualOps);
+        separatorVisualOps.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
 
-        var menuItemInsertSubtitle = new MenuItem
+        var menuItemResizeImagesSelectedLines = new MenuItem
         {
-            Header = Se.Language.General.InsertSubtitleAfterCurrentLine,
+            Header = Se.Language.Tools.ImageBasedEdit.ResizeImagesDotDotDot,
             DataContext = vm,
-            Command = vm.InsertSubtitleCommand,
+            Command = vm.ResizeImagesSelectedLinesCommand,
         };
-        flyout.Items.Add(menuItemInsertSubtitle);
-        menuItemInsertSubtitle.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsInsertSubtitleVisible)));
+        flyout.Items.Add(menuItemResizeImagesSelectedLines);
+        menuItemResizeImagesSelectedLines.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemCropSelectedLines = new MenuItem
+        {
+            Header = Se.Language.Tools.ImageBasedEdit.CropImages,
+            DataContext = vm,
+            Command = vm.CropSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemCropSelectedLines);
+        menuItemCropSelectedLines.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        flyout.Items.Add(new Separator());
+
+        var menuItemAdjustBrightnessSelectedLines = new MenuItem
+        {
+            Header = Se.Language.Tools.ImageBasedEdit.AdjustBrightnessDotDotDot,
+            DataContext = vm,
+            Command = vm.AdjustBrightnessSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemAdjustBrightnessSelectedLines);
+        menuItemAdjustBrightnessSelectedLines.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemAdjustAlphaSelectedLines = new MenuItem
+        {
+            Header = Se.Language.Tools.ImageBasedEdit.AdjustAlphaDotDotDot,
+            DataContext = vm,
+            Command = vm.AdjustAlphaSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemAdjustAlphaSelectedLines);
+        menuItemAdjustAlphaSelectedLines.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemAdjustColorSelectedLines = new MenuItem
+        {
+            Header = Se.Language.Tools.ImageBasedEdit.AdjustColorDotDotDot,
+            DataContext = vm,
+            Command = vm.AdjustColorSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemAdjustColorSelectedLines);
+        menuItemAdjustColorSelectedLines.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var separatorDurations = new Separator() { DataContext = vm };
+        flyout.Items.Add(separatorDurations);
+        separatorDurations.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemAdjustDurations = new MenuItem
+        {
+            Header = Se.Language.Main.Menu.AdjustDurations,
+            DataContext = vm,
+            Command = vm.AdjustDurationsSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemAdjustDurations);
+        menuItemAdjustDurations.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemApplyDurationLimits = new MenuItem
+        {
+            Header = Se.Language.Main.Menu.ApplyDurationLimits,
+            DataContext = vm,
+            Command = vm.ApplyDurationLimitsSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemApplyDurationLimits);
+        menuItemApplyDurationLimits.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemAdjustAllTimesSelectedLines = new MenuItem
+        {
+            Header = Se.Language.Sync.ShowEarlierLaterDotDotDot,
+            DataContext = vm,
+            Command = vm.AdjustAllTimesSelectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemAdjustAllTimesSelectedLines);
+        menuItemAdjustAllTimesSelectedLines.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var separatorDelete = new Separator() { DataContext = vm };
+        flyout.Items.Add(separatorDelete);
+        separatorDelete.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
+
+        var menuItemDelete = new MenuItem
+        {
+            Header = Se.Language.General.Delete,
+            DataContext = vm,
+            Command = vm.DeleteSectedLinesCommand,
+        };
+        flyout.Items.Add(menuItemDelete);
+        menuItemDelete.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.HasSelection)));
 
         vm.SubtitleGrid = dataGrid;
         dataGrid.SelectionChanged += vm.SubtitleGridSelectionChanged;
@@ -491,7 +640,7 @@ public class BinaryEditWindow : Window
         dataGrid.Columns.Add(new DataGridTextColumn
         {
             Header = Se.Language.General.NumberSymbol,
-            Width = new DataGridLength(50),
+            Width = new DataGridLength(1, DataGridLengthUnitType.Auto),
             MinWidth = 40,
             IsReadOnly = true,
             Binding = new Binding(nameof(BinarySubtitleItem.Number)),
@@ -501,8 +650,8 @@ public class BinaryEditWindow : Window
         dataGrid.Columns.Add(new DataGridTextColumn
         {
             Header = Se.Language.General.Show,
-            Width = new DataGridLength(105),
-            MinWidth = 90,
+            Width = new DataGridLength(1, DataGridLengthUnitType.Auto),
+            MinWidth = 100,
             IsReadOnly = true,
             Binding = new Binding(nameof(BinarySubtitleItem.StartTime)) { Converter = new TimeSpanToDisplayFullConverter() },
             CellTheme = UiUtil.DataGridNoBorderNoPaddingCellTheme,
@@ -511,8 +660,8 @@ public class BinaryEditWindow : Window
         dataGrid.Columns.Add(new DataGridTextColumn
         {
             Header = Se.Language.General.Duration,
-            Width = new DataGridLength(90),
-            MinWidth = 70,
+            Width = new DataGridLength(1, DataGridLengthUnitType.Auto),
+            MinWidth = 60,
             IsReadOnly = true,
             Binding = new Binding(nameof(BinarySubtitleItem.Duration)) { Converter = new TimeSpanToDisplayShortConverter() },
             CellTheme = UiUtil.DataGridNoBorderNoPaddingCellTheme,
@@ -713,12 +862,8 @@ public class BinaryEditWindow : Window
             Stretch = Stretch.Fill,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
+            IsVisible = false,
             Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-            [!Visual.IsVisibleProperty] = new Binding($"{nameof(vm.DisplayedSubtitle)}.{nameof(BinarySubtitleItem.Bitmap)}")
-            {
-                Converter = new NotNullConverter()
-            },
-            [!Image.SourceProperty] = new Binding($"{nameof(vm.DisplayedSubtitle)}.{nameof(BinarySubtitleItem.Bitmap)}"),
         };
 
         videoGrid.Children.Add(overlayImage);

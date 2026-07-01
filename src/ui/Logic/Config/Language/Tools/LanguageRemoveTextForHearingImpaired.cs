@@ -15,9 +15,11 @@ public class LanguageRemoveTextForHearingImpaired
     public string OnlyIfTextIsUppercase { get; set; }
     public string OnlyOnSeparateLine { get; set; }
     public string IfLineIsUppercase { get; set; }
+    public string KeepUppercaseWords { get; set; }
     public string IfLineContains { get; set; }
     public string IfLineOnlyContainsMusicSymbols { get; set; }
     public string RemoveInterjections { get; set; }
+    public string LinesFoundX { get; set; }
 
     public LanguageRemoveTextForHearingImpaired()
     {
@@ -34,8 +36,10 @@ public class LanguageRemoveTextForHearingImpaired
         OnlyIfTextIsUppercase = "Only if text is uppercase";
         OnlyOnSeparateLine = "Only on separate line";
         IfLineIsUppercase = "If line is uppercase";
+        KeepUppercaseWords = "Keep these words (comma separated)";
         IfLineContains = "If line contains";
         IfLineOnlyContainsMusicSymbols = "If line only contains music symbols";
         RemoveInterjections = "Remove interjections";
+        LinesFoundX = "Lines found: {0}";
     }
 }

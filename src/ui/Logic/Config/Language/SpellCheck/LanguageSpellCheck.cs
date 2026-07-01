@@ -17,6 +17,7 @@ public class LanguageSpellCheck
     public string XOfYNamesImported { get; set; }
     public string NoDictionariesFound { get; set; }
     public string WordNotFound { get; set; }
+    public string LoadSourceImage { get; set; }
     public string LineXofY { get; set; }
     public string ChangeWordFromXToY { get; set; }
     public string ChangeAllWordsFromXToY { get; set; }
@@ -31,6 +32,17 @@ public class LanguageSpellCheck
     public string PickSpellCheckDictionaryDotDotDot { get; set; }
     public string ChooseSpellCheckDictionary { get; set; }
     public string PickLiveSpellCheckDictionary { get; set; }
+    public string UndoX { get; set; }
+    public string EditWholeText { get; set; }
+    public string ContinueFromCurrentLine { get; set; }
+    public string ContinueFromTop { get; set; }
+    public string SpellCheckCompleted { get; set; }
+    public string ChangedWordsX { get; set; }
+    public string SkippedWordsX { get; set; }
+    public string CorrectWordsX { get; set; }
+    public string NamesX { get; set; }
+    public string AddedToDictionaryX { get; set; }
+    public string DoNotShowThisAgain { get; set; }
 
     public LanguageSpellCheck()
     {
@@ -47,6 +59,7 @@ public class LanguageSpellCheck
         XOfYNamesImported = "{0} of {1} names imported (the rest may already exist).";
         NoDictionariesFound = "No dictionaries found";
         WordNotFound = "Word not found";
+        LoadSourceImage = "Show source images too...";
         LineXofY = "Spell checker - line {0} of {1}";
         ChangeWordFromXToY = "Change word from '{0}' to '{1}'";
         ChangeAllWordsFromXToY = "Change all words from '{0}' to '{1}'";
@@ -61,5 +74,16 @@ public class LanguageSpellCheck
         PickSpellCheckDictionaryDotDotDot = "Choose spell check dictionary...";
         ChooseSpellCheckDictionary = "Choose spell check dictionary";
         PickLiveSpellCheckDictionary = "Pick live spell check dictionary";
+        UndoX = "Undo: {0}";
+        EditWholeText = "Edit whole text";
+        ContinueFromCurrentLine = "Continue spell check from the current line?\n\nYes = continue from the current line\nNo = start from the beginning";
+        ContinueFromTop = "Spell check reached the end of the subtitle.\n\nContinue from the top?";
+        SpellCheckCompleted = "Spell check completed";
+        ChangedWordsX = "Changed words: {0}";
+        SkippedWordsX = "Skipped words: {0}";
+        CorrectWordsX = "Correct words: {0}";
+        NamesX = "Names: {0}";
+        AddedToDictionaryX = "Added to dictionary: {0}";
+        DoNotShowThisAgain = "Do not show this message again";
     }
 }

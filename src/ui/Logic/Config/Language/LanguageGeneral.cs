@@ -26,6 +26,7 @@ public class LanguageGeneral
     public string AlphaAdjustment { get; set; }
     public string AlphaThreshold { get; set; }
     public string ApiKey { get; set; }
+    public string Formality { get; set; }
     public string ApiSecret { get; set; }
     public string Appearance { get; set; }
     public string Append { get; set; }
@@ -172,6 +173,8 @@ public class LanguageGeneral
     public string ExtendSelectedLinesToPreviousShotChange { get; set; }
     public string ExtendSelectedToNext { get; set; }
     public string ExtendSelectedToPrevious { get; set; }
+    public string ExtendPreviousEndToSelectedStart { get; set; }
+    public string ExtendNextStartToSelectedEnd { get; set; }
     public string ExtractingAudioClips { get; set; }
     public string ExitFullScreen { get; set; }
     public string Fade { get; set; }
@@ -251,6 +254,7 @@ public class LanguageGeneral
     public string ImageSaved { get; set; }
     public string ImageBasedSubtitles { get; set; }
     public string Images { get; set; }
+    public string ImagesWithHtmlIndex { get; set; }
     public string ImagesWithTimeCode { get; set; }
     public string Import { get; set; }
     public string ImportDotDotDot { get; set; }
@@ -391,6 +395,7 @@ public class LanguageGeneral
     public string Percent { get; set; }
     public string PickLayer { get; set; }
     public string PickOllamaModel { get; set; }
+    public string LlamaCppUseRemoteServer { get; set; }
     public string PickOutputFolder { get; set; }
     public string PickResolutionFromCurrentVideo { get; set; }
     public string PickResolutionFromVideoDotDotDot { get; set; }
@@ -399,7 +404,13 @@ public class LanguageGeneral
     public string PickVideoPosition { get; set; }
     public string Play { get; set; }
     public string PlayFromStartOfVideo { get; set; }
+    public string PlayFromJustBeforeText { get; set; }
     public string PlayNext { get; set; }
+    public string PlayNextAndStop { get; set; }
+    public string PlayNextAndLoop { get; set; }
+    public string PlayPrevious { get; set; }
+    public string PlayPreviousAndStop { get; set; }
+    public string PlayPreviousAndLoop { get; set; }
     public string PlaySelectedLines { get; set; }
     public string PlaySelectedLinesWithLoop { get; set; }
     public string PlaySelectedLinesAndFocusWaveform { get; set; }
@@ -440,6 +451,7 @@ public class LanguageGeneral
     public string RemoveItalic { get; set; }
     public string RemoveRightToLeftUnicodeTags { get; set; }
     public string RemoveSelectedFile { get; set; }
+    public string RemoveSelectedFilesX { get; set; }
     public string RemoveStyling { get; set; }
     public string RemoveTextForHearingImpaired { get; set; }
     public string RemoveUnderline { get; set; }
@@ -490,6 +502,8 @@ public class LanguageGeneral
     public string SessionKeyGenerate { get; set; }
     public string SetEnd { get; set; }
     public string SetEndAndGoToNext { get; set; }
+    public string SetEndAddNewAndGoToNew { get; set; }
+    public string SetEndAddNewAndGoToNewNoFocusTextBox { get; set; }
     public string SetEndAndOffsetTheRest { get; set; }
     public string SetFontDotDotDot { get; set; }
     public string SetInCueToClosestShotChangeLeftGreenZone { get; set; }
@@ -497,7 +511,9 @@ public class LanguageGeneral
     public string SetOutCueToClosestShotChangeLeftGreenZone { get; set; }
     public string SetOutCueToClosestShotChangeRightGreenZone { get; set; }
     public string SetStart { get; set; }
+    public string SetStartAndKeepDuration { get; set; }
     public string SetStartAndOffsetTheRest { get; set; }
+    public string SetUpLikeSubtitleEdit4 { get; set; }
     public string SetVideoOffset { get; set; }
     public string Settings { get; set; }
     public string Shadow { get; set; }
@@ -641,6 +657,10 @@ public class LanguageGeneral
     public string VideoCustom1ForwardX { get; set; }
     public string VideoCustom2BackX { get; set; }
     public string VideoCustom2ForwardX { get; set; }
+    public string VideoCustom3BackX { get; set; }
+    public string VideoCustom3ForwardX { get; set; }
+    public string VideoCustom4BackX { get; set; }
+    public string VideoCustom4ForwardX { get; set; }
     public string VideoEncodingX { get; set; }
     public string VideoExtension { get; set; }
     public string VideoFile { get; set; }
@@ -752,6 +772,7 @@ public class LanguageGeneral
         AlphaAdjustment = "Alpha adjustment";
         AlphaThreshold = "Alpha threshold";
         ApiKey = "API key";
+        Formality = "Formality";
         ApiSecret = "Secret";
         Appearance = "Appearance";
         Append = "Append";
@@ -898,6 +919,8 @@ public class LanguageGeneral
         ExtendSelectedLinesToPreviousShotChange = "Extend selected lines to previous shot change (or previous subtitle)";
         ExtendSelectedToNext = "Extend selected to next";
         ExtendSelectedToPrevious = "Extend selected to previous";
+        ExtendPreviousEndToSelectedStart = "Extend previous line's end to selected's start";
+        ExtendNextStartToSelectedEnd = "Extend next line's start to selected's end";
         ExtractingAudioClips = "Extracting audio clips...";
         ExitFullScreen = "Exit full screen";
         Fade = "Fade";
@@ -977,6 +1000,7 @@ public class LanguageGeneral
         ImageSaved = "Image saved";
         ImageBasedSubtitles = "Image-based subtitles";
         Images = "Images";
+        ImagesWithHtmlIndex = "Images with HTML index";
         ImagesWithTimeCode = "Images with time code";
         Import = "Import";
         ImportDotDotDot = "Import...";
@@ -1117,6 +1141,7 @@ public class LanguageGeneral
         Percent = "Percent";
         PickLayer = "Set layer";
         PickOllamaModel = "Pick Ollama model";
+        LlamaCppUseRemoteServer = "Use external server (URL)";
         PickOutputFolder = "Pick output folder";
         PickResolutionFromCurrentVideo = "Pick resolution from current video";
         PickResolutionFromVideoDotDotDot = "Pick resolution from video...";
@@ -1125,7 +1150,13 @@ public class LanguageGeneral
         PickVideoPosition = "Pick video position";
         Play = "Play";
         PlayFromStartOfVideo = "Play from start of video";
+        PlayFromJustBeforeText = "Play from just before text";
         PlayNext = "Play next";
+        PlayNextAndStop = "Play next (and stop)";
+        PlayNextAndLoop = "Play next (and loop)";
+        PlayPrevious = "Play previous";
+        PlayPreviousAndStop = "Play previous (and stop)";
+        PlayPreviousAndLoop = "Play previous (and loop)";
         PlaySelectedLines = "Play selected lines";
         PlaySelectedLinesWithLoop = "Play selected lines with loop";
         PlaySelectedLinesAndFocusWaveform = "Play selected lines and focus waveform";
@@ -1166,6 +1197,7 @@ public class LanguageGeneral
         RemoveItalic = "Remove italic";
         RemoveRightToLeftUnicodeTags = "Remove RTL Unicode tags";
         RemoveSelectedFile = "Remove selected file?";
+        RemoveSelectedFilesX = "Remove {0} selected files?";
         RemoveStyling = "Remove styling";
         RemoveTextForHearingImpaired = "Remove text for hearing impaired";
         RemoveUnderline = "Remove underline";
@@ -1216,6 +1248,8 @@ public class LanguageGeneral
         SessionKeyGenerate = "Generate new key";
         SetEnd = "Set end";
         SetEndAndGoToNext = "Set end and go to next";
+        SetEndAddNewAndGoToNew = "Set end, add new and go to new";
+        SetEndAddNewAndGoToNewNoFocusTextBox = "Set end, add new and go to new (no focus text box)";
         SetEndAndOffsetTheRest = "Set end and offset the rest";
         SetFontDotDotDot = "Set font...";
         SetInCueToClosestShotChangeLeftGreenZone = "Set in-cue to closest shot change (snap to left green zone)";
@@ -1223,7 +1257,9 @@ public class LanguageGeneral
         SetOutCueToClosestShotChangeLeftGreenZone = "Set out-cue to closest shot change (snap to left green zone)";
         SetOutCueToClosestShotChangeRightGreenZone = "Set out-cue to closest shot change (snap to right green zone)";
         SetStart = "Set start";
+        SetStartAndKeepDuration = "Set start and keep duration";
         SetStartAndOffsetTheRest = "Set start and offset the rest";
+        SetUpLikeSubtitleEdit4 = "Set up like Subtitle Edit 4 (theme, shortcuts, replace rules)";
         SetVideoOffset = "Set video offset";
         Settings = "Settings";
         Shadow = "Shadow";
@@ -1367,6 +1403,10 @@ public class LanguageGeneral
         VideoCustom1ForwardX = "Video, custom milliseconds ({0:#,###,##0}) forward, 1";
         VideoCustom2BackX = "Video, custom milliseconds ({0:#,###,##0}) back, 2";
         VideoCustom2ForwardX = "Video, custom milliseconds ({0:#,###,##0}) forward, 2";
+        VideoCustom3BackX = "Video, custom milliseconds ({0:#,###,##0}) back, 3";
+        VideoCustom3ForwardX = "Video, custom milliseconds ({0:#,###,##0}) forward, 3";
+        VideoCustom4BackX = "Video, custom milliseconds ({0:#,###,##0}) back, 4";
+        VideoCustom4ForwardX = "Video, custom milliseconds ({0:#,###,##0}) forward, 4";
         VideoEncodingX = "Video encoding: {0}";
         VideoExtension = "Video file extension";
         VideoFile = "Video file";

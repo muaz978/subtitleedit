@@ -8,9 +8,11 @@ public class SeBatchConvert
     public string OutputFolder { get; set; }
     public bool Overwrite { get; set; }
     public string TargetFormat { get; set; }
+    public string CustomTextFormatName { get; set; } = string.Empty;
     public string TargetEncoding { get; set; }
     public string OcrEngine { get; set; }
     public string TesseractLanguage { get; set; }
+    public int TesseractEngineMode { get; set; }
     public string PaddleLanguage { get; set; }
     public string BinaryOcrDatabase { get; set; }
     public string NOcrBinaryOcrFallbackDatabase { get; set; }
@@ -102,6 +104,7 @@ public class SeBatchConvert
         TargetEncoding = string.Empty;
         OcrEngine = "Tesseract";
         TesseractLanguage = "eng";
+        TesseractEngineMode = 3; // Default, based on what is available (tesseract --oem)
         PaddleLanguage = "en";
         BinaryOcrDatabase = "Latin";
         NOcrBinaryOcrFallbackDatabase = string.Empty;

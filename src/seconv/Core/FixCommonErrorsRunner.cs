@@ -1,6 +1,8 @@
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.Forms.FixCommonErrors;
 using Nikse.SubtitleEdit.Core.Interfaces;
+using Nikse.SubtitleEdit.Features.Ocr.FixEngine;
+using Nikse.SubtitleEdit.Features.SpellCheck;
 using SkiaSharp;
 
 namespace SeConv.Core;
@@ -13,15 +15,23 @@ namespace SeConv.Core;
 ///
 /// Rule IDs are stable string keys (matching the rule class name) so users can pass
 /// them via <c>--FixCommonErrorsRules</c>. Matching is case-insensitive.
-/// <c>FixCommonOcrErrors</c> is intentionally excluded — it requires UI-side
-/// spell-check / OCR engine setup that seconv lacks.
+/// <c>FixCommonOcrErrors</c> runs as a final pass when a dictionary folder is configured
+/// (<c>--dictionary-folder</c>), using the shared OCR-fix engine + Hunspell from libuilogic
+/// (#11744).
 /// </summary>
 internal static class FixCommonErrorsRunner
 {
+    // Upper bound on convergence passes (SE4 used a fixed 3); we loop until stable but
+    // never beyond this, to guard against a rule pair that oscillates forever.
+    private const int MaxPasses = 10;
+
+    // Pseudo-rule id for the OCR-fix pass (not an IFixCommonError; needs a dictionary + the engine).
+    internal const string OcrFixRuleId = "FixCommonOcrErrors";
+
     private static readonly IReadOnlyList<(string Id, Func<IFixCommonError> Factory)> Rules = BuildRules();
 
     public static IReadOnlyList<string> AvailableRuleIds { get; } =
-        Rules.Select(r => r.Id).ToArray();
+        Rules.Select(r => r.Id).Append(OcrFixRuleId).ToArray();
 
     /// <summary>
     /// Runs every available rule against the subtitle. Equivalent to
@@ -89,6 +99,82 @@ internal static class FixCommonErrorsRunner
             Language = language,
         };
 
+        // Fix Common Errors is not idempotent in a single pass: one rule can create a
+        // condition another rule fixes on the next pass. SE4's batch converter ran the
+        // whole suite three times per /FixCommonErrors (issue #11873). Run to convergence
+        // here - repeat until a pass changes nothing, capped to avoid pathological loops.
+        var previousSnapshot = Snapshot(subtitle);
+        for (var pass = 0; pass < MaxPasses; pass++)
+        {
+            RunSinglePass(subtitle, wanted, explicitlyNamed, language, callbacks);
+
+            var snapshot = Snapshot(subtitle);
+            if (snapshot == previousSnapshot)
+            {
+                break;
+            }
+
+            previousSnapshot = snapshot;
+        }
+
+        // OCR-fix pass: deterministic rules above run first; this spell-check-driven pass runs last.
+        // It needs a dictionary folder (--dictionary-folder) and the OCR-fix engine, so it is gated
+        // separately from the IFixCommonError rule list. Runs as part of the full suite, or when the
+        // user names it explicitly (#11744).
+        if (wanted == null || wanted.Contains(OcrFixRuleId))
+        {
+            RunOcrFix(subtitle, language);
+        }
+    }
+
+    /// <summary>
+    /// Applies the OCR-fix engine (OCR replace lists + Hunspell spell-check guessing) to every line,
+    /// the headless equivalent of the GUI's "Fix common OCR errors". No-op when no dictionary folder
+    /// is configured or no Hunspell dictionary matches the detected language. (#11744)
+    /// </summary>
+    private static void RunOcrFix(Subtitle subtitle, string twoLetterLanguage)
+    {
+        var folder = SpellCheckConfig.DictionariesFolder();
+        if (string.IsNullOrEmpty(folder) || !System.IO.Directory.Exists(folder))
+        {
+            return;
+        }
+
+        var threeLetter = Iso639Dash2LanguageCode.GetThreeLetterCodeFromTwoLetterCode(twoLetterLanguage);
+        if (string.IsNullOrEmpty(threeLetter))
+        {
+            return;
+        }
+
+        var spellChecker = new SpellChecker();
+        var dictionary = spellChecker.GetDictionaryLanguages(folder)
+            .FirstOrDefault(d => d.GetThreeLetterCode() == threeLetter);
+        if (dictionary == null)
+        {
+            return;
+        }
+
+        IOcrFixEngine engine = new OcrFixEngine(spellChecker);
+        engine.Initialize(subtitle, threeLetter, dictionary);
+
+        for (var i = 0; i < subtitle.Paragraphs.Count; i++)
+        {
+            var p = subtitle.Paragraphs[i];
+            var fixedText = engine.FixOcrErrors(i, p.Text, true).GetText();
+            if (fixedText != p.Text)
+            {
+                p.Text = fixedText;
+            }
+        }
+    }
+
+    private static void RunSinglePass(
+        Subtitle subtitle,
+        HashSet<string>? wanted,
+        HashSet<string>? explicitlyNamed,
+        string language,
+        EmptyFixCallback callbacks)
+    {
         foreach (var (id, factory) in Rules)
         {
             if (wanted != null && !wanted.Contains(id))
@@ -116,6 +202,34 @@ internal static class FixCommonErrorsRunner
                 // A rogue rule shouldn't kill the conversion. Skip and continue.
             }
         }
+    }
+
+    // A signature of the subtitle's timing + text, used to detect when a Fix Common
+    // Errors pass has stopped changing anything (convergence). A 64-bit FNV-1a hash over
+    // the same fields - only compared against the previous pass within this run, so it
+    // avoids building (and discarding) a full-subtitle string on every pass.
+    private static long Snapshot(Subtitle subtitle)
+    {
+        const long fnvPrime = 1099511628211L;
+        var hash = unchecked((long)14695981039346656037UL); // FNV offset basis
+        unchecked
+        {
+            foreach (var p in subtitle.Paragraphs)
+            {
+                hash = (hash ^ BitConverter.DoubleToInt64Bits(p.StartTime.TotalMilliseconds)) * fnvPrime;
+                hash = (hash ^ BitConverter.DoubleToInt64Bits(p.EndTime.TotalMilliseconds)) * fnvPrime;
+
+                var text = p.Text ?? string.Empty;
+                foreach (var c in text)
+                {
+                    hash = (hash ^ c) * fnvPrime;
+                }
+
+                hash = (hash ^ '\n') * fnvPrime;
+            }
+        }
+
+        return hash;
     }
 
     /// <summary>
@@ -244,56 +358,61 @@ internal static class FixCommonErrorsRunner
     /// </summary>
     private static IReadOnlyList<(string Id, Func<IFixCommonError> Factory)> BuildRules() =>
     [
-        ("AddMissingQuotes", () => new AddMissingQuotes()),
-        ("Fix3PlusLines", () => new Fix3PlusLines()),
-        ("FixAloneLowercaseIToUppercaseI", () => new FixAloneLowercaseIToUppercaseI()),
-        ("FixCommas", () => new FixCommas()),
-        ("FixContinuationStyle", () => new FixContinuationStyle { FixAction = "Fix continuation style" }),
-        ("FixDanishLetterI", () => new FixDanishLetterI()),
-        ("FixDialogsOnOneLine", () => new FixDialogsOnOneLine()),
-        ("FixDoubleApostrophes", () => new FixDoubleApostrophes()),
-        ("FixDoubleDash", () => new FixDoubleDash()),
-        ("FixDoubleGreaterThan", () => new FixDoubleGreaterThan()),
-        ("FixEllipsesStart", () => new FixEllipsesStart()),
-        ("FixEmptyLines", () => new FixEmptyLines()),
-        ("FixHyphensInDialog", () => new FixHyphensInDialog()),
-        ("FixHyphensRemoveDashSingleLine", () => new FixHyphensRemoveDashSingleLine()),
-        ("FixInvalidItalicTags", () => new FixInvalidItalicTags()),
-        ("FixLongDisplayTimes", () => new FixLongDisplayTimes()),
-        ("FixLongLines", () => new FixLongLines()),
-        ("FixMissingOpenBracket", () => new FixMissingOpenBracket()),
-        ("FixMissingPeriodsAtEndOfLine", () => new FixMissingPeriodsAtEndOfLine()),
-        ("FixMissingSpaces", () => new FixMissingSpaces()),
-        ("FixMusicNotation", () => new FixMusicNotation()),
-        ("FixOverlappingDisplayTimes", () => new FixOverlappingDisplayTimes()),
-        ("FixShortDisplayTimes", () => new FixShortDisplayTimes()),
-        ("FixShortGaps", () => new FixShortGaps()),
-        ("FixShortLines", () => new FixShortLines()),
-        ("FixShortLinesAll", () => new FixShortLinesAll()),
-        ("FixShortLinesPixelWidth", () => new FixShortLinesPixelWidth(MeasurePixelWidth)),
-        ("FixSpanishInvertedQuestionAndExclamationMarks", () => new FixSpanishInvertedQuestionAndExclamationMarks()),
-        ("FixStartWithUppercaseLetterAfterColon", () => new FixStartWithUppercaseLetterAfterColon()),
-        ("FixStartWithUppercaseLetterAfterParagraph", () => new FixStartWithUppercaseLetterAfterParagraph()),
-        ("FixStartWithUppercaseLetterAfterPeriodInsideParagraph", () => new FixStartWithUppercaseLetterAfterPeriodInsideParagraph()),
-        ("FixTurkishAnsiToUnicode", () => new FixTurkishAnsiToUnicode()),
-        ("FixUnnecessaryLeadingDots", () => new FixUnnecessaryLeadingDots()),
-        ("FixUnneededPeriods", () => new FixUnneededPeriods()),
-        ("FixUnneededSpaces", () => new FixUnneededSpaces()),
-        ("FixUppercaseIInsideWords", () => new FixUppercaseIInsideWords()),
-        ("NormalizeStrings", () => new NormalizeStrings()),
-        ("RemoveDialogFirstLineInNonDialogs", () => new RemoveDialogFirstLineInNonDialogs()),
-        ("RemoveSpaceBetweenNumbers", () => new RemoveSpaceBetweenNumbers()),
+        (nameof(AddMissingQuotes), () => new AddMissingQuotes()),
+        (nameof(Fix3PlusLines), () => new Fix3PlusLines()),
+        (nameof(FixAloneLowercaseIToUppercaseI), () => new FixAloneLowercaseIToUppercaseI()),
+        (nameof(FixCommas), () => new FixCommas()),
+        (nameof(FixContinuationStyle), () => new FixContinuationStyle { FixAction = "Fix continuation style" }),
+        (nameof(FixDanishLetterI), () => new FixDanishLetterI()),
+        (nameof(FixDialogsOnOneLine), () => new FixDialogsOnOneLine()),
+        (nameof(FixDoubleApostrophes), () => new FixDoubleApostrophes()),
+        (nameof(FixDoubleDash), () => new FixDoubleDash()),
+        (nameof(FixDoubleGreaterThan), () => new FixDoubleGreaterThan()),
+        (nameof(FixEllipsesStart), () => new FixEllipsesStart()),
+        (nameof(FixEmptyLines), () => new FixEmptyLines()),
+        (nameof(FixHyphensInDialog), () => new FixHyphensInDialog()),
+        (nameof(FixHyphensRemoveDashSingleLine), () => new FixHyphensRemoveDashSingleLine()),
+        (nameof(FixInvalidItalicTags), () => new FixInvalidItalicTags()),
+        (nameof(FixLongDisplayTimes), () => new FixLongDisplayTimes()),
+        (nameof(FixLongLines), () => new FixLongLines()),
+        (nameof(FixMissingOpenBracket), () => new FixMissingOpenBracket()),
+        (nameof(FixMissingPeriodsAtEndOfLine), () => new FixMissingPeriodsAtEndOfLine()),
+        (nameof(FixMissingSpaces), () => new FixMissingSpaces()),
+        (nameof(FixMusicNotation), () => new FixMusicNotation()),
+        (nameof(FixOverlappingDisplayTimes), () => new FixOverlappingDisplayTimes()),
+        (nameof(FixShortDisplayTimes), () => new FixShortDisplayTimes()),
+        (nameof(FixShortGaps), () => new FixShortGaps()),
+        (nameof(FixShortLines), () => new FixShortLines()),
+        (nameof(FixShortLinesAll), () => new FixShortLinesAll()),
+        (nameof(FixShortLinesPixelWidth), () => new FixShortLinesPixelWidth(MeasurePixelWidth)),
+        (nameof(FixSpanishInvertedQuestionAndExclamationMarks), () => new FixSpanishInvertedQuestionAndExclamationMarks()),
+        (nameof(FixStartWithUppercaseLetterAfterColon), () => new FixStartWithUppercaseLetterAfterColon()),
+        (nameof(FixStartWithUppercaseLetterAfterParagraph), () => new FixStartWithUppercaseLetterAfterParagraph()),
+        (nameof(FixStartWithUppercaseLetterAfterPeriodInsideParagraph), () => new FixStartWithUppercaseLetterAfterPeriodInsideParagraph()),
+        (nameof(FixTurkishAnsiToUnicode), () => new FixTurkishAnsiToUnicode()),
+        (nameof(FixUnnecessaryLeadingDots), () => new FixUnnecessaryLeadingDots()),
+        (nameof(FixUnneededPeriods), () => new FixUnneededPeriods()),
+        (nameof(FixUnneededSpaces), () => new FixUnneededSpaces()),
+        (nameof(FixUppercaseIInsideWords), () => new FixUppercaseIInsideWords()),
+        (nameof(NormalizeStrings), () => new NormalizeStrings()),
+        (nameof(RemoveDialogFirstLineInNonDialogs), () => new RemoveDialogFirstLineInNonDialogs()),
+        (nameof(RemoveSpaceBetweenNumbers), () => new RemoveSpaceBetweenNumbers()),
     ];
 
     /// <summary>
     /// Pixel-width measurer for FixShortLinesPixelWidth. Mirrors UI's implementation:
     /// 14pt of the default Skia typeface. Headless contexts get the same numbers.
     /// </summary>
+    // Cached per thread: MeasurePixelWidth runs once per subtitle line, so building a new
+    // SKFont every call was wasteful - and the old code disposed SKTypeface.Default, which
+    // is a shared instance that must not be disposed. [ThreadStatic] keeps it safe even if
+    // conversions are ever run in parallel.
+    [ThreadStatic] private static SKFont? _pixelWidthFont;
+
     private static int MeasurePixelWidth(string text)
     {
-        using var typeface = SKTypeface.Default;
-        using var font = new SKFont(typeface, 14);
-        var width = font.MeasureText(text);
+        _pixelWidthFont ??= new SKFont(SKTypeface.Default, 14);
+        var width = _pixelWidthFont.MeasureText(text);
         return (int)Math.Round(width, MidpointRounding.AwayFromZero);
     }
 }

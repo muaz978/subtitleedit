@@ -159,6 +159,39 @@ public partial class VoiceSettingsViewModel : ObservableObject
 
             ok = f5Engine.ImportVoice(fileName, result.Text.Trim());
         }
+        else if (_engine is Qwen3TtsCrispAsr qwenCrispEngine)
+        {
+            // The Qwen3 (CrispASR) "Voice clone" (Base) model needs the spoken transcription of
+            // the reference WAV — the backend loads it as ref-text and errors without it. Prefer a
+            // sibling .txt; otherwise auto-transcribe with Whisper so the user rarely has to type
+            // it. Either way show the result for a quick review/correction (clone quality is
+            // sensitive to ref-text accuracy), keeping the STT button to re-run if needed.
+            var transcript = TryReadSiblingTranscript(fileName);
+            if (string.IsNullOrWhiteSpace(transcript) || Qwen3TtsCrispAsr.LooksLikeAttributionBlurb(transcript))
+            {
+                transcript = await RunSpeechToTextAsync(fileName) ?? string.Empty;
+            }
+
+            var audioFileName = fileName;
+            var result = await _windowService.ShowDialogAsync<PromptTextBoxWindow, PromptTextBoxViewModel>(Window!, vm =>
+            {
+                vm.Initialize(
+                    Se.Language.Video.TextToSpeech.VoiceCloneTranscriptTitle,
+                    transcript ?? string.Empty,
+                    500,
+                    150);
+                vm.ConfigureExtraButton(
+                    Se.Language.Video.TextToSpeech.UseSpeechToTextDotDotDot,
+                    () => RunSpeechToTextAsync(audioFileName));
+            });
+
+            if (!result.OkPressed || string.IsNullOrWhiteSpace(result.Text))
+            {
+                return;
+            }
+
+            ok = qwenCrispEngine.ImportVoice(fileName, result.Text.Trim());
+        }
         else if (_engine is VoxCPM2CrispAsr voxEngine)
         {
             // VoxCPM2 clones zero-shot from audio alone; a transcription (ref-text) is optional

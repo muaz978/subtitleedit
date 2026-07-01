@@ -121,12 +121,14 @@ public class ProfilesWindow : Window
         dataGrid.Bind(DataGrid.ItemsSourceProperty, new Binding(nameof(vm.Profiles)) { Source = vm });
         dataGrid.Bind(DataGrid.SelectedItemProperty, new Binding(nameof(vm.SelectedProfile)) { Source = vm });
 
+        var buttonNew = UiUtil.MakeButton(vm.NewCommand, IconNames.New, Se.Language.General.NewProfile);
         var buttonExport = UiUtil.MakeButton(vm.ExportCommand, IconNames.Export, Se.Language.General.ExportDotDotDot);
         var buttonImport = UiUtil.MakeButton(vm.ImportCommand, IconNames.Import, Se.Language.General.ImportDotDotDot);
         var buttonCopy = UiUtil.MakeButton(vm.CopyCommand, IconNames.Copy, Se.Language.General.Copy);
         var buttonDelete = UiUtil.MakeButton(vm.DeleteCommand, IconNames.Trash, Se.Language.General.Delete);
         var buttonClear = UiUtil.MakeButton(vm.ClearCommand, IconNames.Close, Se.Language.General.Clear);
         var panelButtons = UiUtil.MakeButtonBar(
+            buttonNew,
             buttonExport,
             buttonImport,
             buttonCopy,
@@ -179,13 +181,13 @@ public class ProfilesWindow : Window
         var numericUpDownSingleLineMaxLength = UiUtil.MakeNumericUpDownInt(0, 1000, 43, 150, vm, nameof(vm.SelectedProfile) + "." + nameof(ProfileDisplay.SingleLineMaxLength));
 
         var labelOptimalCharsPerSec = UiUtil.MakeLabel(Se.Language.Options.Settings.OptimalCharsPerSec);
-        var numericUpDownOptimalCharsPerSec = UiUtil.MakeNumericUpDownInt(0, 1000, 43, 150, vm, nameof(vm.SelectedProfile) + "." + nameof(ProfileDisplay.OptimalCharsPerSec));
+        var numericUpDownOptimalCharsPerSec = UiUtil.MakeNumericUpDownDouble(0, 1000, 43, 150, vm, nameof(vm.SelectedProfile) + "." + nameof(ProfileDisplay.OptimalCharsPerSec));
 
         var labelMaxCharsPerSec = UiUtil.MakeLabel(Se.Language.General.MaxCharactersPerSecond);
-        var numericUpDownMaxCharsPerSec = UiUtil.MakeNumericUpDownInt(0, 1000, 43, 150, vm, nameof(vm.SelectedProfile) + "." + nameof(ProfileDisplay.MaxCharsPerSec));
+        var numericUpDownMaxCharsPerSec = UiUtil.MakeNumericUpDownDouble(0, 1000, 43, 150, vm, nameof(vm.SelectedProfile) + "." + nameof(ProfileDisplay.MaxCharsPerSec));
 
         var labelMaxWordsPerMin = UiUtil.MakeLabel(Se.Language.Options.Settings.MaxWordsPerMin);
-        var numericUpDownMaxWordsPerMin = UiUtil.MakeNumericUpDownInt(0, 1000, 43, 150, vm, nameof(vm.SelectedProfile) + "." + nameof(ProfileDisplay.MaxWordsPerMin));
+        var numericUpDownMaxWordsPerMin = UiUtil.MakeNumericUpDownDouble(0, 1000, 43, 150, vm, nameof(vm.SelectedProfile) + "." + nameof(ProfileDisplay.MaxWordsPerMin));
 
         var labelMinDurationMs = UiUtil.MakeLabel(Se.Language.Options.Settings.MinDurationMs);
         var numericUpDownMinDurationMs = UiUtil.MakeNumericUpDownInt(0, 10000, 43, 150, vm, nameof(vm.SelectedProfile) + "." + nameof(ProfileDisplay.MinDurationMs));

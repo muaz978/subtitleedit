@@ -117,6 +117,9 @@ seconv lint *.srt --json             # CI-friendly: exit 1 on any issue
 | `--assa-style-file:<file>` | ASSA | Apply `[V4+ Styles]` block from another ASSA file |
 | `--pac-codepage:<page>` | PAC | Code page name (`Latin`, `Greek`, `Hebrew`, …) or numeric (0–12). See `seconv list-pac-codepages` |
 | `--ebu-header-file:<file>` | EBU STL | Reuse the GSI header block from an existing `.stl` file |
+| `--plaintext-merge` | Plain text (`txt`) | Merge all subtitles into one space-separated block (no blank lines). Takes precedence over the two options below |
+| `--plaintext-unbreak` | Plain text (`txt`) | Unbreak each subtitle, joining its lines into one |
+| `--plaintext-no-blank-line` | Plain text (`txt`) | Do not put a blank line between subtitles (default keeps it) |
 
 ### Containers / tracks
 
@@ -162,8 +165,10 @@ If two tracks share a language, the track number is added: `movie.#3.eng.srt`.
 | `--ocr-engine:<engine>` | `tesseract` (default) \| `nocr` \| `binaryocr` \| `ollama` \| `paddle` |
 | `--ocr-language:<lang>` | Tesseract: ISO 639-2 (`eng`, `deu`); Paddle: short (`en`); Ollama: human (`English`) |
 | `--ocr-db:<path>` | OCR database file: `.nocr` for `nocr`, `.db` for `binaryocr` (required for both) |
+| `--dictionary-folder:<path>` | Folder with Hunspell dictionaries + `*_OCRFixReplaceList.xml`; enables the "Fix common OCR errors" pass of `--fix-common-errors` (English is bundled, so this is only needed for other languages) |
 | `--ollama-url:<url>` | Default `http://localhost:11434/api/chat` |
 | `--ollama-model:<model>` | Default `llama3.2-vision` |
+| `--time-codes-only` | Image sources (`.sup`, VobSub `.sub`/`.idx`, MKV PGS/VobSub, MP4 VobSub, TS DVB-sub) → text format with time codes only and empty text. **Skips OCR entirely** — no OCR engine required. Ignored for text inputs and image output targets. |
 
 > **OCR database files are not bundled with `seconv`.** The `nocr` and `binaryocr` engines need a `.nocr` or `.db` file passed via `--ocr-db`. Sources:
 >
@@ -183,11 +188,18 @@ seconv movie.sup subrip --ocr-engine:nocr --ocr-db:"C:\Users\me\AppData\Roaming\
 # BinaryOCR
 seconv movie.sup subrip --ocr-engine:binaryocr --ocr-db:"C:\Users\me\AppData\Roaming\Subtitle Edit\Ocr\Latin.db"
 
-# MKV with image (PGS) tracks — OCR runs automatically
+# MKV with image (PGS or VobSub) tracks — OCR runs automatically
 seconv movie.mkv subrip --ocr-engine:tesseract --ocr-language:eng
+
+# VobSub .sub + .idx pair — the .idx companion is auto-detected
+seconv movie.sub subrip --ocr-engine:tesseract --ocr-language:eng
 
 # Transport-stream teletext (no OCR needed)
 seconv broadcast.ts subrip
+
+# Time codes only — extract timing with no OCR (empty text); works for any image source
+seconv movie.sup subrip --time-codes-only
+seconv movie.sub subrip --time-codes-only
 ```
 
 ### Templates / replacements
@@ -257,7 +269,18 @@ Available template tokens: `{title}`, `{number}`, `{start}`, `{end}`, `{duration
 {
   "general": {
     "subtitleLineMaximumLength": 43,
-    "subtitleMaximumDisplayMilliseconds": 8000
+    "subtitleMinimumDisplayMilliseconds": 1000,
+    "subtitleMaximumDisplayMilliseconds": 8000,
+    "currentFrameRate": 23.976,
+    "defaultFrameRate": 23.976,
+    "minimumMillisecondsBetweenLines": 24,
+    "maxNumberOfLines": 2,
+    "mergeLinesShorterThan": 33,
+    "subtitleMaximumCharactersPerSeconds": 25.0,
+    "subtitleOptimalCharactersPerSeconds": 15.0,
+    "subtitleMaximumWordsPerMinute": 400.0,
+    "dialogStyle": "DashBothLinesWithSpace",
+    "continuationStyle": "None"
   },
   "removeTextForHearingImpaired": {
     "removeTextBeforeColon": true,
@@ -272,6 +295,8 @@ Available template tokens: `{title}`, `{number}`, `{start}`, `{end}`, `{duration
 }
 ```
 
+The `general` section mirrors `Configuration.Settings.General`; any key left out keeps the libse default. The profile-shaping values (`minimumMillisecondsBetweenLines`, `maxNumberOfLines`, `mergeLinesShorterThan`, `subtitleMaximumCharactersPerSeconds`, `subtitleOptimalCharactersPerSeconds`, `subtitleMaximumWordsPerMinute`, `dialogStyle`, `continuationStyle`) feed Fix common errors and the split/merge operations, so set them to reproduce an SE4 profile. `dialogStyle` and `continuationStyle` take the enum names (case-insensitive): `dialogStyle` ∈ `DashBothLinesWithSpace`, `DashBothLinesWithoutSpace`, `DashSecondLineWithSpace`, `DashSecondLineWithoutSpace`; `continuationStyle` ∈ `None`, `NoneTrailingDots`, `NoneTrailingEllipsis`, `OnlyTrailingDots`, `LeadingTrailingDots`, `LeadingTrailingEllipsis`, `LeadingTrailingDash`, … (see the Fix common errors continuation styles).
+
 ```bash
 seconv *.srt subrip --settings:my.json --profile:broadcast --remove-text-for-hi
 ```
@@ -281,7 +306,7 @@ seconv *.srt subrip --settings:my.json --profile:broadcast --remove-text-for-hi
 | Option | Description |
 |---|---|
 | `--quiet` / `-q` | Suppress per-file progress and the parameters table; only print the final summary |
-| `--verbose` / `-v` | Reserved for diagnostic output (currently parsed but unused) |
+| `--verbose` / `-v` | Print extra diagnostic information, including full exception details (stack traces) on errors |
 | `--json` | Emit per-file results as JSON to stdout (suppresses Spectre output) |
 
 ## Operations

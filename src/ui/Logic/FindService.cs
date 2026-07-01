@@ -138,20 +138,20 @@ public partial class FindService : IFindService
         return CurrentLineNumber;
     }
 
-    public int Count(string searchText)
+    public int Count(string searchText, IReadOnlyList<string> textLines, bool wholeWord, FindMode findMode)
     {
-        if (string.IsNullOrEmpty(searchText) || _textLines.Count == 0)
+        if (string.IsNullOrEmpty(searchText) || textLines == null || textLines.Count == 0)
         {
             return 0;
         }
 
-        int count = 0;
-        for (int i = 0; i < _textLines.Count; i++)
+        var total = 0;
+        foreach (var line in textLines)
         {
-            count += CountMatchesInLine(_textLines[i], searchText);
+            total += CountMatchesInLine(line, searchText, wholeWord, findMode);
         }
 
-        return count;
+        return total;
     }
 
     public List<(int LineIndex, int TextIndex, string FoundText)> FindAll(string searchText)
@@ -165,7 +165,7 @@ public partial class FindService : IFindService
 
         for (int lineIndex = 0; lineIndex < _textLines.Count; lineIndex++)
         {
-            var matches = GetAllMatchesInLine(_textLines[lineIndex], searchText);
+            var matches = GetAllMatchesInLine(_textLines[lineIndex], searchText, WholeWord, CurrentFindMode);
             foreach (var match in matches)
             {
                 results.Add((lineIndex, match.Index, match.Value));
@@ -349,6 +349,7 @@ public partial class FindService : IFindService
     private (bool replaced, string newText, int replacementCount) ReplaceWithRegex(string line, string searchText, string replaceText, int startIndex, int maxReplacements)
     {
         replaceText = RegexUtils.FixNewLine(replaceText);
+        searchText = RegexUtils.FixNewLine(searchText); // \r\n / \r in the pattern -> \n to match the text (#11956)
         try
         {
             var regex = new Regex(searchText);
@@ -425,7 +426,7 @@ public partial class FindService : IFindService
 
     private (bool replaced, string newText, int replacementCount) ReplaceWholeWordWithStringComparison(string line, string searchText, string replaceText, int startIndex, int maxReplacements, StringComparison comparison)
     {
-        var pattern = $@"\b{Regex.Escape(searchText)}\b";
+        var pattern = RegexUtils.BuildWholeWordPattern(searchText);
         var options = comparison == StringComparison.OrdinalIgnoreCase ? RegexOptions.IgnoreCase : RegexOptions.None;
 
         try
@@ -471,7 +472,7 @@ public partial class FindService : IFindService
 
         if (WholeWord)
         {
-            var pattern = $@"\b{Regex.Escape(searchText)}\b";
+            var pattern = RegexUtils.BuildWholeWordPattern(searchText);
             var options = comparison == StringComparison.OrdinalIgnoreCase ? RegexOptions.IgnoreCase : RegexOptions.None;
 
             try
@@ -505,7 +506,7 @@ public partial class FindService : IFindService
 
         if (WholeWord)
         {
-            var pattern = $@"\b{Regex.Escape(searchText)}\b";
+            var pattern = RegexUtils.BuildWholeWordPattern(searchText);
             var options = comparison == StringComparison.OrdinalIgnoreCase ? RegexOptions.IgnoreCase : RegexOptions.None;
 
             try
@@ -541,7 +542,7 @@ public partial class FindService : IFindService
             var searchLine = startIndex > 0 ? line.Substring(startIndex) : line;
             var originalLength = searchLine.Length;
             searchLine = NormalizeLineEndingsForRegex(searchLine, out var indexMap);
-            var match = Regex.Match(searchLine, searchText);
+            var match = Regex.Match(searchLine, RegexUtils.FixNewLine(searchText));
 
             if (match.Success)
             {
@@ -566,7 +567,7 @@ public partial class FindService : IFindService
 
             // Advance by 1 after each match so overlapping matches are found
             // (e.g. two long lines sharing the \n between them).
-            var regex = new Regex(searchText);
+            var regex = new Regex(RegexUtils.FixNewLine(searchText));
             Match? lastMatch = null;
             var pos = 0;
             while (pos < searchLine.Length)
@@ -590,20 +591,20 @@ public partial class FindService : IFindService
         return (false, -1, string.Empty);
     }
 
-    private int CountMatchesInLine(string line, string searchText)
+    private int CountMatchesInLine(string line, string searchText, bool wholeWord, FindMode findMode)
     {
         if (string.IsNullOrEmpty(line))
         {
             return 0;
         }
 
-        switch (CurrentFindMode)
+        switch (findMode)
         {
             case FindMode.RegularExpression:
                 try
                 {
-                    var searchLine = NormalizeLineEndingsForRegex(line, out _);
-                    return Regex.Matches(searchLine, searchText).Count;
+                    var searchLine = NormalizeLineEndingsForRegex(line);
+                    return Regex.Matches(searchLine, RegexUtils.FixNewLine(searchText)).Count;
                 }
                 catch (ArgumentException)
                 {
@@ -611,12 +612,12 @@ public partial class FindService : IFindService
                 }
 
             default:
-                var matches = GetAllMatchesInLine(line, searchText);
+                var matches = GetAllMatchesInLine(line, searchText, wholeWord, findMode);
                 return matches.Count;
         }
     }
 
-    private List<FindMatch> GetAllMatchesInLine(string line, string searchText)
+    private List<FindMatch> GetAllMatchesInLine(string line, string searchText, bool wholeWord, FindMode findMode)
     {
         var matches = new List<FindMatch>();
 
@@ -625,13 +626,13 @@ public partial class FindService : IFindService
             return matches;
         }
 
-        switch (CurrentFindMode)
+        switch (findMode)
         {
             case FindMode.RegularExpression:
                 try
                 {
                     var searchLine = NormalizeLineEndingsForRegex(line, out var indexMap);
-                    var regexMatches = Regex.Matches(searchLine, searchText);
+                    var regexMatches = Regex.Matches(searchLine, RegexUtils.FixNewLine(searchText));
                     foreach (Match match in regexMatches)
                     {
                         matches.Add(new FindMatch(MapNormalizedIndex(indexMap, match.Index, line.Length), match.Value));
@@ -644,14 +645,14 @@ public partial class FindService : IFindService
                 break;
 
             default:
-                var comparison = CurrentFindMode == FindMode.CaseSensitive
+                var comparison = findMode == FindMode.CaseSensitive
                     ? StringComparison.Ordinal
                     : StringComparison.OrdinalIgnoreCase;
 
-                if (WholeWord)
+                if (wholeWord)
                 {
-                    var pattern = $@"\b{Regex.Escape(searchText)}\b";
-                    var options = CurrentFindMode == FindMode.CaseInsensitive ? RegexOptions.IgnoreCase : RegexOptions.None;
+                    var pattern = RegexUtils.BuildWholeWordPattern(searchText);
+                    var options = findMode == FindMode.CaseInsensitive ? RegexOptions.IgnoreCase : RegexOptions.None;
 
                     try
                     {
@@ -678,7 +679,7 @@ public partial class FindService : IFindService
                         }
 
                         matches.Add(new FindMatch(index, searchText));
-                        startIndex = index + 1;
+                        startIndex = index + Math.Max(1, searchText.Length);
                     }
                 }
                 break;
@@ -690,6 +691,33 @@ public partial class FindService : IFindService
     private static int MapNormalizedIndex(List<int> indexMap, int normalizedIndex, int originalLength)
     {
         return normalizedIndex < indexMap.Count ? indexMap[normalizedIndex] : originalLength;
+    }
+
+    private static string NormalizeLineEndingsForRegex(string line)
+    {
+        if (!line.Contains('\r'))
+        {
+            return line;
+        }
+
+        var normalized = new StringBuilder(line.Length);
+        for (var i = 0; i < line.Length; i++)
+        {
+            if (line[i] == '\r')
+            {
+                normalized.Append('\n');
+                if (i + 1 < line.Length && line[i + 1] == '\n')
+                {
+                    i++;
+                }
+            }
+            else
+            {
+                normalized.Append(line[i]);
+            }
+        }
+
+        return normalized.ToString();
     }
 
     private static string NormalizeLineEndingsForRegex(string line, out List<int> indexMap)

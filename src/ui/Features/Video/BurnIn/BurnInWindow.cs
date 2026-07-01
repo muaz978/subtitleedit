@@ -5,6 +5,7 @@ using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using Nikse.SubtitleEdit.Controls;
 using Nikse.SubtitleEdit.Features.Main.Layout;
 using Nikse.SubtitleEdit.Logic;
@@ -24,7 +25,7 @@ public class BurnInWindow : Window
         UiUtil.InitializeWindow(this, GetType().Name);
         Title = Se.Language.Video.BurnIn.Title;
         SizeToContent = SizeToContent.WidthAndHeight;
-        CanResize = false;
+        CanResize = true;
         vm.Window = this;
         DataContext = vm;
 
@@ -37,6 +38,15 @@ public class BurnInWindow : Window
         var targetFileSizeView = MakeTargetFileSizeView(vm);
         var videoInfoView = MakeVideoInfoView(vm);
         var progressView = MakeProgressView(vm);
+
+        // Keep the left column (subtitle + video + target size) together and top-aligned so the
+        // extra vertical space goes to the preview instead of opening a gap between the boxes.
+        var leftPanel = new StackPanel
+        {
+            Orientation = Orientation.Vertical,
+            VerticalAlignment = VerticalAlignment.Top,
+            Children = { subtitleSettingsView, videoSettingsView, targetFileSizeView },
+        };
 
         var buttonGenerate = new SplitButton
         {
@@ -73,45 +83,116 @@ public class BurnInWindow : Window
             UiUtil.MakeButtonCancel(vm.CancelCommand)
         );
 
+        // The preview column grows in single mode; the batch column grows in batch mode
+        // (toggled in UpdateGrowAreas). The preview/batch row is a star row so the preview
+        // (single mode) and the batch list (batch mode) also grow vertically.
+        var previewColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) };
+        var batchColumn = new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) };
+
         var grid = new Grid
         {
             RowDefinitions =
             {
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }, // target file size + video info
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // cut
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }, // preview + batch list
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // audio
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // video info
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // progress bar
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) }, // buttons
             },
             ColumnDefinitions =
             {
                 new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) }, // subtitle/video settings
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) }, // cut/preview/audio settings
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }, // batch mode
+                previewColumn, // cut/preview/audio settings
+                batchColumn, // batch mode
             },
             Margin = UiUtil.MakeWindowMargin(),
             Width = double.NaN,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
 
-        grid.Add(subtitleSettingsView, 0, 0, 2, 1);
-        grid.Add(videoSettingsView, 2, 0);
+        grid.Add(leftPanel, 0, 0, 4, 1);
         grid.Add(cutView, 0, 1);
         grid.Add(previewView, 1, 1);
         grid.Add(audioSettingsView, 2, 1);
-        grid.Add(batchView, 0, 3, 3, 1);
-        grid.Add(targetFileSizeView, 4, 0);
-        grid.Add(videoInfoView, 4, 1);
-        grid.Add(progressView, 5, 0, 1, 3);
-        grid.Add(buttonPanel, 6, 0, 1, 3);
+        grid.Add(videoInfoView, 3, 1);
+        grid.Add(batchView, 0, 2, 4, 1);
+        grid.Add(progressView, 4, 0, 1, 3);
+        grid.Add(buttonPanel, 5, 0, 1, 3);
 
         Content = grid;
+
+        void UpdateGrowAreas()
+        {
+            // Steer extra space to whichever area is in use: the preview (single mode) or the batch list (batch mode).
+            previewColumn.Width = new GridLength(1, vm.IsBatchMode ? GridUnitType.Auto : GridUnitType.Star);
+            batchColumn.Width = new GridLength(1, vm.IsBatchMode ? GridUnitType.Star : GridUnitType.Auto);
+
+            // In batch mode the file list is the focus, so keep the preview small; in single mode let it grow.
+            var player = vm.VideoPlayerControl;
+            if (player == null)
+            {
+                return;
+            }
+
+            if (vm.IsBatchMode)
+            {
+                player.MinWidth = 0;
+                player.MinHeight = 0;
+                player.Width = 240;
+                player.Height = 135;
+                player.HorizontalAlignment = HorizontalAlignment.Left;
+                player.VerticalAlignment = VerticalAlignment.Top;
+            }
+            else
+            {
+                player.Width = double.NaN;
+                player.Height = double.NaN;
+                player.MinWidth = 480;
+                player.MinHeight = 270;
+                player.HorizontalAlignment = HorizontalAlignment.Stretch;
+                player.VerticalAlignment = VerticalAlignment.Stretch;
+            }
+        }
+
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(vm.IsBatchMode))
+            {
+                UpdateGrowAreas();
+                LockMinimumToContentSize(); // batch mode needs more width; re-fit and re-lock the minimum
+            }
+        };
+        UpdateGrowAreas();
 
         Activated += delegate { buttonOk.Focus(); }; // hack to make OnKeyDown work
         Loaded += (_, _) => vm.Loaded();
         KeyDown += (_, e) => vm.OnKeyDown(e);
+
+        Opened += (_, _) => LockMinimumToContentSize();
+    }
+
+    private void LockMinimumToContentSize()
+    {
+        // Re-fit the window to the current mode's content (single mode is narrower; batch mode
+        // needs more width for the file list), then lock that size in as the new minimum while
+        // still allowing the user to enlarge the window further.
+        MinWidth = 0;
+        MinHeight = 0;
+        SizeToContent = SizeToContent.WidthAndHeight;
+        Dispatcher.UIThread.Post(() =>
+        {
+            var width = ClientSize.Width;
+            var height = ClientSize.Height;
+            SizeToContent = SizeToContent.Manual;
+            if (width > 0 && height > 0)
+            {
+                MinWidth = width;
+                MinHeight = height;
+                Width = width;
+                Height = height;
+            }
+        }, DispatcherPriority.Loaded);
     }
 
     protected override void OnClosing(WindowClosingEventArgs e)
@@ -393,14 +474,13 @@ public class BurnInWindow : Window
         var labelPixelFormat = UiUtil.MakeLabel(Se.Language.Video.BurnIn.PixelFormat);
         var comboBoxPixelFormat = UiUtil.MakeComboBox(vm.VideoPixelFormats, vm, nameof(vm.SelectedVideoPixelFormat));
 
+        var labelVideoExtension = UiUtil.MakeLabel(Se.Language.General.VideoExtension);
+        var comboBoxVideoExtension = UiUtil.MakeComboBox(vm.VideoExtensions, vm, nameof(vm.SelectedVideoExtension));
+
         var grid = new Grid
         {
             RowDefinitions =
             {
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
@@ -434,6 +514,9 @@ public class BurnInWindow : Window
 
         grid.Add(labelPixelFormat, 4, 0);
         grid.Add(comboBoxPixelFormat, 4, 1);
+
+        grid.Add(labelVideoExtension, 5, 0);
+        grid.Add(comboBoxVideoExtension, 5, 1);
 
         return UiUtil.MakeBorderForControl(grid).WithMarginBottom(5).WithMarginRight(5);
     }
@@ -506,21 +589,21 @@ public class BurnInWindow : Window
         vm.VideoPlayerControl = InitVideoPlayer.MakeVideoPlayer();
         vm.VideoPlayerControl.FullScreenIsVisible = true;
         vm.VideoPlayerControl.FullScreenCommand = vm.PreviewFullScreenCommand;
-        vm.VideoPlayerControl.Width = 480;
-        vm.VideoPlayerControl.Height = 270;
-        vm.VideoPlayerControl.HorizontalAlignment = HorizontalAlignment.Left;
-        vm.VideoPlayerControl.VerticalAlignment = VerticalAlignment.Top;
+        vm.VideoPlayerControl.MinWidth = 480;
+        vm.VideoPlayerControl.MinHeight = 270;
+        vm.VideoPlayerControl.HorizontalAlignment = HorizontalAlignment.Stretch;
+        vm.VideoPlayerControl.VerticalAlignment = VerticalAlignment.Stretch;
 
         var grid = new Grid
         {
             RowDefinitions =
             {
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
-                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }, // video player grows
             },
             ColumnDefinitions =
             {
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) },
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
             },
             ColumnSpacing = 5,
             RowSpacing = 5,
@@ -708,9 +791,15 @@ public class BurnInWindow : Window
         var checkBoxUseTargetFileSize = UiUtil.MakeCheckBox(Se.Language.Video.BurnIn.TargetFileSize, vm, nameof(vm.UseTargetFileSize));
         checkBoxUseTargetFileSize.IsCheckedChanged += (_, _) => vm.CheckBoxTargetFileChanged();
 
-        var labelTargetFileSize = UiUtil.MakeLabel(Se.Language.Video.BurnIn.FileSizeMb);
+        // "Match source video size" derives the target from each input file's own size (works per-file
+        // in batch mode); when on, the fixed-MB field is irrelevant and is disabled.
+        var checkBoxMatchSource = UiUtil.MakeCheckBox(Se.Language.Video.BurnIn.MatchSourceVideoSize, vm, nameof(vm.MatchSourceVideoSize))
+            .WithMarginLeft(10);
+
+        var labelTargetFileSize = UiUtil.MakeLabel(Se.Language.Video.BurnIn.FileSizeMb).WithMarginLeft(10);
         var numericUpDownTargetFileSize = UiUtil.MakeNumericUpDownInt(1, 1000_000_000, 0, 150, vm, nameof(vm.TargetFileSize));
         numericUpDownTargetFileSize.ValueChanged += vm.NumericUpDownTargetFileSizeChanged;
+        numericUpDownTargetFileSize.Bind(NumericUpDown.IsEnabledProperty, new Binding(nameof(vm.MatchSourceVideoSize)) { Converter = new InverseBooleanConverter() });
         var labelVideoBitRate = UiUtil.MakeLabel(string.Empty).WithBindText(vm, nameof(vm.TargetVideoBitRateInfo));
         labelVideoBitRate.FontSize = 10;
         labelVideoBitRate.Opacity = 0.7;
@@ -732,6 +821,7 @@ public class BurnInWindow : Window
             {
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
             },
             ColumnDefinitions =
             {
@@ -745,11 +835,14 @@ public class BurnInWindow : Window
         };
 
         grid.Add(checkBoxUseTargetFileSize, 0, 0, 1, 2);
-        grid.Add(labelTargetFileSize, 1, 0);
-        grid.Add(panelTargetFileSize, 1, 1);
+        grid.Add(checkBoxMatchSource, 1, 0, 1, 2);
+        grid.Add(labelTargetFileSize, 2, 0);
+        grid.Add(panelTargetFileSize, 2, 1);
 
+        // Visible in batch mode too, so each file can target its own source size (issue #11802).
+        // MarginBottom(5) matches every other settings box so the borders line up across columns.
         return UiUtil.MakeBorderForControl(grid)
-            .WithBindIsVisible(nameof(vm.IsBatchMode), new InverseBooleanConverter())
+            .WithMarginBottom(5)
             .WithMarginRight(5);
     }
 
@@ -785,6 +878,7 @@ public class BurnInWindow : Window
 
         return UiUtil.MakeBorderForControl(grid)
             .WithBindIsVisible(nameof(vm.IsBatchMode), new InverseBooleanConverter())
+            .WithMarginBottom(5)
             .WithMarginRight(5);
     }
 

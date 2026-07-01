@@ -78,6 +78,14 @@ public class LanguageAssa
     public string StylesTitle { get; set; }
     public string StylesInFile { get; set; }
     public string StylesSaved { get; set; }
+    public string Category { get; set; }
+    public string AllCategories { get; set; }
+    public string DefaultCategory { get; set; }
+    public string NewCategory { get; set; }
+    public string RenameCategory { get; set; }
+    public string DeleteCategory { get; set; }
+    public string MoveToCategoryDotDotDot { get; set; }
+    public string DeleteCategoryQuestion { get; set; }
     public string StylesTitleX { get; set; }
     public string PropertiesTitleX { get; set; }
     public string AttachmentsTitleX { get; set; }
@@ -97,6 +105,7 @@ public class LanguageAssa
     public string CopyToFileStyles { get; set; }
     public string SetStyleAsDefault { get; set; }
     public string TakeUsagesFromDotDotDot { get; set; }
+    public string ReplaceStyleWithDotDotDot { get; set; }
     public string NoAttachmentsFound { get; set; }
     public string DeleteStyleQuestion { get; set; }
     public string DeleteStylesQuestion { get; set; }
@@ -117,6 +126,7 @@ public class LanguageAssa
     public string SpinIn { get; set; }
     public string PlayCurrent { get; set; }
     public string SetPosition { get; set; }
+    public string Rotation { get; set; }
     public string ImageColorPicker { get; set; }
     public string CopyColorAsHextoClipboard { get; set; }
     public string GeneratingBackgroundBoxXOfY { get; set; }
@@ -281,6 +291,14 @@ public class LanguageAssa
         StylesTitle = "Advanced Sub Station Alpha styles";
         StylesInFile = "Styles in file";
         StylesSaved = "Styles saved";
+        Category = "Category";
+        AllCategories = "[All]";
+        DefaultCategory = "Default";
+        NewCategory = "New category...";
+        RenameCategory = "Rename category...";
+        DeleteCategory = "Delete category";
+        MoveToCategoryDotDotDot = "Move to category...";
+        DeleteCategoryQuestion = "Delete category \"{0}\"? Styles in it will be moved to the default category.";
         StylesTitleX = "Styles - {0}";
         PropertiesTitleX = "Properties - {0}";
         AttachmentsTitleX = "Attachments - {0}";
@@ -300,6 +318,7 @@ public class LanguageAssa
         CopyToFileStyles = "Copy to file styles";
         SetStyleAsDefault = "Set style as default";
         TakeUsagesFromDotDotDot = "Take usages from...";
+        ReplaceStyleWithDotDotDot = "Replace style with...";
         NoAttachmentsFound = "No attachments found in selected ASSA file.";
         DeleteStyleQuestion = "Delete style?";
         DeleteStylesQuestion = "Delete styles?";
@@ -320,6 +339,7 @@ public class LanguageAssa
         SpinIn = "Spin in";
         PlayCurrent = "Play current";
         SetPosition = "Set position";
+        Rotation = "Rotation";
         ImageColorPicker = "Image color picker";
         CopyColorAsHextoClipboard = "Copy color as hex to clipboard";
         GeneratingBackgroundBoxXOfY = "Generating background box {0} of {1}...";

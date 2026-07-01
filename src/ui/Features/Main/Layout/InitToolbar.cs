@@ -8,6 +8,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Styling;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
@@ -31,7 +32,7 @@ public static class InitToolbar
 
     private static string _imagePath = string.Empty;
 
-    private static Grid CreateToolbar(MainViewModel vm)
+    private static void EnsureImagePath()
     {
         _imagePath = Path.Combine(Se.ThemesFolder, UiTheme.ThemeName);
         if (!Directory.Exists(_imagePath))
@@ -47,6 +48,11 @@ public static class InitToolbar
                 _imagePath = path;
             }
         }
+    }
+
+    private static Grid CreateToolbar(MainViewModel vm)
+    {
+        EnsureImagePath();
 
         var stackPanelLeft = new StackPanel
         {
@@ -271,6 +277,19 @@ public static class InitToolbar
             isLastSeparator = false;
         }
 
+        if (appearance.ToolbarShowSourceView)
+        {
+            stackPanelLeft.Children.Add(new Button
+            {
+                Content = MakeImage("SourceView"),
+                Command = vm.ShowSourceViewCommand,
+                Background = Brushes.Transparent,
+                [AutomationProperties.NameProperty] = Se.Language.Options.Shortcuts.SourceView,
+                [ToolTip.TipProperty] = UiUtil.MakeToolTip(Se.Language.Options.Shortcuts.SourceView + " {0}", shortcuts, nameof(vm.ShowSourceViewCommand)),
+            });
+            isLastSeparator = false;
+        }
+
         if (appearance.ToolbarShowHelp)
         {
             if (!isLastSeparator)
@@ -323,8 +342,8 @@ public static class InitToolbar
             Content = MakeImage("AssaStyle"),
             Command = vm.ShowSsaStylesCommand,
             Background = Brushes.Transparent,
-            [AutomationProperties.NameProperty] = languageHints.AssaStylesHint,
-            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.AssaStylesHint, shortcuts, nameof(vm.ShowSsaStylesCommand)),
+            [AutomationProperties.NameProperty] = languageHints.SsaStylesHint,
+            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.SsaStylesHint, shortcuts, nameof(vm.ShowSsaStylesCommand)),
             [!Visual.IsVisibleProperty] = new Binding(nameof(vm.IsFormatSsa))
             {
                 Source = vm,
@@ -336,8 +355,8 @@ public static class InitToolbar
             Content = MakeImage("AssaProperties"),
             Command = vm.ShowSsaPropertiesCommand,
             Background = Brushes.Transparent,
-            [AutomationProperties.NameProperty] = languageHints.AssaPropertiesHint,
-            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.AssaPropertiesHint, shortcuts, nameof(vm.ShowSsaPropertiesCommand)),
+            [AutomationProperties.NameProperty] = languageHints.SsaPropertiesHint,
+            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.SsaPropertiesHint, shortcuts, nameof(vm.ShowSsaPropertiesCommand)),
             [!Visual.IsVisibleProperty] = new Binding(nameof(vm.IsFormatSsa))
             {
                 Source = vm,
@@ -349,8 +368,8 @@ public static class InitToolbar
             Content = MakeImage("AssaAttachments"),
             Command = vm.ShowSsaAttachmentsCommand,
             Background = Brushes.Transparent,
-            [AutomationProperties.NameProperty] = languageHints.AssaAttachmentsHint,
-            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.AssaAttachmentsHint, shortcuts, nameof(vm.ShowSsaAttachmentsCommand)),
+            [AutomationProperties.NameProperty] = languageHints.SsaAttachmentsHint,
+            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.SsaAttachmentsHint, shortcuts, nameof(vm.ShowSsaAttachmentsCommand)),
             [!Visual.IsVisibleProperty] = new Binding(nameof(vm.IsFormatSsa))
             {
                 Source = vm,
@@ -495,11 +514,34 @@ public static class InitToolbar
         grid.Add(stackPanelLeft, 0, 0);
         grid.Add(stackPanelRight, 0, 1);
 
+        // SE 4 drew toolbar icons as flat, borderless buttons. The Classic theme's
+        // global Button style (UiTheme.ApplyWindowsClassicGray) adds a 1px border to
+        // every button; this style is scoped to the toolbar grid so it strips the
+        // border from the toolbar buttons only - buttons elsewhere keep their border.
+        if (UiTheme.ThemeName == UiTheme.ThemeNameClassic)
+        {
+            grid.Styles.Add(new Style(x => x.OfType<Button>())
+            {
+                Setters =
+                {
+                    new Setter(Button.BorderThicknessProperty, new Thickness(0)),
+                    new Setter(Button.BorderBrushProperty, Brushes.Transparent),
+                },
+            });
+        }
+
         return grid;
     }
 
-    private static Image MakeImage(string image)
+    // Public so other windows (e.g. the spell-check completed dialog) can reuse the exact same
+    // themed/recolored toolbar icons. EnsureImagePath keeps it usable before the toolbar is built.
+    public static Image MakeImage(string image)
     {
+        if (string.IsNullOrEmpty(_imagePath))
+        {
+            EnsureImagePath();
+        }
+
         return new Image
         {
             Source = MakeOneColor(Path.Combine(_imagePath, image + ".png")),

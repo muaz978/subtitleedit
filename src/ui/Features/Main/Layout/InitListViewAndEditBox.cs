@@ -95,10 +95,6 @@ public static partial class InitListViewAndEditBox
             HorizontalGridLinesBrush = UiUtil.GetBorderBrush(),
             FontSize = Se.Settings.Appearance.SubtitleGridFontSize,
         };
-        if (!string.IsNullOrEmpty(Se.Settings.Appearance.SubtitleTextBoxAndGridFontName))
-        {
-            vm.SubtitleGrid.FontFamily = new FontFamily(Se.Settings.Appearance.SubtitleTextBoxAndGridFontName);
-        }
 
         // hack to make drag and drop work on the DataGrid - also on empty rows
         var dropHost = new Border
@@ -128,7 +124,7 @@ public static partial class InitListViewAndEditBox
         var booleanToGridLengthConverter = new BooleanToGridLengthConverter();
         var booleanAndConverter = BooleanAndConverter.Instance;
 
-        // Optional alternating row background (hidden setting, no UI yet)
+        // Optional alternating row background (Options > Settings > Appearance)
         IBrush? alternatingRowBrush = null;
         if (Se.Settings.Appearance.GridAlternatingRows)
         {
@@ -757,6 +753,11 @@ public static partial class InitListViewAndEditBox
         insertLineMenuItem.Command = vm.InsertLineAtEndCommand;
         flyout.Items.Add(insertLineMenuItem);
 
+        var insertSubtitleFileAfterLineMenuItem = new MenuItem { Header = Se.Language.General.InsertSubtitleAfterCurrentLine, DataContext = vm };
+        insertSubtitleFileAfterLineMenuItem.Bind(Visual.IsVisibleProperty, new Binding(nameof(vm.IsInsertSubtitleFileAfterLineVisible)));
+        insertSubtitleFileAfterLineMenuItem.Command = vm.InsertSubtitleFileAfterThisLineCommand;
+        flyout.Items.Add(insertSubtitleFileAfterLineMenuItem);
+
         var copyOriginal = new MenuItem { Header = Se.Language.Main.CopyTextFromOriginalToCurrent, Command = vm.ColumnCopyTextFromOriginalToCurrentCommand };
         copyOriginal.Bind(Visual.IsVisibleProperty, new Binding(nameof(vm.ShowColumnOriginalText)));
 
@@ -991,6 +992,12 @@ public static partial class InitListViewAndEditBox
                     Command = vm.ShowBeautifyTimeCodesSelectedLinesCommand,
                     DataContext = vm,
                 },
+                new MenuItem
+                {
+                    Header = Se.Language.Main.Menu.RemoveTextForHearingImpaired,
+                    Command = vm.RemoveTextForHearingImpairedSelectedLinesCommand,
+                    DataContext = vm,
+                },
                 new Separator { DataContext = vm },
                 new MenuItem
                 {
@@ -1055,6 +1062,13 @@ public static partial class InitListViewAndEditBox
                     Command = vm.StatisticsSelectedLinesCommand,
                     DataContext = vm,
                 },
+                new Separator { DataContext = vm },
+                new MenuItem
+                {
+                    Header = Se.Language.Main.Menu.SaveAs,
+                    Command = vm.SaveSelectedLinesAsCommand,
+                    DataContext = vm,
+                },
             }
         };
         menuItemSelectedLines.Bind(Visual.IsVisibleProperty, new Binding(nameof(vm.IsSubtitleGridDataMenuVisible)));
@@ -1102,9 +1116,12 @@ public static partial class InitListViewAndEditBox
             UseVideoOffset = true,
             [AutomationProperties.NameProperty] = Se.Language.General.StartTime,
         };
+        // With a separate end-time editor, moving start should keep the end fixed
+        // (StartTimeOnly). Without one, moving start drags the whole line keeping
+        // its duration (StartTimeKeepDuration).
         var startTimeBindingName = nameof(vm.SelectedSubtitle) + "." + (Se.Settings.Appearance.ShowUpDownEndTime
             ? nameof(SubtitleLineViewModel.StartTimeOnly)
-            : nameof(SubtitleLineViewModel.StartTime));
+            : nameof(SubtitleLineViewModel.StartTimeKeepDuration));
         timeCodeUpDown[!TimeCodeUpDown.ValueProperty] = new Binding(startTimeBindingName)
         {
             Mode = BindingMode.TwoWay,
@@ -1723,7 +1740,7 @@ public static partial class InitListViewAndEditBox
         var textEditor = MakeTextEditor();
 
         var defaultBorderBrush = UiUtil.GetBorderBrush();
-        var focusedBorderBrush = new SolidColorBrush(Colors.DodgerBlue);
+        var focusedBorderBrush = UiUtil.GetAccentBrush();
 
         var textEditorBorder = new Border
         {
@@ -1762,7 +1779,6 @@ public static partial class InitListViewAndEditBox
             Height = 92,
             FontSize = Se.Settings.Appearance.SubtitleTextBoxFontSize,
             FontWeight = Se.Settings.Appearance.SubtitleTextBoxFontBold ? FontWeight.Bold : FontWeight.Normal,
-            WordWrap = true,
             ShowLineNumbers = false,
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
@@ -1782,6 +1798,10 @@ public static partial class InitListViewAndEditBox
         {
             textEditor.FontFamily = new FontFamily(Se.Settings.Appearance.SubtitleTextBoxAndGridFontName);
         }
+
+        // Enable word wrap after the editor is otherwise configured so AvaloniaEdit
+        // can apply its built-in "wrap disables horizontal scrolling" behavior.
+        textEditor.WordWrap = true;
 
         return textEditor;
     }
@@ -1830,7 +1850,7 @@ public static partial class InitListViewAndEditBox
         var textEditor = MakeTextEditor();
 
         var defaultBorderBrush = UiUtil.GetBorderBrush();
-        var focusedBorderBrush = new SolidColorBrush(Colors.DodgerBlue);
+        var focusedBorderBrush = UiUtil.GetAccentBrush();
 
         var textEditorBorder = new Border
         {

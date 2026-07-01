@@ -10,6 +10,10 @@ internal class Program
 {
     static int Main(string[] args)
     {
+        // Must run before any SkiaSharp.HarfBuzz use (image-based export) so the bundled
+        // libHarfBuzzSharp deep-binds its own hb_* symbols and doesn't crash on Linux (#11864).
+        Nikse.SubtitleEdit.UiLogic.HarfBuzzNativeFix.Apply();
+
         // Encoding code pages and the headless EBU UI helper are wired by the
         // module initializer in SeConv.Core.Bootstrap.
 
@@ -70,6 +74,10 @@ internal class Program
             }
         }
 
+        // Capture the raw args so the convert command can recover operation order/repetition
+        // (Spectre collapses repeated flags and discards ordering).
+        ConvertCommand.RawArgs = args;
+
         // Set up Spectre.Console CLI with default command
         var app = new CommandApp<ConvertCommand>();
         app.Configure(config =>
@@ -86,10 +94,10 @@ internal class Program
         }
         catch (Exception ex)
         {
-            AnsiConsole.MarkupLine($"[red]Fatal error: {ex.Message}[/]");
+            AnsiConsole.MarkupLineInterpolated($"[red]Fatal error: {ex.Message}[/]");
             if (ex.InnerException != null)
             {
-                AnsiConsole.MarkupLine($"[red]  {ex.InnerException.Message}[/]");
+                AnsiConsole.MarkupLineInterpolated($"[red]  {ex.InnerException.Message}[/]");
             }
             return 1;
         }
@@ -293,7 +301,7 @@ internal class Program
             }
             else
             {
-                AnsiConsole.MarkupLine($"[red]Error: {ex.Message.EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLineInterpolated($"[red]Error: {ex.Message}[/]");
             }
             return 1;
         }

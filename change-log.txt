@@ -1,6 +1,222 @@
 
 Subtitle Edit Changelog
 
+v5.1.0-beta4 (1st of July 2026)
+
+* Add CSV import/export to Multiple replace - thx faon-92
+* Add a re-usable "Apply" button to Multiple replace (SE4 parity) - thx KaDeeKe
+* Add a "New" button to the Fix common errors rule profiles window - thx MbuguaDavid
+* Spell check: show a completion summary (changed/skipped/correct/names/added) with a "do not show again" option (SE4 parity) - thx cyberbrix
+* Fix common errors: restore the keyboard flow so Return advances and applies fixes (SE4 parity) - thx KaDeeKe
+* Focus the subtitle grid after extracting a subtitle from an mkv, so Ctrl+S works right away - thx KaDeeKe
+* Fix icon-button hints not showing in dialogs on macOS
+* Fix Google Lens OCR including server retry messages in the OCR text - thx LurkingNinja
+* Fix bare Alt not activating the main menu bar on Windows
+* Fix small custom-millisecond video seeks being unreliable on a single key press - thx AndryOut
+* Fix Option+Arrow word navigation in the color-tag / source-view text editors on macOS - thx mjuhasz
+* Fix Escape closing the Binary edit window when a dialog was opened from its context menu - thx mjuhasz
+* Fix the status dot and description in the "Get dictionaries" window - thx ivandrofly
+* Fix garbled Korean/CJK text in the Linux Flatpak build (bundle Noto Sans CJK)
+* Fix caret misplacement on macOS by defaulting the UI font to Helvetica Neue - thx mjuhasz
+* Fix the waveform cursor lagging/jittering when pausing playback - thx AndryOut
+
+-----------------------------------------------------------------------------------------------------
+
+v5.1.0-beta3 (30th of June 2026)
+
+* Add DeepL formality picker (SE4 parity) - thx fraternl
+* Add ASSA "Replace style with..." (SE4 parity)
+* Add "Apply" button to "Remove text for hearing impaired" - thx fraternl
+* Remove text for hearing impaired: show count of lines found - thx bptrsn
+* Add editable whitelist for "Remove if all uppercase" - thx muaz978
+* Add a text box for the grid single-line separator (Settings) - thx bichitoxxx
+* Show the grid single-line separator in a distinct color
+* Auto-translate (llama.cpp): add Qwen 3.5 and Aya Expanse models
+* Enable Qwen3 ASR CPP speech-to-text on macOS
+* Add CrispASR ARK-ASR speech-to-text backend
+* Update CrispASR to v0.8.6
+* Update llama.cpp to b9833
+* Waveform: block overlap when drag-creating a new selection - thx muaz978
+* Spell check: recognize hyphenated names from the names list - thx samdoesknow
+* Fix spell check flagging words wrapped in single quotes (e.g. 'Een) - thx fraternl
+* Fix dialogs (Settings etc.) opening behind undocked video/audio windows - thx GrampaWildWilly
+* Fix invalid JSON in AI translate request bodies - thx korsosattila73
+* Fix "go to next/previous subtitle from video position" skipping lines - thx muaz978
+* Fix stuck shortcut keys when the main window loses focus - thx muaz978
+* Fix regex \r\n / \n not matching line breaks in Find and Multiple replace - thx KaDeeKe
+* Fix "Save as" not converting source-format native tags when changing format - thx wjcarpenter
+* Fix Visual sync not honoring the selected audio track - thx zoltan-antal
+* Fix menu: Escape needing a 3rd press and stale menu state after Alt+Tab - thx kylesskim-sys
+* Fix CrispASR Parakeet ignoring the selected language - thx sergechaly
+* Fix Qwen3 ASR (CPP) failing with "'0x0D' is invalid within a JSON string" - thx ProFire
+* Fix unsaved-changes prompt treating a dismissed dialog (close/Escape) as a choice - thx pdjdev
+* Fix Blu-ray sup export crash on Linux (HarfBuzz symbol clash) - thx CannaraX
+* Fix umlaut diacritics (Ä/Ö/Ü) clipped in the OCR window on macOS - thx Bastians-Bits
+* Fix VLC not loading from a path with non-ASCII characters (e.g. Chinese) - thx StandAloof
+* Use nameof for rule IDs in FixCommonErrorsRunner - thx ivandrofly
+* Update Turkish translation - thx bilimiyorum
+* Update Japanese translation - thx hisui3393
+* Update Italian translation - thx bovirus
+* Update Korean translation - thx 12si27
+
+-----------------------------------------------------------------------------------------------------
+
+v5.1.0-beta2 (28th of June 2026)
+
+* Update CrispASR to v0.8.5
+* Add ASSA style categories - group storage styles (e.g. per project) in the Styles window - thx bichitoxxx
+* ASSA styles: keep the "Set style" menu in style order instead of sorting alphabetically - thx bichitoxxx
+* Batch convert: honor the selected custom text format and add the image-based formats in the format picker
+* Add "Remove text for hearing impaired" and "Save as..." to the grid "Selected lines" menu
+* OCR: auto-select the spell-check dictionary from the OCR language (SE4 parity) - thx fraternl
+* OCR: use user OCR-fix replace lists (e.g. xxx_OCRFixReplaceList_User.xml) - thx fraternl
+* seconv: support "Fix common OCR errors" with bundled English dictionaries
+* Binary edit: correctness, resource-safety and selection fixes
+* Make icon-button tooltips honor the "Show hints" appearance setting
+* Fix text box selection shortcuts (e.g. "Selection to lowercase") being inactive and hidden - thx abc16361
+* Fix EBU STL Save/Save As writing an invalid 14-byte file - thx jancisefcik
+* Fix seconv failing to start due to a SkiaSharp native/managed version mismatch - thx pcspeak
+* Update Portuguese (Brazil) translation - thx igorruckert
+* Update Turkish translation - thx bilimiyorum
+* Update Korean translation - thx 12si27
+* Fix "Join subtitles" by time codes not sorting the joined lines by time - thx han8mr8
+* seconv: run operations in the given order, repeating each occurrence (e.g. "--fix-common-errors" twice runs two passes) - thx Rouzax
+* seconv: bundle the Linux native libs (libSkiaSharp/libHarfBuzzSharp) so Fix common errors no longer crashes - thx Rouzax
+* seconv: expose the Fix-common-errors profile values (min gap, CPS, max lines, dialog/continuation style, ...) in --settings JSON - thx Rouzax
+* Add option to not auto-generate the waveform when opening a video (click the empty waveform to generate) - thx nugemon
+* "Set up like Subtitle Edit 4" now shows grid line breaks as "<br />" on a single row, like SE4 - thx bichitoxxx
+* Redesign the "Change speed" dialog to match the "Adjust all times" dialog - thx mjuhasz
+* Fix "Change speed" radio buttons disabled/not respected in the main window - thx mjuhasz
+* Binary edit: wire up "Change speed", respect the selected-lines radio, and always apply "Change frame rate" to all lines - thx mjuhasz
+* Binary edit: keep the grid scroll position after "Adjust all times" and "Change speed" - thx mjuhasz
+* Binary edit: add "Adjust color" for selected lines in the image-based subtitle editor (Tools > Selected lines) - thx mjuhasz
+* Spell check: show the source image for the current line - auto-attached after OCR, or loaded via the image button left of Done (Blu-ray sup, VobSub, BDN XML, transport stream, Matroska) - thx fraternl
+* Add two more configurable "move video position custom" forward/back jumps (custom 3 and 4)
+* Main and binary-edit menu: Alt/F10 toggle menu activation and Escape deactivates it (Windows standard) - thx GrampaWildWilly
+* Update Polish translation - thx Adam Malich
+* Update Japanese translation - thx hisui3393
+* Update Italian translation - thx bovirus
+* Update Bulgarian translation - thx jekovcar
+* Update Russian translation - thx jekovcar
+* Use asynchronous JSON serialization in the plugin runner - thx ivandrofly
+* Fix video playback speed reverting to 1.0x after changing settings or layout - thx Hakunamatata67
+
+-----------------------------------------------------------------------------------------------------
+
+v5.1.0-beta1 (26th June 2026)
+
+* Add auto-save of the open subtitle file (Options > General) - thx muaz978
+* Add remote/external llama.cpp server (URL) option to auto-translate - thx muaz978
+* Add HTML index export to binary edit - thx mjuhasz
+* Add "Toggle translation mode" command/shortcut (SE4 parity)
+* Add "Play next (and stop)" and "Play next (and loop)" shortcuts - thx nguyenphuc2312
+* Add "Play previous (and stop)" and "Play previous (and loop)" shortcuts
+* Add "Treat words ending in 'in'' as 'ing'" spell check setting - thx RedSoxFan04
+* Add Undo button to spell check (SE4 parity)
+* Add grid context menu "insert subtitle after current line" on the last line
+* Add grid alternating-row coloring option to Appearance settings
+* Add a couple of "Extend" shortcuts from SE4 - thx OmrSi
+* Bridge more SE4 shortcuts in the SE4 settings importer
+* Open original subtitle into an empty subtitle as a blank translation
+* Drag a multi-line selection in the waveform to shift all time codes together - thx wuwufei
+* Spell check can continue from the current line and wrap around (SE4 parity) - thx p1nkyy
+* F10 focuses the main menu for keyboard/screen-reader access - thx kylesskim-sys
+* Restore horizontal grid lines in the waveform
+* Improve Dutch casing rules ('s/'t contractions and IJ digraph)
+* Batch convert: pluralize the remove-files confirmation for multi-select
+* Use ffmpeg from the system PATH (v7+) when the download fails
+* Update CrispASR to v0.8.4
+* Update whisper.cpp to v1.9.1
+* Fix "Save as" to ASSA using Arial instead of the configured default style - thx korsosattila73
+* Fix proxy settings not being saved - thx baoyu0
+* Fix Split tool dropping the last part; default output to the source folder
+* Fix SSA toolbar hints showing "Advanced Sub Station Alpha"
+* Fix missing window title on the ASSA/SSA style picker
+* Fix found/selected grid row not always being fully scrolled into view - thx subcor
+* Fix Bold shortcut bolding the whole line instead of the selected words - thx Khaztaroth
+* Fix profile editor not showing/saving the chars/sec and words/min values - thx Khaztaroth
+* Make "Merge continuation lines" work with CJK text (treat like English) - thx acc4github
+* Change the default "Auto-break text" shortcut from Ctrl+R to Ctrl+Alt+B
+* Align the CJK merge shortcut label with SE4 wording
+* Localize "Set up like Subtitle Edit 4" dialog strings
+* Add an assignable "Waveform insert new selection" shortcut (SE4 parity) - thx geroyannis
+* Add a Tesseract OCR engine-mode setting (SE4 parity)
+* Add accessible names to the waveform toolbar controls for screen readers
+* Burn-in: default the target file size to the source video size, and add per-file target size in batch mode
+* Extend Dutch casing contractions to apply after a colon and a mid-paragraph period
+* Fix OCR word colors and subtitle-image background contrast in light mode
+* Shorten and resize a long video file name in the player so it no longer overlaps the position info
+* Add "Play from just before text" video shortcut (SE4 parity) - thx GordonLeekt
+* Add "Move text after cursor position to next subtitle and go to next" (and a "...and play" variant) shortcuts (SE4 parity) - thx kadrimarzouki
+* Add "Set start and keep duration" shortcut (SE4 parity)
+* Add "Set end, add new and go to new" shortcuts (SE4 parity) - thx Estevarena
+* Add "Auto detect" language for the standard Whisper engines - thx l0uev4-lab
+* Add an "Add custom model" GUI for the Whisper engines - thx l0uev4-lab
+* Make the waveform "Toolbar items" settings row findable in search
+* Binary edit: F10 focuses the menu and menu keys no longer close the window - thx kylesskim-sys
+* Improve CJK UI text rendering and font fallbacks on Linux
+* Optimize waveform/spectrogram drawing
+* Clean up speech-to-text temp files via a per-run subfolder - thx l0uev4-lab
+* Fix 24 fps being read as 23.976 (and 30 as 29.97) - thx Larxen
+* Fix Find Next/Previous shortcuts while the Find/Replace window is open - thx mjuhasz
+* Fix "Surround with" placing symbols outside formatting tags - thx mjuhasz
+* Fix EBU STL export writing a blank Display Standard Code
+* Fix multi-character custom tags in "Remove text for hearing impaired" - thx l0uev4-lab
+* Fix Tesseract OCR blanking colored (non-white) text, and surface OCR errors instead of blank lines
+* Fix Ollama OCR runaway repetition / hang
+* Fix ASSA "Set position" frame grab and rotation, and the blank preview - thx bichitoxxx
+* Add Traditional Chinese (zh-Hant) translation - thx love80312
+* Add Hebrew and Swedish whisper.cpp models for download - thx darnn
+* Update Italian translation - thx bovirus
+* Update Korean translation - thx 12si27
+* Update Russian translation - thx jekovcar
+* Update Bulgarian translation - thx jekovcar
+* Update Polish translation - thx potplayer-fanpack
+
+-----------------------------------------------------------------------------------------------------
+
+v5.0.0 (22nd June 2026)
+
+  Subtitle Edit 5 is a major new release and a big step for the project. 
+  For the first time, Subtitle Edit runs natively on Windows, macOS, and Linux
+  from a single, modern, cross-platform codebase. 
+  The builds are self-contained, so no separate .NET installation is required, 
+  and on macOS and Linux the needed media components (mpv/ffmpeg) are bundled in.
+ 
+  Please read before upgrading:
+ 
+  Subtitle Edit 5 is a new application, not just an update of Subtitle Edit 4.
+  It has been rebuilt from the ground up to be cross-platform, so:
+ 
+  - It is not 100% the same app. The look, layout, and some workflows have
+    changed. Some things are in different places, and a few behave differently
+    than in SE4.
+  - Not every SE4 feature exists in SE5 yet. SE5 covers all the core editing,
+    conversion, sync, video playback, OCR, and online services, but some of the
+    more specialized SE4 tools are not available yet. Features will continue to
+    be added.
+ 
+  If you rely on a specific SE4 feature that is missing, please keep SE4
+  installed alongside SE5. The easiest way to run both side by side is to use
+  the Portable versions of SE4 and SE5, which keep their settings separate and
+  do not interfere with each other.
+ 
+  Which version should I use?
+   
+  - Subtitle Edit 5: recommended for most users on Windows 10 (22H2) or newer,
+    macOS 12+, and Linux.
+  - Subtitle Edit 4: please continue to use SE4 if you are on an older Windows
+    version (Windows 7/8), or on older / slower computers where SE5 may not run well. 
+    SE4 remains available and is the right choice in those cases.
+ 
+  To run SE4 and SE5 at the same time, use the Portable versions - you can try
+  SE5 while keeping SE4 as a fallback.
+ 
+  Feedback is welcome on the issue tracker - it directly helps prioritize what
+  comes next. Thank you to everyone who has supported and contributed to
+  Subtitle Edit over the years :)
+
+-----------------------------------------------------------------------------------------------------
 
 v5.0.0-rc4 (11th of June 2026)
 

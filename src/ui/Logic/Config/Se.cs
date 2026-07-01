@@ -15,7 +15,7 @@ namespace Nikse.SubtitleEdit.Logic.Config;
 
 public class Se
 {
-    public static string Version { get; set; } = "v5.0.0-rc4";
+    public static string Version { get; set; } = "v5.1.0-beta4";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -151,6 +151,7 @@ public class Se
         folders.Add("/usr/bin");
         folders.Add("/opt/homebrew/bin");
         folders.Add("/opt/local/bin");
+        folders.Add("/app/bin"); // bundled into the Flatpak sandbox (issue #11646)
 
         foreach (var folder in folders)
         {
@@ -169,41 +170,36 @@ public class Se
 
     private static string ResolveTesseractModelFolder()
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        var modelFolder = Path.Combine(DataFolder, "Tesseract550", "tessdata");
+        SeedBundledTesseractModels(modelFolder);
+        return modelFolder;
+    }
+
+    // In the Flatpak sandbox the English model is bundled read-only at
+    // /app/share/tessdata (issue #11646). Copy it into the writable model folder
+    // on first use so OCR works out of the box; additional languages are still
+    // downloaded into the same folder by DownloadTesseractModelViewModel.
+    private static void SeedBundledTesseractModels(string modelFolder)
+    {
+        const string bundledEng = "/app/share/tessdata/eng.traineddata";
+        if (!System.IO.File.Exists(bundledEng))
         {
-            return Path.Combine(TesseractFolder, "tessdata");
+            return;
         }
 
-        var folders = new List<string>();
-
-        if (Directory.Exists("/opt/homebrew/Cellar/tesseract-lang"))
+        try
         {
-            foreach (var folder in Directory.EnumerateDirectories("/opt/homebrew/Cellar/tesseract-lang"))
+            var target = Path.Combine(modelFolder, "eng.traineddata");
+            if (!System.IO.File.Exists(target))
             {
-                folders.Add(Path.Combine(folder, "share/tessdata"));
+                Directory.CreateDirectory(modelFolder);
+                System.IO.File.Copy(bundledEng, target);
             }
         }
-
-        if (Directory.Exists("/usr/share/tesseract-ocr"))
+        catch (Exception ex)
         {
-            foreach (var folder in Directory.EnumerateDirectories("/usr/share/tesseract-ocr"))
-            {
-                folders.Add(Path.Combine(folder, "tessdata"));
-            }
+            SeLogger.Error("Error seeding bundled Tesseract model: " + ex.Message);
         }
-
-        folders.Add("/usr/share/tessdata");
-        folders.Add("/opt/homebrew/share/tessdata/");
-
-        foreach (var folder in folders)
-        {
-            if (Directory.Exists(folder))
-            {
-                return folder;
-            }
-        }
-
-        return Path.Combine(TesseractFolder, "tessdata");
     }
 
     public void InitializeMainShortcuts(MainViewModel vm)
@@ -468,6 +464,17 @@ public class Se
         Configuration.Settings.General.UseDarkTheme = Settings.Appearance.Theme == "Dark";
         Configuration.Settings.General.UseTimeFormatHHMMSSFF = Settings.General.UseFrameMode;
 
+        Configuration.Settings.Proxy.ProxyAddress = Settings.General.ProxyAddress ?? string.Empty;
+        Configuration.Settings.Proxy.UserName = Settings.General.ProxyUserName ?? string.Empty;
+        if (!string.IsNullOrEmpty(Settings.General.ProxyPassword))
+        {
+            Configuration.Settings.Proxy.EncodePassword(Settings.General.ProxyPassword);
+        }
+        else
+        {
+            Configuration.Settings.Proxy.Password = null;
+        }
+
         var stt = Settings.Tools.AudioToText;
         Configuration.Settings.Tools.WhisperChoice = stt.WhisperChoice;
         Configuration.Settings.Tools.WhisperIgnoreVersion = stt.WhisperIgnoreVersion;
@@ -590,7 +597,17 @@ public class Se
 
     public static void WriteToolsLog(string log)
     {
-        if (!Settings.Tools.WriteToolsLog)
+        WriteToolsLog(log, false);
+    }
+
+    /// <summary>
+    /// Writes an entry to the tools log. When <paramref name="force"/> is true the entry is written
+    /// even if the "write tools log" setting is off — use this for hard-failure diagnostics (e.g. an
+    /// engine produced output that could not be parsed) that must be available for a bug report.
+    /// </summary>
+    public static void WriteToolsLog(string log, bool force)
+    {
+        if (!force && !Settings.Tools.WriteToolsLog)
         {
             return;
         }

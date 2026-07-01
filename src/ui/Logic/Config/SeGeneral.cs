@@ -42,6 +42,7 @@ public class SeGeneral
     public string DefaultSubtitleFormat { get; set; }
     public string DefaultSaveAsFormat { get; set; }
     public string FavoriteSubtitleFormats { get; set; }
+    public string FavoriteLanguages { get; set; }
     public string DefaultEncoding { get; set; }
     public string SubtitleEnterKeyAction { get; set; }
     public string SubtitleSingleClickAction { get; set; }
@@ -61,6 +62,7 @@ public class SeGeneral
     public bool RememberPositionAndSize { get; set; }
     public bool UndockVideoControls { get; set; }
     public List<SeWindowPosition> WindowPositions { get; set; } = new List<SeWindowPosition>();
+    public bool AutoSave { get; set; }
     public bool AutoBackupOn { get; set; }
     public int AutoBackupIntervalMinutes { get; set; }
     public int AutoBackupDeleteAfterDays { get; set; }
@@ -83,6 +85,10 @@ public class SeGeneral
     public string FfmpegPath { get; set; }
     public bool FfmpegUseCenterChannelOnly { get; set; }
     public string LibMpvPath { get; set; }
+
+    public string ProxyAddress { get; set; }
+    public string ProxyUserName { get; set; }
+    public string ProxyPassword { get; set; }
 
     public bool ShowColumnStartTime { get; set; }
     public bool ShowColumnEndTime { get; set; }
@@ -172,6 +178,7 @@ public class SeGeneral
         AutoBackupDeleteAfterDays = 90;
         DefaultSaveAsFormat = new SubRip().FriendlyName;
         FavoriteSubtitleFormats = new SubRip().FriendlyName + ";" + new AdvancedSubStationAlpha().FriendlyName;
+        FavoriteLanguages = string.Empty;
         CpsLineLengthStrategy = nameof(CalcAll);
         RememberPositionAndSize = true;
 
@@ -191,6 +198,10 @@ public class SeGeneral
 
         FfmpegPath = string.Empty;
         LibMpvPath = string.Empty;
+
+        ProxyAddress = string.Empty;
+        ProxyUserName = string.Empty;
+        ProxyPassword = string.Empty;
 
         ShowColumnStartTime = true;
         ShowColumnEndTime = true;

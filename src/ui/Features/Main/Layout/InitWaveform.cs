@@ -1,4 +1,5 @@
 ﻿using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data;
@@ -107,6 +108,7 @@ public class InitWaveform
             vm.AudioVisualizer.PointerReleased += vm.ControlMacPointerReleased;
             vm.AudioVisualizer.OnSelectRequested += vm.AudioVisualizerSelectRequested;
             vm.AudioVisualizer.OnSetStartAndOffsetTheRest += vm.AudioVisualizerSetStartAndOffsetTheRest;
+            vm.AudioVisualizer.OnGenerateWaveformRequested += vm.AudioVisualizerOnGenerateWaveformRequested;
 
             // Create a Flyout for the DataGrid
             var flyout = new MenuFlyout();
@@ -438,6 +440,8 @@ public class InitWaveform
             VerticalAlignment = VerticalAlignment.Center,
             Value = 1,
             [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.ZoomHorizontalHint, shortcuts),
+            // Accessible name for screen readers (the slider only has a visual icon/tooltip otherwise).
+            [AutomationProperties.NameProperty] = string.Format(languageHints.ZoomHorizontalHint, string.Empty).TrimEnd(),
         };
         sliderHorizontalZoom.TemplateApplied += (s, e) =>
         {
@@ -486,6 +490,7 @@ public class InitWaveform
             Margin = new Thickness(0, 0, 0, 0),
             Value = 1,
             [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.ZoomVerticalHint, shortcuts),
+            [AutomationProperties.NameProperty] = string.Format(languageHints.ZoomVerticalHint, string.Empty).TrimEnd(),
         };
         sliderVerticalZoom.TemplateApplied += (s, e) =>
         {
@@ -527,6 +532,7 @@ public class InitWaveform
             Margin = new Thickness(settingPosition.LeftMargin, 0, settingPosition.RightMargin, 0),
             Focusable = true,
             [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.VideoPosition, shortcuts),
+            [AutomationProperties.NameProperty] = Se.Language.General.VideoPosition,
         };
         sliderPosition.TemplateApplied += (s, e) =>
         {
@@ -598,6 +604,8 @@ public class InitWaveform
             Padding = new Thickness(2, 2, 0, 2),
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
+            // The adjacent "Speed" TextBlock is not auto-associated, so name the combo box explicitly.
+            [AutomationProperties.NameProperty] = Se.Language.General.PlaybackSpeed,
         };
         comboBoxSpeed.Bind(ItemsControl.ItemsSourceProperty, new Binding(nameof(vm.Speeds)));
         comboBoxSpeed.Bind(SelectingItemsControl.SelectedItemProperty, new Binding(nameof(vm.SelectedSpeed)) { Mode = BindingMode.TwoWay });
@@ -649,6 +657,7 @@ public class InitWaveform
         var buttonMore = new NonSpaceButton
         {
             Margin = new Thickness(settingMore.LeftMargin, 0, settingMore.RightMargin, 0),
+            [ToolTip.TipProperty] = UiUtil.MakeToolTip(Se.Language.General.More, shortcuts),
         };
         Attached.SetIcon(buttonMore, "fa-ellipsis-v");
 
@@ -667,6 +676,26 @@ public class InitWaveform
             Command = vm.HideWaveformToolbarCommand,
         };
         flyoutMore.Items.Add(menuItemHideControls);
+
+        // The waveform toolbar buttons only contain an icon, so their automation peer would
+        // otherwise expose the icon control's type name ("Optris...Icon") as the accessible name -
+        // useless to a screen reader. Give each one a real name, reusing the localized hint strings
+        // (same concise form ToolbarItemDisplay uses). The buttons are already keyboard-focusable.
+        void SetAccessibleName(Control control, string hint) =>
+            AutomationProperties.SetName(control, string.Format(hint, string.Empty).TrimEnd());
+
+        SetAccessibleName(buttonPlay, languageHints.PlayPauseHint);
+        SetAccessibleName(buttonPlaySelectedLines, languageHints.PlaySelectionHint);
+        SetAccessibleName(buttonPlaySelectedLinesRepeat, languageHints.PlaySelectedRepeatHint);
+        SetAccessibleName(buttonPlayNext, languageHints.PlayNextHint);
+        SetAccessibleName(buttonNew, languageHints.NewHint);
+        SetAccessibleName(buttonSetStartAndOffsetTheRest, languageHints.SetStartAndOffsetTheRestHint);
+        SetAccessibleName(buttonSetStart, languageHints.SetStartHint);
+        SetAccessibleName(buttonSetEnd, languageHints.SetEndHint);
+        SetAccessibleName(buttonRemoveBlankLines, languageHints.RemoveBlankLines);
+        SetAccessibleName(toggleButtonAutoSelectOnPlay, languageHints.SelectCurrentLineWhilePlayingHint);
+        SetAccessibleName(toggleButtonCenter, languageHints.CenterWaveformHint);
+        AutomationProperties.SetName(buttonMore, Se.Language.General.More);
 
         var sortableButtons = MakeCustomSortableButtons(
             settings,

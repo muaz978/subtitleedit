@@ -90,6 +90,16 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         _subtitleFormats = SubtitleFormatHelper.GetSubtitleFormatsWithFavoritesAtTop();
     }
 
+    /// <summary>
+    /// True when the batch item's format string identifies an embedded MP4 subtitle track.
+    /// The scanner stores the picked track in the format string (e.g. "MP4/WebVTT - eng" or
+    /// "MP4/#0 text - eng"), so the converter must match on that prefix - not the bare "MP4".
+    /// </summary>
+    public static bool IsMp4SubtitleFormat(string? format)
+    {
+        return format != null && format.StartsWith("MP4/", StringComparison.Ordinal);
+    }
+
     public async Task Convert(BatchConvertItem item, CancellationToken cancellationToken)
     {
         if (_subtitleFormats.Count == 0)
@@ -225,7 +235,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 imageSubtitle = item.ImageSubtitle as IOcrSubtitle;
             }
         }
-        else if (item.Format == "MP4" &&
+        else if (IsMp4SubtitleFormat(item.Format) &&
                  (item.FileName.EndsWith(".mp4") || item.FileName.EndsWith(".m4v") || item.FileName.EndsWith(".m4s")))
         {
             var mp4Files = new List<string>();
@@ -641,7 +651,10 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             subtitles.Add(sv);
         }
 
-        var selectedCustomFormat = customFormats.FirstOrDefault();
+        var customFormatName = Se.Settings.Tools.BatchConvert.CustomTextFormatName;
+        var selectedCustomFormat =
+            customFormats.FirstOrDefault(f => f.Name == customFormatName)
+            ?? customFormats.FirstOrDefault();
         if (selectedCustomFormat == null)
         {
             item.Status = string.Format(Se.Language.General.ErrorX, Se.Language.General.Error);
@@ -658,13 +671,14 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
     {
         var tesseractOcr = new TesseractOcr();
         var language = string.IsNullOrEmpty(Se.Settings.Tools.BatchConvert.TesseractLanguage) ? "eng" : Se.Settings.Tools.BatchConvert.TesseractLanguage;
+        var engineMode = Se.Settings.Tools.BatchConvert.TesseractEngineMode;
         item.Subtitle = new Subtitle();
         for (var i = 0; i < imageSubtitles.Count; i++)
         {
             var pct = (i + 1) * 100 / imageSubtitles.Count;
             item.Status = string.Format(Se.Language.General.OcrPercentX, pct);
             var bitmap = imageSubtitles.GetBitmap(i);
-            var text = await tesseractOcr.Ocr(bitmap, language, cancellationToken);
+            var text = await tesseractOcr.Ocr(bitmap, language, Se.TesseractModelFolder, cancellationToken, engineMode);
             var p = new Paragraph(text, imageSubtitles.GetStartTime(i).TotalMilliseconds, imageSubtitles.GetEndTime(i).TotalMilliseconds);
             item.Subtitle.Paragraphs.Add(p);
 

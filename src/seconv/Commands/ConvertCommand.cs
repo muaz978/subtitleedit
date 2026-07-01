@@ -8,6 +8,12 @@ namespace SeConv.Commands;
 
 internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
 {
+    /// <summary>
+    /// The original process arguments, captured in Program.Main before Spectre parsing.
+    /// Used to recover operation order/repetition, which the bound settings discard.
+    /// </summary>
+    public static string[] RawArgs { get; set; } = [];
+
     public sealed class Settings : CommandSettings
     {
         [CommandArgument(0, "<pattern>")]
@@ -74,6 +80,18 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
         [Description("Path to a Subtitle Edit custom-format XML file (used with --format customtext)")]
         public string? CustomFormat { get; init; }
 
+        [CommandOption("--plaintext-merge|--plaintextmerge")]
+        [Description("Plain text output: merge all subtitles into one space-separated block (no blank lines)")]
+        public bool PlainTextMerge { get; init; }
+
+        [CommandOption("--plaintext-unbreak|--plaintextunbreak")]
+        [Description("Plain text output: unbreak each subtitle, joining its lines into one")]
+        public bool PlainTextUnbreak { get; init; }
+
+        [CommandOption("--plaintext-no-blank-line|--plaintextnoblankline")]
+        [Description("Plain text output: do not put a blank line between subtitles (default keeps it)")]
+        public bool PlainTextNoBlankLine { get; init; }
+
         [CommandOption("--ocr-engine|--ocrengine")]
         [Description("OCR engine: tesseract | nocr | binaryocr | ollama | paddle (default: tesseract)")]
         public string? OcrEngine { get; init; }
@@ -85,6 +103,14 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
         [CommandOption("--ocr-db|--ocrdb")]
         [Description("Path to a .nocr file (--ocr-engine=nocr) or .db file (--ocr-engine=binaryocr)")]
         public string? OcrDb { get; init; }
+
+        [CommandOption("--dictionary-folder|--dictionaryfolder")]
+        [Description("Folder with Hunspell dictionaries + *_OCRFixReplaceList.xml; enables the 'Fix common OCR errors' pass of --fix-common-errors")]
+        public string? DictionaryFolder { get; init; }
+
+        [CommandOption("--time-codes-only|--timecodesonly")]
+        [Description("For image-based sources (.sup, VobSub .sub/.idx, MKV PGS/VobSub, MP4 VobSub, TS DVB-sub): output time codes only with empty text; skips OCR (no OCR engine required)")]
+        public bool TimeCodesOnly { get; init; }
 
         [CommandOption("--ollama-url")]
         [Description("Ollama API endpoint (default: http://localhost:11434/api/chat)")]
@@ -310,7 +336,7 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                 }
                 catch (Exception ex)
                 {
-                    AnsiConsole.MarkupLine($"[red]Error loading --settings file: {ex.Message.EscapeMarkup()}[/]");
+                    AnsiConsole.MarkupLineInterpolated($"[red]Error loading --settings file: {ex.Message}[/]");
                     return 1;
                 }
             }
@@ -337,29 +363,40 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                 }
                 catch (ArgumentException ex)
                 {
-                    AnsiConsole.MarkupLine($"[red]Error: {ex.Message.EscapeMarkup()}[/]");
+                    AnsiConsole.MarkupLineInterpolated($"[red]Error: {ex.Message}[/]");
                     return 1;
                 }
             }
 
-            // Build operations list
-            var operations = new List<string>();
-            if (settings.ApplyDurationLimits) operations.Add("ApplyDurationLimits");
-            if (settings.BalanceLines) operations.Add("BalanceLines");
-            if (settings.BeautifyTimeCodes) operations.Add("BeautifyTimeCodes");
-            if (settings.ConvertColorsToDialog) operations.Add("ConvertColorsToDialog");
-            if (fceRequested) operations.Add("FixCommonErrors");
-            if (settings.FixRtlViaUnicodeChars) operations.Add("FixRtlViaUnicodeChars");
-            if (settings.MergeSameTexts) operations.Add("MergeSameTexts");
-            if (settings.MergeSameTimeCodes) operations.Add("MergeSameTimeCodes");
-            if (settings.MergeShortLines) operations.Add("MergeShortLines");
-            if (settings.RedoCasing) operations.Add("RedoCasing");
-            if (settings.RemoveFormatting) operations.Add("RemoveFormatting");
-            if (settings.RemoveLineBreaks) operations.Add("RemoveLineBreaks");
-            if (settings.RemoveTextForHI) operations.Add("RemoveTextForHI");
-            if (settings.RemoveUnicodeControlChars) operations.Add("RemoveUnicodeControlChars");
-            if (settings.ReverseRtlStartEnd) operations.Add("ReverseRtlStartEnd");
-            if (settings.SplitLongLines) operations.Add("SplitLongLines");
+            // Build operations list. Operations run in the order the user typed them and
+            // repeat for each occurrence (SE4 parity) - e.g. "--fix-common-errors" twice
+            // runs two FCE passes. Spectre collapses repeated flags, so the order/count is
+            // recovered from the raw args. Fall back to a fixed order if raw args are missing.
+            List<string> operations;
+            if (RawArgs.Length > 0)
+            {
+                operations = OperationOrderParser.BuildOperations(RawArgs, fceRequested);
+            }
+            else
+            {
+                operations = new List<string>();
+                if (settings.ApplyDurationLimits) operations.Add("ApplyDurationLimits");
+                if (settings.BalanceLines) operations.Add("BalanceLines");
+                if (settings.BeautifyTimeCodes) operations.Add("BeautifyTimeCodes");
+                if (settings.ConvertColorsToDialog) operations.Add("ConvertColorsToDialog");
+                if (fceRequested) operations.Add("FixCommonErrors");
+                if (settings.FixRtlViaUnicodeChars) operations.Add("FixRtlViaUnicodeChars");
+                if (settings.MergeSameTexts) operations.Add("MergeSameTexts");
+                if (settings.MergeSameTimeCodes) operations.Add("MergeSameTimeCodes");
+                if (settings.MergeShortLines) operations.Add("MergeShortLines");
+                if (settings.RedoCasing) operations.Add("RedoCasing");
+                if (settings.RemoveFormatting) operations.Add("RemoveFormatting");
+                if (settings.RemoveLineBreaks) operations.Add("RemoveLineBreaks");
+                if (settings.RemoveTextForHI) operations.Add("RemoveTextForHI");
+                if (settings.RemoveUnicodeControlChars) operations.Add("RemoveUnicodeControlChars");
+                if (settings.ReverseRtlStartEnd) operations.Add("ReverseRtlStartEnd");
+                if (settings.SplitLongLines) operations.Add("SplitLongLines");
+            }
 
             // Validate --change-speed (must be > 0; 100 means no change)
             if (settings.ChangeSpeed.HasValue && settings.ChangeSpeed.Value <= 0)
@@ -378,7 +415,7 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                 }
                 catch (FormatException ex)
                 {
-                    AnsiConsole.MarkupLine($"[red]Error: {ex.Message.EscapeMarkup()}[/]");
+                    AnsiConsole.MarkupLineInterpolated($"[red]Error: {ex.Message}[/]");
                     return 1;
                 }
             }
@@ -393,7 +430,7 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                 }
                 catch (FormatException ex)
                 {
-                    AnsiConsole.MarkupLine($"[red]Error: {ex.Message.EscapeMarkup()}[/]");
+                    AnsiConsole.MarkupLineInterpolated($"[red]Error: {ex.Message}[/]");
                     return 1;
                 }
             }
@@ -408,7 +445,7 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                 }
                 catch (FormatException ex)
                 {
-                    AnsiConsole.MarkupLine($"[red]Error: {ex.Message.EscapeMarkup()}[/]");
+                    AnsiConsole.MarkupLineInterpolated($"[red]Error: {ex.Message}[/]");
                     return 1;
                 }
             }
@@ -444,11 +481,16 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                 EbuHeaderFile = settings.EbuHeaderFile,
                 MultipleReplaceFile = settings.MultipleReplace,
                 CustomFormatFile = settings.CustomFormat,
+                PlainTextMerge = settings.PlainTextMerge,
+                PlainTextUnbreak = settings.PlainTextUnbreak,
+                PlainTextLineBetweenSubtitles = !settings.PlainTextNoBlankLine,
                 TrackNumbers = ParseTrackNumbers(settings.TrackNumber),
                 ForcedOnly = settings.ForcedOnly,
                 OcrEngine = string.IsNullOrWhiteSpace(settings.OcrEngine) ? "tesseract" : settings.OcrEngine,
                 OcrLanguage = settings.OcrLanguage ?? "eng",
                 OcrDb = settings.OcrDb,
+                DictionaryFolder = settings.DictionaryFolder,
+                TimeCodesOnly = settings.TimeCodesOnly,
                 OllamaUrl = settings.OllamaUrl,
                 OllamaModel = settings.OllamaModel,
                 TeletextOnly = settings.TeletextOnly,
@@ -545,7 +587,7 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
                     AnsiConsole.MarkupLine("[red]Errors:[/]");
                     foreach (var error in result.Errors)
                     {
-                        AnsiConsole.MarkupLine($"  [red]•[/] {error.EscapeMarkup()}");
+                        AnsiConsole.MarkupLineInterpolated($"  [red]•[/] {error}");
                     }
                 }
 
@@ -562,10 +604,10 @@ internal sealed class ConvertCommand : AsyncCommand<ConvertCommand.Settings>
             }
             else
             {
-                AnsiConsole.MarkupLine($"[red]Error: {ex.Message}[/]");
+                AnsiConsole.MarkupLineInterpolated($"[red]Error: {ex.Message}[/]");
                 if (ex.InnerException != null)
                 {
-                    AnsiConsole.MarkupLine($"[dim]{ex.InnerException.Message}[/]");
+                    AnsiConsole.MarkupLineInterpolated($"[dim]{ex.InnerException.Message}[/]");
                 }
             }
             return 1;

@@ -18,6 +18,7 @@ public class SeOcr
     public string OllamaModel { get; set; }
     public string OllamaUrl { get; set; }
     public string OllamaLanguage { get; set; }
+    public int OllamaOcrTimeoutMinutes { get; set; }
     public string LlamaCppUrl { get; set; }
     public string LlamaCppOcrModel { get; set; }
     public string LlamaCppOcrPrompt { get; set; }
@@ -33,6 +34,8 @@ public class SeOcr
     public string NOcrLineAlgorithm { get; set; }
     public string PaddleOcrMode { get; set; }
     public string PaddleOcrLastLanguage { get; set; }
+    public string TesseractLastLanguage { get; set; }
+    public int TesseractEngineMode { get; set; }
     public string GoogleVisionOcrLastLanguage { get; set; }
     public string GoogleLensOcrLastLanguage { get; set; }
     public bool DoTryToGuessUnknownWords { get; set; }
@@ -73,7 +76,8 @@ public class SeOcr
         OllamaModels = ["glm-ocr"];
         OllamaLanguage = "English";
         OllamaModel = OllamaModels.First();
-        OllamaUrl = "http://localhost:11434/api/chat/";
+        OllamaUrl = "http://localhost:11434/api/chat";
+        OllamaOcrTimeoutMinutes = 5;
 
         LlamaCppUrl = "http://127.0.0.1:8080/v1/chat/completions";
         LlamaCppOcrModel = string.Empty;
@@ -85,6 +89,8 @@ public class SeOcr
 
         PaddleOcrMode = "mobile";
         PaddleOcrLastLanguage = "en";
+        TesseractLastLanguage = "eng";
+        TesseractEngineMode = 3; // Default, based on what is available (tesseract --oem)
 
         GoogleVisionOcrLastLanguage = "en";
         GoogleLensOcrLastLanguage = "en";

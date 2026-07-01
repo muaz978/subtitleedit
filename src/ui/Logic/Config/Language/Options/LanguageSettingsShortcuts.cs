@@ -13,6 +13,9 @@ public class LanguageSettingsShortcuts
     public string CategorySubtitleGridAndTextBox { get; set; }
     public string CategorySubtitleGrid { get; set; }
     public string CategoryWaveform { get; set; }
+    public string CategoryTextBox { get; set; }
+
+    public string GeneralSetupLikeSe4 { get; set; }
 
     public string GeneralMergeSelectedLines { get; set; }
     public string GeneralMergeWithPrevious { get; set; }
@@ -138,12 +141,16 @@ public class LanguageSettingsShortcuts
     public string MoveLastWordToNextSubtitle { get; set; }
     public string MoveLastWordFromFirstLineDownCurrentSubtitle { get; set; }
     public string MoveFirstWordFromNextLineUpCurrentSubtitle { get; set; }
+    public string MoveTextFromCursorToNextAndGoToNext { get; set; }
+    public string MoveTextFromCursorToNextAndGoToNextAndPlay { get; set; }
     public string ToggleFocusGridAndWaveform { get; set; }
     public string ToggleFocusTextBoxAndWaveform { get; set; }
     public string ToggleFocusTextBoxAndGrid { get; set; }
     public string GoToPreviousLineAndSetVideoPosition { get; set; }
     public string GoToPreviousLineFromVideoPosition { get; set; }
     public string GoToNextLineFromVideoPosition { get; set; }
+    public string VideoGoToPreviousTimeCode { get; set; }
+    public string VideoGoToNextTimeCode { get; set; }
     public string GoToNextLineAndSetVideoPosition { get; set; }
     public string TextBoxDeleteSelectionNoClipboard { get; set; }
     public string TextBoxCut { get; set; }
@@ -250,6 +257,7 @@ public class LanguageSettingsShortcuts
     public string ShowMediaInformation { get; set; }
     public string ChooseSubtitleFormat { get; set; }
     public string TrimWhitespaceSelectedLines { get; set; }
+    public string WaveformInsertNewSelection { get; set; }
     public string WaveformHorizontalZoomInCommand { get; set; }
     public string WaveformHorizontalZoomOutCommand { get; set; }
     public string WaveformVerticalZoomInCommand { get; set; }
@@ -307,7 +315,9 @@ public class LanguageSettingsShortcuts
         CategorySubtitleGridAndTextBox = "Subtitle list view & text box";
         CategorySubtitleGrid = "Subtitle list view";
         CategoryWaveform = "Waveform";
+        CategoryTextBox = "Text box";
 
+        GeneralSetupLikeSe4 = "Set up like Subtitle Edit 4 (theme, shortcuts, replace rules)";
         GeneralMergeSelectedLines = "Merge selected lines";
         GeneralMergeWithPrevious = "Merge with previous";
         GeneralMergeWithNext = "Merge with next";
@@ -317,7 +327,7 @@ public class LanguageSettingsShortcuts
         GeneralMergeWithNextAndAutoBreak = "Merge with next and auto-break";
         GeneralMergeSelectedLinesAndAutoBreak = "Merge selected lines and auto-break";
         GeneralMergeSelectedLinesAndUnbreak = "Merge selected lines and unbreak";
-        GeneralMergeSelectedLinesAndUnbreakCjk = "Merge selected lines and unbreak CJK";
+        GeneralMergeSelectedLinesAndUnbreakCjk = "Merge selected lines and unbreak without space (CJK)";
         GeneralUnbreakNoSpaceCjk = "Unbreak without space (CJK)";
         GeneralMergeSelectedLinesOnlyFirstText = "Merge selected lines only first text";
         GeneralMergeSelectedLinesBilingual = "Merge selected lines bilingual";
@@ -436,6 +446,8 @@ public class LanguageSettingsShortcuts
         MoveLastWordToNextSubtitle = "Move last word to next subtitle";
         MoveLastWordFromFirstLineDownCurrentSubtitle = "Move last word from first line down (current subtitle)";
         MoveFirstWordFromNextLineUpCurrentSubtitle = "Move first word from next line up (current subtitle)";
+        MoveTextFromCursorToNextAndGoToNext = "Move text after cursor position to next subtitle and go to next";
+        MoveTextFromCursorToNextAndGoToNextAndPlay = "Move text after cursor position to next subtitle, go to next and play";
         ToggleFocusGridAndWaveform = "Toggle focus between subtitle grid and waveform/spectrogram";
         ToggleFocusTextBoxAndWaveform = "Toggle focus between text box and waveform/spectrogram";
         ToggleFocusTextBoxAndGrid = "Toggle focus between text box and subtitle grid";
@@ -443,6 +455,8 @@ public class LanguageSettingsShortcuts
         GoToNextLineAndSetVideoPosition = "Go to next subtitle and set video position";
         GoToPreviousLineFromVideoPosition = "Go to previous subtitle (from current video position)";
         GoToNextLineFromVideoPosition = "Go to next subtitle (from current video position)";
+        VideoGoToPreviousTimeCode = "Go to previous time code";
+        VideoGoToNextTimeCode = "Go to next time code";
         TextBoxDeleteSelectionNoClipboard = "Text box: Delete selection (no clipboard)";
         TextBoxCut = "Text box: Cut";
         TextBoxCut2 = "Text box: Cut (alternative)";
@@ -548,6 +562,7 @@ public class LanguageSettingsShortcuts
         ShowMediaInformation = "Show media information";
         ChooseSubtitleFormat = "Choose subtitle format";
         TrimWhitespaceSelectedLines = "Trim whitespace (selected lines)";
+        WaveformInsertNewSelection = "Waveform insert new selection";
         WaveformHorizontalZoomInCommand = "Waveform horizontal zoom in";
         WaveformHorizontalZoomOutCommand = "Waveform horizontal zoom out";
         WaveformVerticalZoomInCommand = "Waveform vertical zoom in";

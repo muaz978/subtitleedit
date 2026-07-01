@@ -24,6 +24,12 @@ public class TextWithSubtitleSyntaxHighlightingConverter : IValueConverter
     private static readonly Color ValuesColor = Color.FromRgb(206, 145, 120);    // Soft orange/peach - attribute values / ASS tag values
     private static readonly Color StyleColor = Color.FromRgb(156, 220, 254);     // Light cyan - CSS property values
 
+    // Pre-compiled <font> attribute patterns (reused across every grid-row render)
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromMilliseconds(100);
+    private static readonly Regex FontColorRegex = new(@"color\s*=\s*[""']?([^""'\s>]+)[""']?", RegexOptions.IgnoreCase | RegexOptions.Compiled, RegexTimeout);
+    private static readonly Regex FontFaceRegex = new(@"face\s*=\s*[""']?([^""'>]+)[""']?", RegexOptions.IgnoreCase | RegexOptions.Compiled, RegexTimeout);
+    private static readonly Regex FontSizeRegex = new(@"size\s*=\s*[""']?(\d+)[""']?", RegexOptions.IgnoreCase | RegexOptions.Compiled, RegexTimeout);
+
     // Reuse brushes instead of creating new ones each time
     private static readonly SolidColorBrush ElementBrush = new(ElementColor);
     private static readonly SolidColorBrush AttributeBrush = new(AttributeColor);
@@ -288,19 +294,6 @@ public class TextWithSubtitleSyntaxHighlightingConverter : IValueConverter
             return new InlineCollection();
         }
 
-        if (Se.Settings.Appearance.SubtitleGridTextSingleLine)
-        {
-            var separator = Se.Settings.Appearance.SubtitleGridTextSingleLineSeparator;
-            if (string.IsNullOrEmpty(separator))
-            {
-                separator = " ";
-            }
-
-            str = str
-                .Replace("\r\n", separator)
-                .Replace("\n", separator);
-        }
-
         // Truncate long strings for performance
         if (str.Length > 200)
         {
@@ -326,7 +319,7 @@ public class TextWithSubtitleSyntaxHighlightingConverter : IValueConverter
         {
             if (!firstLine)
             {
-                inlines.Add(new LineBreak());
+                AppendLineSeparator(inlines);
             }
 
             if (line.Length > 0)
@@ -989,11 +982,8 @@ public class TextWithSubtitleSyntaxHighlightingConverter : IValueConverter
 
         try
         {
-            // Use regex with timeout to prevent hanging
-            var timeout = TimeSpan.FromMilliseconds(100);
-
             // Parse color attribute
-            var colorMatch = Regex.Match(tagContent, @"color\s*=\s*[""']?([^""'\s>]+)[""']?", RegexOptions.IgnoreCase, timeout);
+            var colorMatch = FontColorRegex.Match(tagContent);
             if (colorMatch.Success)
             {
                 var colorValue = colorMatch.Groups[1].Value;
@@ -1012,7 +1002,7 @@ public class TextWithSubtitleSyntaxHighlightingConverter : IValueConverter
             }
 
             // Parse face (font name) attribute
-            var faceMatch = Regex.Match(tagContent, @"face\s*=\s*[""']?([^""'>]+)[""']?", RegexOptions.IgnoreCase, timeout);
+            var faceMatch = FontFaceRegex.Match(tagContent);
             if (faceMatch.Success)
             {
                 var fontName = faceMatch.Groups[1].Value.Trim();
@@ -1023,7 +1013,7 @@ public class TextWithSubtitleSyntaxHighlightingConverter : IValueConverter
             }
 
             // Parse size attribute
-            var sizeMatch = Regex.Match(tagContent, @"size\s*=\s*[""']?(\d+)[""']?", RegexOptions.IgnoreCase, timeout);
+            var sizeMatch = FontSizeRegex.Match(tagContent);
             if (sizeMatch.Success && double.TryParse(sizeMatch.Groups[1].Value, out var size))
             {
                 state.FontSize = size;
@@ -1378,9 +1368,30 @@ public class TextWithSubtitleSyntaxHighlightingConverter : IValueConverter
             return false;
         }
 
-        inlines.Add(new LineBreak());
+        AppendLineSeparator(inlines);
         i += c == '\r' && c2 == '\n' ? 2 : 1;
         return true;
+    }
+
+    private static void AppendLineSeparator(InlineCollection inlines)
+    {
+        if (Se.Settings.Appearance.SubtitleGridTextSingleLine)
+        {
+            var separator = Se.Settings.Appearance.SubtitleGridTextSingleLineSeparator;
+            if (string.IsNullOrEmpty(separator))
+            {
+                separator = " ";
+            }
+
+            // Add the separator as literal text so markup-like separators (e.g. "<br />")
+            // are shown verbatim instead of being parsed away by the formatter. Render it in the
+            // soft blue accent (AttributeBrush) - a mid-tone that reads on both light and dark
+            // themes - so the separator stands out clearly from the actual subtitle text.
+            inlines.Add(new Run(separator) { Foreground = AttributeBrush });
+            return;
+        }
+
+        inlines.Add(new LineBreak());
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

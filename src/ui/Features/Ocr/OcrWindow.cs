@@ -273,6 +273,11 @@ public class OcrWindow : Window
                     .BindIsEnabled(vm, nameof(OcrViewModel.IsOcrRunning), new InverseBooleanConverter()),
                 UiUtil.MakeBrowseButton(vm.PickTesseractModelCommand).BindIsVisible(vm, nameof(vm.IsTesseractVisible))
                     .BindIsEnabled(vm, nameof(vm.IsOcrRunning), new InverseBooleanConverter()),
+                UiUtil.MakeLabel<OcrViewModel>(Se.Language.Ocr.TesseractEngineMode, vm => vm.IsTesseractVisible)
+                    .WithMarginLeft(10),
+                UiUtil.MakeComboBox(vm.TesseractEngineModes, vm, nameof(vm.SelectedTesseractEngineMode),
+                        nameof(vm.IsTesseractVisible))
+                    .BindIsEnabled(vm, nameof(OcrViewModel.IsOcrRunning), new InverseBooleanConverter()),
 
                 // Ollama settings
                 UiUtil.MakeLabel<OcrViewModel>(Se.Language.General.Language, vm => vm.IsOllamaVisible),
@@ -423,7 +428,17 @@ public class OcrWindow : Window
                             };
                             image.Bind(Image.MaxHeightProperty, new Binding(nameof(vm.ImageMaxHeight)) { Source = vm });
                             image.Bind(Image.MaxWidthProperty, new Binding(nameof(vm.ImageMaxWidth)) { Source = vm });
-                            stackPanel.Children.Add(image);
+
+                            // Subtitle bitmaps are usually light text on a transparent background, which
+                            // is invisible on a light grid - give them a dark backdrop so they show.
+                            var imageContainer = new Border
+                            {
+                                Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.FromRgb(0x2D, 0x2D, 0x30)),
+                                CornerRadius = new CornerRadius(3),
+                                Padding = new Thickness(3),
+                                Child = image,
+                            };
+                            stackPanel.Children.Add(imageContainer);
                         }
 
                         return stackPanel;
@@ -628,6 +643,7 @@ public class OcrWindow : Window
         textBoxText.Bind(FontFamilyProperty, new Binding(nameof(vm.TextBoxFontFamily)) { Mode = BindingMode.TwoWay });
         textBoxText.Bind(FontSizeProperty, new Binding(nameof(vm.TextBoxFontSize)) { Mode = BindingMode.TwoWay });
         textBoxText.Bind(TextBox.FontWeightProperty, new Binding(nameof(vm.TextBoxFontWeight)) { Mode = BindingMode.TwoWay });
+        UiUtil.FixMacDiacriticClipping(textBoxText);
 
         // Create a Flyout for the TextBox
         var flyout = new MenuFlyout();

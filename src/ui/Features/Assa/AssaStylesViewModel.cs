@@ -1,3 +1,4 @@
+using Avalonia.Collections;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media.Imaging;
@@ -8,6 +9,7 @@ using CommunityToolkit.Mvvm.Input;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Features.Shared;
+using Nikse.SubtitleEdit.Features.Shared.PromptTextBox;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Media;
@@ -29,6 +31,8 @@ public partial class AssaStylesViewModel : ObservableObject
     [ObservableProperty] private StyleDisplay? _selectedFileStyle;
     [ObservableProperty] private ObservableCollection<StyleDisplay> _storageStyles;
     [ObservableProperty] private StyleDisplay? _selectedStorageStyle;
+    [ObservableProperty] private ObservableCollection<string> _storageCategories;
+    [ObservableProperty] private string _selectedStorageCategory;
     [ObservableProperty] private StyleDisplay? _currentStyle;
     [ObservableProperty] private ObservableCollection<string> _fonts;
     [ObservableProperty] private ObservableCollection<BorderStyleItem> _borderTypes;
@@ -44,12 +48,14 @@ public partial class AssaStylesViewModel : ObservableObject
     [ObservableProperty] private bool _isTakeUsagesFromVisible;
     [ObservableProperty] private bool _isSetStyleAsDefaultVisible;
     [ObservableProperty] private bool _isCopyToFileStylesVisible;
+    [ObservableProperty] private bool _isCategoryActionVisible;
 
     public Window? Window { get; set; }
     public bool OkPressed { get; private set; }
     public string Header { get; set; }
     public DataGrid FileStyleGrid { get; set; }
     public DataGrid StorageStyleGrid { get; set; }
+    public DataGridCollectionView StorageStylesView { get; }
     public Subtitle ResultSubtitle => _subtitle;
 
     private readonly IFileHelper _fileHelper;
@@ -58,6 +64,7 @@ public partial class AssaStylesViewModel : ObservableObject
     private Subtitle _subtitle;
     private string _subtitleFileName;
     private readonly System.Timers.Timer _timerUpdatePreview;
+    private readonly List<string> _extraCategories = new();
 
     public AssaStylesViewModel(IFileHelper fileHelper, IWindowService windowService)
     {
@@ -67,6 +74,8 @@ public partial class AssaStylesViewModel : ObservableObject
         Title = string.Empty;
         FileStyles = new ObservableCollection<StyleDisplay>();
         StorageStyles = new ObservableCollection<StyleDisplay>();
+        StorageCategories = new ObservableCollection<string>();
+        SelectedStorageCategory = Se.Language.Assa.AllCategories;
         Fonts = new ObservableCollection<string>();
         BorderTypes = new ObservableCollection<BorderStyleItem>(BorderStyleItem.List());
         SelectedBorderType = BorderTypes[0];
@@ -79,6 +88,12 @@ public partial class AssaStylesViewModel : ObservableObject
         _subtitleFileName = string.Empty;
 
         LoadSettings();
+
+        StorageStylesView = new DataGridCollectionView(StorageStyles)
+        {
+            Filter = o => o is StyleDisplay s && IsStyleInSelectedCategory(s),
+        };
+        RebuildStorageCategories();
 
         _timerUpdatePreview = new System.Timers.Timer(500);
         _timerUpdatePreview.Elapsed += (s, e) =>
@@ -142,7 +157,7 @@ public partial class AssaStylesViewModel : ObservableObject
 
         var result = await _windowService.ShowDialogAsync<AssaStylePickerWindow, AssaStylePickerViewModel>(Window, vm =>
         {
-            vm.Initialize(ssaStyles.Select(p => new StyleDisplay(p) { IsSelected = true, Name = MakeUniqueName(p.Name, FileStyles) }).ToList(), Se.Language.General.Import, false);
+            vm.Initialize(Se.Language.General.Import, ssaStyles.Select(p => new StyleDisplay(p) { IsSelected = true, Name = MakeUniqueName(p.Name, FileStyles) }).ToList(), Se.Language.General.Import, false);
         });
 
         var selectedStyles = result.Styles.Where(p => p.IsSelected).ToList();
@@ -342,7 +357,7 @@ public partial class AssaStylesViewModel : ObservableObject
         {
             var style = item.ToSsaStyle();
             style.Name = MakeUniqueName(style.Name, StorageStyles);
-            StorageStyles.Add(new StyleDisplay(style));
+            StorageStyles.Add(new StyleDisplay(style) { Category = CategoryForNewStyle() });
         }
     }
 
@@ -359,7 +374,7 @@ public partial class AssaStylesViewModel : ObservableObject
         var result = await _windowService.ShowDialogAsync<AssaStylePickerWindow, AssaStylePickerViewModel>(Window, vm =>
         {
             var styles = ssaStyles.Select(p => new StyleDisplay(p)).ToList();
-            vm.Initialize(styles, Se.Language.General.Ok, true);
+            vm.Initialize(Se.Language.Assa.TakeUsagesFromDotDotDot, styles, Se.Language.General.Ok, true);
         });
 
         var selectedStyles = result.Styles.Where(p => p.IsSelected).ToList();
@@ -381,6 +396,72 @@ public partial class AssaStylesViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task FileReplaceWith()
+    {
+        var selectedItems = FileStyleGrid.SelectedItems.Cast<StyleDisplay>().ToList();
+        if (Window == null || selectedItems.Count == 0)
+        {
+            return;
+        }
+
+        var oldNames = selectedItems.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Candidate targets: the other file styles, plus storage styles not already in the file.
+        var candidates = FileStyles.Where(p => !oldNames.Contains(p.Name)).ToList();
+        candidates.AddRange(StorageStyles.Where(s => FileStyles.All(f => !f.Name.Equals(s.Name, StringComparison.OrdinalIgnoreCase))));
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        var result = await _windowService.ShowDialogAsync<AssaStylePickerWindow, AssaStylePickerViewModel>(Window, vm =>
+        {
+            var styles = candidates.Select(p => new StyleDisplay(p.ToSsaStyle())).ToList();
+            vm.Initialize(Se.Language.Assa.ReplaceStyleWithDotDotDot, styles, Se.Language.General.Ok, false);
+        });
+
+        var target = result.Styles.FirstOrDefault(p => p.IsSelected) ?? result.SelectedStyle;
+        if (!result.OkPressed || target == null)
+        {
+            return;
+        }
+
+        // If the target came from storage and isn't in the file yet, add it.
+        var targetInFile = FileStyles.FirstOrDefault(f => f.Name.Equals(target.Name, StringComparison.OrdinalIgnoreCase));
+        if (targetInFile == null)
+        {
+            targetInFile = new StyleDisplay(target.ToSsaStyle());
+            FileStyles.Add(targetInFile);
+        }
+
+        // Re-point every line that used one of the replaced styles to the target.
+        RepointParagraphsToStyle(_subtitle, oldNames, targetInFile.Name);
+
+        // Remove the replaced styles (but never the target itself).
+        foreach (var old in selectedItems.Where(s => !s.Name.Equals(targetInFile.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            FileStyles.Remove(old);
+        }
+
+        SelectedFileStyle = targetInFile;
+        CurrentStyle = targetInFile;
+        UpdateUsages();
+    }
+
+    // Re-points every paragraph that uses one of <paramref name="oldNames"/> (its style, via Extra,
+    // optionally prefixed with '*') to <paramref name="targetName"/>. Used by "Replace style with...".
+    internal static void RepointParagraphsToStyle(Subtitle subtitle, ISet<string> oldNames, string targetName)
+    {
+        foreach (var paragraph in subtitle.Paragraphs)
+        {
+            if (paragraph.Extra != null && oldNames.Contains(paragraph.Extra.TrimStart('*')))
+            {
+                paragraph.Extra = targetName;
+            }
+        }
+    }
+
+    [RelayCommand]
     private async Task StorageImport()
     {
         if (Window == null)
@@ -399,13 +480,19 @@ public partial class AssaStylesViewModel : ObservableObject
 
         var result = await _windowService.ShowDialogAsync<AssaStylePickerWindow, AssaStylePickerViewModel>(Window, vm =>
         {
-            vm.Initialize(ssaStyles.Select(p => new StyleDisplay(p) { IsSelected = true, Name = MakeUniqueName(p.Name, StorageStyles) }).ToList(), Se.Language.General.Import, false);
+            vm.Initialize(Se.Language.General.Import, ssaStyles.Select(p => new StyleDisplay(p) { IsSelected = true, Name = MakeUniqueName(p.Name, StorageStyles) }).ToList(), Se.Language.General.Import, false);
         });
 
         var selectedStyles = result.Styles.Where(p => p.IsSelected).ToList();
         if (!result.OkPressed || selectedStyles.Count == 0)
         {
             return;
+        }
+
+        var category = CategoryForNewStyle();
+        foreach (var style in selectedStyles)
+        {
+            style.Category = category;
         }
 
         StorageStyles.AddRange(selectedStyles);
@@ -430,7 +517,7 @@ public partial class AssaStylesViewModel : ObservableObject
         }
 
         var style = new SsaStyle { Name = name };
-        StorageStyles.Add(new StyleDisplay(style));
+        StorageStyles.Add(new StyleDisplay(style) { Category = CategoryForNewStyle() });
     }
 
     [RelayCommand]
@@ -528,7 +615,7 @@ public partial class AssaStylesViewModel : ObservableObject
 
             var style = selectedStyle.ToSsaStyle();
             style.Name = name;
-            StorageStyles.Add(new StyleDisplay(style));
+            StorageStyles.Add(new StyleDisplay(style) { Category = CategoryForNewStyle() });
         }
     }
 
@@ -592,6 +679,195 @@ public partial class AssaStylesViewModel : ObservableObject
         }
 
         selectedStyle.IsDefault = true;
+    }
+
+    private string DefaultCategoryLabel => Se.Language.Assa.DefaultCategory;
+    private string AllCategoriesLabel => Se.Language.Assa.AllCategories;
+
+    private string CategoryLabelToStored(string label)
+        => label == DefaultCategoryLabel || label == AllCategoriesLabel ? string.Empty : label;
+
+    private string StoredToCategoryLabel(string stored)
+        => string.IsNullOrEmpty(stored) ? DefaultCategoryLabel : stored;
+
+    private bool IsStyleInSelectedCategory(StyleDisplay style)
+        => SelectedStorageCategory == AllCategoriesLabel ||
+           StoredToCategoryLabel(style.Category) == SelectedStorageCategory;
+
+    private string CategoryForNewStyle()
+        => SelectedStorageCategory == AllCategoriesLabel ? string.Empty : CategoryLabelToStored(SelectedStorageCategory);
+
+    private void RebuildStorageCategories()
+    {
+        var previous = SelectedStorageCategory;
+
+        var labels = StorageStyles
+            .Select(s => StoredToCategoryLabel(s.Category))
+            .Concat(_extraCategories)
+            .Where(l => l != DefaultCategoryLabel && l != AllCategoriesLabel)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(l => l, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        StorageCategories.Clear();
+        StorageCategories.Add(AllCategoriesLabel);
+        StorageCategories.Add(DefaultCategoryLabel);
+        foreach (var label in labels)
+        {
+            StorageCategories.Add(label);
+        }
+
+        SelectedStorageCategory = StorageCategories.Contains(previous) ? previous : AllCategoriesLabel;
+    }
+
+    partial void OnSelectedStorageCategoryChanged(string value)
+    {
+        StorageStylesView?.Refresh();
+        IsCategoryActionVisible = value != AllCategoriesLabel && value != DefaultCategoryLabel;
+    }
+
+    [RelayCommand]
+    private async Task NewCategory()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var result = await _windowService.ShowDialogAsync<PromptTextBoxWindow, PromptTextBoxViewModel>(Window, vm =>
+        {
+            vm.Initialize(Se.Language.Assa.NewCategory, string.Empty, 250, 20, true);
+        });
+
+        if (!result.OkPressed || string.IsNullOrWhiteSpace(result.Text))
+        {
+            return;
+        }
+
+        var name = result.Text.Trim();
+        if (name == AllCategoriesLabel || name == DefaultCategoryLabel)
+        {
+            return;
+        }
+
+        if (!_extraCategories.Contains(name, StringComparer.OrdinalIgnoreCase))
+        {
+            _extraCategories.Add(name);
+        }
+
+        RebuildStorageCategories();
+        SelectedStorageCategory = StorageCategories.FirstOrDefault(c => c.Equals(name, StringComparison.OrdinalIgnoreCase)) ?? SelectedStorageCategory;
+    }
+
+    [RelayCommand]
+    private async Task RenameCategory()
+    {
+        if (Window == null || SelectedStorageCategory == AllCategoriesLabel || SelectedStorageCategory == DefaultCategoryLabel)
+        {
+            return;
+        }
+
+        var oldName = SelectedStorageCategory;
+        var result = await _windowService.ShowDialogAsync<PromptTextBoxWindow, PromptTextBoxViewModel>(Window, vm =>
+        {
+            vm.Initialize(Se.Language.Assa.RenameCategory, oldName, 250, 20, true);
+        });
+
+        if (!result.OkPressed || string.IsNullOrWhiteSpace(result.Text))
+        {
+            return;
+        }
+
+        var newName = result.Text.Trim();
+        if (newName == oldName || newName == AllCategoriesLabel || newName == DefaultCategoryLabel)
+        {
+            return;
+        }
+
+        var newStored = CategoryLabelToStored(newName);
+        foreach (var style in StorageStyles.Where(s => StoredToCategoryLabel(s.Category) == oldName))
+        {
+            style.Category = newStored;
+        }
+
+        _extraCategories.RemoveAll(c => c.Equals(oldName, StringComparison.OrdinalIgnoreCase));
+        if (!_extraCategories.Contains(newName, StringComparer.OrdinalIgnoreCase))
+        {
+            _extraCategories.Add(newName);
+        }
+
+        RebuildStorageCategories();
+        SelectedStorageCategory = StorageCategories.FirstOrDefault(c => c.Equals(newName, StringComparison.OrdinalIgnoreCase)) ?? AllCategoriesLabel;
+    }
+
+    [RelayCommand]
+    private void DeleteCategory()
+    {
+        if (Window == null || SelectedStorageCategory == AllCategoriesLabel || SelectedStorageCategory == DefaultCategoryLabel)
+        {
+            return;
+        }
+
+        var name = SelectedStorageCategory;
+        Dispatcher.UIThread.Post(async void () =>
+        {
+            var answer = await MessageBox.Show(
+                Window!,
+                Se.Language.Assa.DeleteCategory,
+                string.Format(Se.Language.Assa.DeleteCategoryQuestion, name),
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (answer != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            foreach (var style in StorageStyles.Where(s => StoredToCategoryLabel(s.Category) == name))
+            {
+                style.Category = string.Empty;
+            }
+
+            _extraCategories.RemoveAll(c => c.Equals(name, StringComparison.OrdinalIgnoreCase));
+            RebuildStorageCategories();
+            SelectedStorageCategory = AllCategoriesLabel;
+        });
+    }
+
+    [RelayCommand]
+    private async Task MoveToCategory()
+    {
+        var selectedItems = StorageStyleGrid.SelectedItems.Cast<StyleDisplay>().ToList();
+        if (Window == null || selectedItems.Count == 0)
+        {
+            return;
+        }
+
+        var result = await _windowService.ShowDialogAsync<PromptTextBoxWindow, PromptTextBoxViewModel>(Window, vm =>
+        {
+            vm.Initialize(Se.Language.Assa.MoveToCategoryDotDotDot, DefaultCategoryLabel, 250, 20, true);
+        });
+
+        if (!result.OkPressed || string.IsNullOrWhiteSpace(result.Text))
+        {
+            return;
+        }
+
+        var label = result.Text.Trim();
+        var stored = CategoryLabelToStored(label);
+        if (!string.IsNullOrEmpty(stored) && !_extraCategories.Contains(label, StringComparer.OrdinalIgnoreCase))
+        {
+            _extraCategories.Add(label);
+        }
+
+        foreach (var style in selectedItems)
+        {
+            style.Category = stored;
+        }
+
+        RebuildStorageCategories();
+        SelectedStorageCategory = StorageCategories.Contains(label) ? label : SelectedStorageCategory;
+        StorageStylesView.Refresh();
     }
 
     private void Close()

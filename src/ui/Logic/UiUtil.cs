@@ -90,6 +90,31 @@ public static class UiUtil
         };
     }
 
+    // On macOS the default UI font's ascent sits right at the cap height, so Avalonia's line box
+    // clips the dots on tall diacritics (Ä/Ö/Ü) at the top - in text boxes and grid cells alike
+    // (issue #11997). Giving the line a bit of extra leading (LineHeight) lifts the line box so the
+    // diacritics fit; padding does not help a TextBox, but LineHeight fixes both TextBox and TextBlock.
+    // Bound to the live FontSize (rather than a fixed value) so it scales with the chosen font size,
+    // and applied only on macOS so Windows/Linux line spacing is unchanged.
+    private static readonly IValueConverter DiacriticLineHeightConverter =
+        new FuncValueConverter<double, double>(fontSize =>
+            double.IsNaN(fontSize) || fontSize <= 0 ? double.NaN : fontSize * 1.4);
+
+    public static void FixMacDiacriticClipping(Control? control)
+    {
+        if (control == null || !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        control.Bind(TextBlock.LineHeightProperty, new Binding
+        {
+            Source = control,
+            Path = nameof(TextBlock.FontSize),
+            Converter = DiacriticLineHeightConverter,
+        });
+    }
+
     public static Button MakeButton(string text)
     {
         return MakeButton(text, null);
@@ -164,6 +189,18 @@ public static class UiUtil
         }
 
         return new SolidColorBrush(Colors.Black, 0.5);
+    }
+
+    public static IBrush GetAccentBrush()
+    {
+        var app = Application.Current;
+        if (app != null)
+        {
+            app.TryGetResource("SystemAccentColor", app.ActualThemeVariant, out var resource);
+            if (resource is Color color)
+                return new SolidColorBrush(color);
+        }
+        return new SolidColorBrush(Colors.DodgerBlue);
     }
 
     public static Color GetBorderColor()
@@ -365,12 +402,53 @@ public static class UiUtil
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             Command = command,
-            [ToolTip.TipProperty] = hint,
         };
 
         Attached.SetIcon(button, iconName);
 
+        if (Se.Settings.Appearance.ShowHints)
+        {
+            AttachHoverTooltip(button, hint);
+        }
+
         return button;
+    }
+
+    // On macOS, Avalonia's built-in ToolTip hover service does not open on hover inside modal
+    // dialogs - the popup itself works (a forced ToolTip.IsOpen renders it, and the pointer-over
+    // state is detected), but the hover trigger never fires, so icon-button hints were invisible in
+    // every dialog. Windows/Linux work fine and keep the native behaviour; on macOS we drive the
+    // tooltip ourselves: open it after a short hover and close it when the pointer leaves. (#12013)
+    public static void AttachHoverTooltip(Control control, string hint)
+    {
+        ToolTip.SetTip(control, hint);
+
+        if (!OperatingSystem.IsMacOS())
+        {
+            return; // native ToolTip hover service works on Windows/Linux
+        }
+
+        System.Threading.CancellationTokenSource? hoverCts = null;
+
+        control.PointerEntered += (_, _) =>
+        {
+            hoverCts?.Cancel();
+            hoverCts = new System.Threading.CancellationTokenSource();
+            var token = hoverCts.Token;
+            DispatcherTimer.RunOnce(() =>
+            {
+                if (!token.IsCancellationRequested && control.IsPointerOver)
+                {
+                    ToolTip.SetIsOpen(control, true);
+                }
+            }, TimeSpan.FromMilliseconds(400));
+        };
+
+        control.PointerExited += (_, _) =>
+        {
+            hoverCts?.Cancel();
+            ToolTip.SetIsOpen(control, false);
+        };
     }
 
 
@@ -1254,6 +1332,16 @@ public static class UiUtil
         return control;
     }
 
+    public static ComboBox WithBindItemsSource(this ComboBox control, string itemsSourcePropertyBinding)
+    {
+        control.Bind(ItemsControl.ItemsSourceProperty, new Binding
+        {
+            Path = itemsSourcePropertyBinding,
+        });
+
+        return control;
+    }
+
     public static TextBlock WithMargin(this TextBlock control, int margin)
     {
         control.Margin = new Thickness(margin);
@@ -1593,6 +1681,20 @@ public static class UiUtil
             BorderBrush = GetTextColor(0.3d),
             CornerRadius = new CornerRadius(CornerRadius),
         };
+    }
+
+    public static bool IsScrollBarSource(RoutedEventArgs e)
+    {
+        var current = e.Source as Control;
+        while (current != null)
+        {
+            if (current is ScrollBar)
+            {
+                return true;
+            }
+            current = current.Parent as Control;
+        }
+        return false;
     }
 
     public static T BindIsVisible<T>(this T control, object vm, string visibilityPropertyPath) where T : Visual
@@ -1971,6 +2073,57 @@ public static class UiUtil
                 Path = propertyValuePath,
                 Mode = BindingMode.TwoWay,
                 Converter = new NullableIntConverter { DefaultValue = defaultValue },
+            });
+        }
+
+        if (propertyIsVisiblePath != null)
+        {
+            control.Bind(NumericUpDown.IsVisibleProperty, new Binding
+            {
+                Path = propertyIsVisiblePath,
+                Mode = BindingMode.TwoWay,
+            });
+        }
+
+        control.AddHandler(InputElement.PointerWheelChangedEvent, (s, e) =>
+        {
+            control.Value = Math.Clamp((control.Value ?? 0) + (e.Delta.Y > 0 ? control.Increment : -control.Increment),
+                                        control.Minimum,
+                                        control.Maximum);
+            e.Handled = true;
+        });
+
+        ForwardAutomationNameToInnerTextBox(control);
+
+        return control;
+    }
+
+    // Like MakeNumericUpDownInt but for double-typed (double?) view-model properties.
+    // Uses NullableDoubleConverter so the actual value round-trips; NullableIntConverter
+    // would fall back to its DefaultValue whenever the source is a double (not an int).
+    public static NumericUpDown MakeNumericUpDownDouble(int min, int max, double defaultValue, double width, object viewModel,
+        string? propertyValuePath = null, string? propertyIsVisiblePath = null)
+    {
+        var control = new NumericUpDown
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            DataContext = viewModel,
+            Minimum = min,
+            Maximum = max,
+            Width = width,
+            Increment = 1,
+            FormatString = "F0",
+            Foreground = GetTextColor(),
+        };
+
+        if (propertyValuePath != null)
+        {
+            control.Bind(NumericUpDown.ValueProperty, new Binding
+            {
+                Path = propertyValuePath,
+                Mode = BindingMode.TwoWay,
+                Converter = new NullableDoubleConverter { DefaultValue = defaultValue },
             });
         }
 

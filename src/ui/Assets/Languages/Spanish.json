@@ -4,6 +4,8 @@
   "CultureName": "es-ES",
   "version": "v5.0.0",
   "General": {
+    "SelectNonForcedLines": "Seleccionar líneas no forzadas",
+    "SelectForcedLines": "Seleccionar líneas forzadas",
     "Abort": "Abortar",
     "Actor": "Actor",
     "Actors": "Actores",
@@ -251,7 +253,6 @@
     "Image": "Imagen",
     "ImageSaved": "Imagen guardada",
     "ImageBasedSubtitles": "Subtítulos basados en imagen",
-    "ImagedBasedSubtitles": "Subtítulos basados en imágenes",
     "Images": "Imágenes",
     "ImagesWithTimeCode": "Imágenes con código de tiempo",
     "Import": "Importar",
@@ -1086,8 +1087,8 @@
       "ImportFileLabel": "Elegir imágenes a importar (códigos de tiempo en el nombre)",
       "ImportFilesInfo": "Usar nombres con código de tiempo:\r\ninicio_HH_MM_SS_MMM__fin_HH_MM_SS_MMM[_índice].ext\r\n\r\nEjemplos:\r\n0_00_01_042__0_00_03_919_0001.png\r\n0_00_01_042__0_00_03_919.png\r\n\r\nReglas:\r\n• HH_MM_SS_MMM para tiempos de inicio y fin\r\n• El guion bajo doble separa inicio/fin\r\n• Índice opcional tras el tiempo final",
       "FormattingDotDotDot": "Formato...",
-      "ImagedBasedSubtitleForEditDotDotDot": "Subtítulo basado en imagen para editar...",
-      "ImagedBasedSubtitleForOcrDotDotDot": "Subtítulo basado en imagen para OCR...",
+      "ImageBasedSubtitleForEditDotDotDot": "Subtítulo basado en imagen para editar...",
+      "ImageBasedSubtitleForOcrDotDotDot": "Subtítulo basado en imagen para OCR...",
       "SplitTextAt": "Dividir texto en",
       "BlankLines": "Líneas en blanco",
       "OneLineIsOneSubtitle": "Una línea es un subtítulo",
@@ -1756,6 +1757,7 @@
       "MaximumXCharactersPerSecond": "Máximo {0} caracteres por segundo"
     },
     "ImageBasedEdit": {
+      "SetText": "Establecer texto",
       "EditImagedBaseSubtitle": "Editar subtítulo basado en imagen",
       "EditImagedBaseSubtitleX": "Editar subtítulo basado en imagen: {0}",
       "ResizeImagesDotDotDot": "Redimensionar imágenes...",
@@ -1981,6 +1983,7 @@
       "BackendAndUpdateStatus": "Estado del backend y de la actualización"
     },
     "TextToSpeech": {
+      "PiperSettings": "Ajustes de Piper",
       "Title": "Texto a voz",
       "TextToSpeechEngine": "Motor de texto a voz",
       "ReviewAudioSegments": "TTS - Revisar segmentos de audio",
@@ -2175,6 +2178,10 @@
   },
   "Options": {
     "Settings": {
+      "MusicSymbolsToReplace": "Símbolos musicales a reemplazar (separados por comas)",
+      "MusicSymbol": "Símbolo musical",
+      "ColorWordsPerMinute": "Colorear palabras/min si es muy alto",
+      "ColorCharactersPerSecond": "Colorear caracteres/seg si es muy alto",
       "DialogStyle": "Estilo de diálogo",
       "DialogStyleDashSecondLineWithoutSpace": "Guion segunda línea sin espacio",
       "DialogStyleDashSecondLineWithSpace": "Guion segunda línea con espacio",
@@ -2465,6 +2472,7 @@
       "WaveformExportThemeDotDotDot": "Exportar tema..."
     },
     "Shortcuts": {
+      "GeneralUnbreakNoSpaceCjk": "Unir sin espacio (CJK)",
       "Title": "Atajos de teclado",
       "SearchShortcuts": "Buscar atajos...",
       "Filter": "Filtro",

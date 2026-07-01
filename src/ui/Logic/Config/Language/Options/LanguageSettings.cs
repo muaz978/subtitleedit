@@ -74,6 +74,7 @@ public class LanguageSettings
     public string SubtitleTextBoxAndGridFontName { get; set; }
     public string SubtitleGridFontSize { get; set; }
     public string SubtitleGridTextSingleLine { get; set; }
+    public string SubtitleGridTextSingleLineSeparator { get; set; }
     public string SubtitleGridLiveSpellCheck { get; set; }
     public string SubtitleGridShowFormatting { get; set; }
     public string ShowUpDownStartTime { get; set; }
@@ -82,6 +83,9 @@ public class LanguageSettings
     public string ShowUpDownLabels { get; set; }
     public string ShowButtonHints { get; set; }
     public string GridCompactMode { get; set; }
+    public string GridAlternatingRows { get; set; }
+    public string GridAlternatingRowColor { get; set; }
+    public string GridAlternatingRowColorDark { get; set; }
     public string UiFont { get; set; }
     public string Theme { get; set; }
     public string IconTheme { get; set; }
@@ -106,6 +110,7 @@ public class LanguageSettings
     public string PromptBeforeDelete { get; set; }
     public string RememberPositionAndSize { get; set; }
     public string OpenLastFileOnStart { get; set; }
+    public string AutoSave { get; set; }
     public string AutoBackupOn { get; set; }
     public string AutoBackupIntervalMinutes { get; set; }
     public string AutoBackupDeleteAfterDays { get; set; }
@@ -126,6 +131,7 @@ public class LanguageSettings
     public string WaveformCenterVideoPosition { get; set; }
     public string WaveformShowToolbar { get; set; }
     public string WaveformShowToolbarEdit { get; set; }
+    public string WaveformShowToolbarEditLabel { get; set; }
     public string WaveformSpectrogramCombinedWaveformHeight { get; set; }
     public string ShowWaveformToolbarPlay { get; set; }
     public string ShowWaveformToolbarRepeat { get; set; }
@@ -181,6 +187,7 @@ public class LanguageSettings
     public string DefaultFormat { get; set; }
     public string DefaultSaveAsFormat { get; set; }
     public string FavoriteSubtitleFormats { get; set; }
+    public string FavoriteLanguages { get; set; }
 
     public string ShowStopButton { get; set; }
     public string ShowFullscreenButton { get; set; }
@@ -189,6 +196,7 @@ public class LanguageSettings
     public string DownloadMpv { get; set; }
     public string DownloadVlc { get; set; }
     public string AllowSingleLetterShortcutsInTextbox { get; set; }
+    public string SpellCheckEnglishTreatInApostropheAsIng { get; set; }
     public string GoToLineNumberSetsVideoPosition { get; set; }
     public string AdjustAllTimesRememberLineSelectionChoice { get; set; }
     public string FilesAndLogs { get; set; }
@@ -236,6 +244,7 @@ public class LanguageSettings
     public string WaveFormsAndSpectrogramFoldersContainsX { get; set; }
     public string DeleteWaveformAndSpectrogramFoldersQuestion { get; set; }
     public string WaveformGenerateSpectrogram { get; set; }
+    public string WaveformAutoGenerate { get; set; }
     public string WaveformSpectrogramMode { get; set; }
     public string WaveformCenterOnSingleClick { get; set; }
     public string WaveformSingleClickSelectsSubtitle { get; set; }
@@ -381,6 +390,7 @@ public class LanguageSettings
         SubtitleTextBoxAndGridFontName = "UI font in subtitle text box and grid";
         SubtitleGridFontSize = "Font size in subtitle grid";
         SubtitleGridTextSingleLine = "Show subtitle text as single line in grid";
+        SubtitleGridTextSingleLineSeparator = "Single line separator (e.g. <br />)";
         SubtitleGridLiveSpellCheck = "Live spell check in subtitle grid";
         SubtitleGridShowFormatting = "Show formatted (HTML/ASSA) text in subtitle grid";
         ShowUpDownStartTime = "Show up/down control for \"Show\"";
@@ -389,6 +399,9 @@ public class LanguageSettings
         ShowUpDownLabels = "Show labels for up/down controls (Show/Hide/Duration)";
         ShowButtonHints = "Show button hints";
         GridCompactMode = "Use compact mode for grids";
+        GridAlternatingRows = "Use alternating row colors in grid";
+        GridAlternatingRowColor = "Alternating row color (light theme)";
+        GridAlternatingRowColorDark = "Alternating row color (dark theme)";
         UiFont = "UI font";
         Theme = "Theme";
         IconTheme = "Icon theme";
@@ -413,6 +426,7 @@ public class LanguageSettings
         PromptBeforeDelete = "Prompt before delete";
         RememberPositionAndSize = "Remember window position and size";
         OpenLastFileOnStart = "Open last recent file on start";
+        AutoSave = "Auto-save (save the open file while editing)";
         AutoBackupOn = "Auto-backup";
         AutoBackupIntervalMinutes = "Auto-backup interval (minutes)";
         AutoBackupDeleteAfterDays = "Auto-backup retention (days)";
@@ -434,6 +448,7 @@ public class LanguageSettings
         WaveformCenterVideoPosition = "Center video position";
         WaveformShowToolbar = "Show toolbar";
         WaveformShowToolbarEdit = "Edit toolbar...";
+        WaveformShowToolbarEditLabel = "Toolbar items";
         WaveformSpectrogramCombinedWaveformHeight = "Waveform/spectrogram combined, waveform height %";
         ShowWaveformToolbarPlay = "Toolbar: show play button";
         ShowWaveformToolbarRepeat = "Toolbar: show repeat button";
@@ -493,11 +508,13 @@ public class LanguageSettings
         DownloadMpv = "Download mpv";
         DownloadVlc = "Download VLC";
         AllowSingleLetterShortcutsInTextbox = "Allow single-letter shortcuts in text box";
+        SpellCheckEnglishTreatInApostropheAsIng = "Spell check: Treat words ending in 'in'' as 'ing' (English only)";
         GoToLineNumberSetsVideoPosition = "Go-to-line-number also sets video position";
         AdjustAllTimesRememberLineSelectionChoice = "Adjust all times, remember line selection choice";
         DefaultFormat = "Default format";
         DefaultSaveAsFormat = "Default \"Save as\" format";
         FavoriteSubtitleFormats = "Favorite subtitle formats";
+        FavoriteLanguages = "Favorite languages";
         FilesAndLogs = "Files and logs";
         ShowErrorLogFile = "Show error log file";
         ShowToolsLogFile = "Show tools log file";
@@ -543,6 +560,7 @@ public class LanguageSettings
         WaveFormsAndSpectrogramFoldersContainsX = "\"Waveforms\" and \"spectrogram\" folders contains {0}";
         DeleteWaveformAndSpectrogramFoldersQuestion = "Delete \"Waveforms\" and \"Spectrogram\" files?";
         WaveformGenerateSpectrogram = "Generate spectrogram";
+        WaveformAutoGenerate = "Auto-generate waveform when opening a video";
         WaveformSpectrogramMode = "Spectrogram mode";
         WaveformCenterOnSingleClick = "Center on single click";
         WaveformSingleClickSelectsSubtitle = "Select subtitle on single click";

@@ -43,6 +43,10 @@ public partial class MultipleReplaceViewModel : ObservableObject
     public Window? Window { get; set; }
     public bool OkPressed { get; private set; }
     public Subtitle FixedSubtitle { get; private set; }
+
+    // Invoked by the re-usable "Apply" button: applies the checked replacements to the document
+    // (subtitle, number applied) without closing the window, so several rounds can be run (#12029).
+    public Action<Subtitle, int>? OnApply { get; set; }
     public int TotalReplaced { get; private set; }
 
     private readonly IWindowService _windowService;
@@ -257,6 +261,21 @@ public partial class MultipleReplaceViewModel : ObservableObject
         UndoUnchecked();
         OkPressed = true;
         Window?.Close();
+    }
+
+    [RelayCommand]
+    private void Apply()
+    {
+        GeneratePreview();
+        UndoUnchecked();
+
+        // Apply the currently checked replacements to the document, then make the result the new
+        // working subtitle so the next round operates on the already-fixed text - without closing
+        // the window (Subtitle Edit 4 had this re-usable "Apply" button - #12029).
+        OnApply?.Invoke(new Subtitle(FixedSubtitle), Fixes.Count(f => f.Apply));
+        _subtitle = new Subtitle(FixedSubtitle);
+        _dirty = true;
+        GeneratePreview();
     }
 
     private void UndoUnchecked()
@@ -499,27 +518,31 @@ public partial class MultipleReplaceViewModel : ObservableObject
             return;
         }
 
-        var fileName = await _fileHelper.PickOpenFile(Window, Se.Language.Options.Settings.OpenRuleFile, "Replace rules", ".template");
+        var fileName = await _fileHelper.PickOpenFile(Window, Se.Language.Options.Settings.OpenRuleFile, "Replace rules", ".template", "CSV (comma separated)", ".csv");
         if (string.IsNullOrEmpty(fileName))
         {
             return;
         }
 
-        // import from json
+        // import from json, SE4 xml or csv
         List<RuleTreeNode>? imported = null;
         try
         {
-            var jsonOrXml = System.IO.File.ReadAllText(fileName);
+            var content = System.IO.File.ReadAllText(fileName);
 
-            CategoryImportExportItem? temp = null;
+            CategoryImportExportItem? temp;
 
-            if (jsonOrXml.Contains("<MultipleSearchAndReplaceList>"))
+            if (fileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
             {
-                temp = Se4XmlImporter.ImportFromXml(jsonOrXml);
+                temp = CsvImporter.Import(content);
+            }
+            else if (content.Contains("<MultipleSearchAndReplaceList>"))
+            {
+                temp = Se4XmlImporter.ImportFromXml(content);
             }
             else
             {
-                temp = JsonSerializer.Deserialize<CategoryImportExportItem>(jsonOrXml, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                temp = JsonSerializer.Deserialize<CategoryImportExportItem>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             }
 
             if (temp == null)
@@ -587,7 +610,11 @@ public partial class MultipleReplaceViewModel : ObservableObject
             return;
         }
 
-        var fileName = await _fileHelper.PickSaveFile(Window, ".template", "SE_Replace_Rules", Se.Language.Options.Settings.SaveRuleProfilesFile);
+        var fileName = await _fileHelper.PickSaveFile(
+            Window,
+            new[] { ("Replace rules", ".template"), ("CSV (comma separated)", ".csv") },
+            "SE_Replace_Rules",
+            Se.Language.Options.Settings.SaveRuleProfilesFile);
         if (string.IsNullOrEmpty(fileName))
         {
             return;
@@ -600,8 +627,16 @@ public partial class MultipleReplaceViewModel : ObservableObject
         }
 
         var export = new CategoryImportExportItem(toExport);
-        var json = JsonSerializer.Serialize(export, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-        System.IO.File.WriteAllText(fileName, json);
+        if (fileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+        {
+            // UTF-8 with BOM so Excel opens non-ASCII rules correctly.
+            System.IO.File.WriteAllText(fileName, CsvExporter.Export(export), new System.Text.UTF8Encoding(true));
+        }
+        else
+        {
+            var json = JsonSerializer.Serialize(export, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+            System.IO.File.WriteAllText(fileName, json);
+        }
 
         _ = await _windowService.ShowDialogAsync<PromptFileSavedWindow, PromptFileSavedViewModel>(Window,
             vm =>
@@ -1127,7 +1162,9 @@ public partial class MultipleReplaceViewModel : ObservableObject
                 else if (item.SearchType == ReplaceExpression.SearchRegEx)
                 {
                     var r = _compiledRegExList[item.FindWhat];
-                    if (r.IsMatch(newText))
+                    // Match against line-feed-normalized text so a pattern's \n line break matches even
+                    // when the paragraph text uses \r\n (the pattern is FixNewLine'd to \n) (#11956).
+                    if (r.IsMatch(string.Join("\n", newText.SplitToLines())))
                     {
                         hit = true;
                         ruleInfo = string.IsNullOrEmpty(ruleInfo) ? item.RuleInfo : $"{ruleInfo} + {item.RuleInfo}";

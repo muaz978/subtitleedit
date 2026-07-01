@@ -91,7 +91,13 @@ public partial class AutoTranslateViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<LlamaCppModelDisplay> _llamaCppModels = new();
     [ObservableProperty] private LlamaCppModelDisplay? _selectedLlamaCppModel;
     [ObservableProperty] private bool _llamaCppModelComboIsVisible;
+
+    [ObservableProperty] private ObservableCollection<DeepLFormalityItem> _formalities = new();
+    [ObservableProperty] private DeepLFormalityItem? _selectedFormality;
+    [ObservableProperty] private bool _formalityIsVisible;
     [ObservableProperty] private bool _llamaCppButtonsAreVisible;
+    [ObservableProperty] private bool _llamaCppRemoteToggleIsVisible;
+    [ObservableProperty] private bool _llamaCppUseRemoteServer;
     [ObservableProperty] private string _llamaCppServerButtonText = "Start server";
     [ObservableProperty] private string _llamaCppDownloadButtonText = string.Empty;
     [ObservableProperty] private string _crispAsrDownloadButtonText = string.Empty;
@@ -107,6 +113,7 @@ public partial class AutoTranslateViewModel : ObservableObject
     private Subtitle _subtitle = new Subtitle();
     private int _translationProgressIndex;
     private bool _llamaCppUpdatePromptShown;
+    private bool _suppressLlamaCppRemoteToggle;
     private readonly IWindowService _windowService;
     private readonly IFolderHelper _folderHelper;
 
@@ -157,6 +164,15 @@ public partial class AutoTranslateViewModel : ObservableObject
         };
         SelectedAutoTranslator = AutoTranslators[0];
         AutoTranslatorLinkText = SelectedAutoTranslator.Name;
+
+        Formalities = new ObservableCollection<DeepLFormalityItem>
+        {
+            new("default", "Default"),
+            new("more", "More formal"),
+            new("less", "Less formal"),
+            new("prefer_more", "More formal (fall back to default)"),
+            new("prefer_less", "Less formal (fall back to default)"),
+        };
 
         Rows = new ObservableCollection<TranslateRow>();
         IsTranslateEnabled = true;
@@ -318,8 +334,18 @@ public partial class AutoTranslateViewModel : ObservableObject
             Configuration.Settings.Tools.LmStudioModel = apiModel.Trim();
         }
 
-        // llama.cpp is server-managed: the API URL is set by LlamaCppServerManager and the
-        // model is persisted via OnSelectedLlamaCppModelChanged, so nothing to save here.
+        if (engineType == typeof(LlamaCppTranslate))
+        {
+            Se.Settings.AutoTranslate.LlamaCppUseRemoteServer = LlamaCppUseRemoteServer;
+            if (LlamaCppUseRemoteServer)
+            {
+                // Remote mode: persist the user-entered endpoint.
+                Configuration.Settings.Tools.LlamaCppApiUrl = apiUrl.Trim();
+                Se.Settings.AutoTranslate.LlamaCppApiUrl = apiUrl.Trim();
+            }
+            // Local mode stays server-managed: the API URL is set by LlamaCppServerManager and the
+            // model is persisted via OnSelectedLlamaCppModelChanged, so nothing else to save here.
+        }
 
         if (engineType == typeof(OllamaTranslate))
         {
@@ -515,7 +541,7 @@ public partial class AutoTranslateViewModel : ObservableObject
             return;
         }
 
-        foreach (var language in autoTranslator.GetSupportedSourceLanguages())
+        foreach (var language in LanguageFavoritesHelper.Order(autoTranslator.GetSupportedSourceLanguages(), p => p.Code))
         {
             SourceLanguages.Add(language);
         }
@@ -564,7 +590,7 @@ public partial class AutoTranslateViewModel : ObservableObject
             return;
         }
 
-        foreach (var language in autoTranslator.GetSupportedTargetLanguages())
+        foreach (var language in LanguageFavoritesHelper.Order(autoTranslator.GetSupportedTargetLanguages(), p => p.Code))
         {
             TargetLanguages.Add(language);
         }
@@ -1164,10 +1190,18 @@ public partial class AutoTranslateViewModel : ObservableObject
 
         _cancellationTokenSource = new CancellationTokenSource();
 
-        if (engineType == typeof(LlamaCppTranslate) && !await EnsureLlamaCppReady())
+        if (engineType == typeof(LlamaCppTranslate))
         {
-            IsProgressEnabled = false;
-            return false;
+            if (Se.Settings.AutoTranslate.LlamaCppUseRemoteServer)
+            {
+                // Remote server: use the configured endpoint directly, skip local server management.
+                Configuration.Settings.Tools.LlamaCppApiUrl = (ApiUrlText ?? string.Empty).Trim();
+            }
+            else if (!await EnsureLlamaCppReady())
+            {
+                IsProgressEnabled = false;
+                return false;
+            }
         }
 
         _translationInProgress = true;
@@ -1434,6 +1468,37 @@ public partial class AutoTranslateViewModel : ObservableObject
         UpdateTargetLanguages(translator);
     }
 
+    partial void OnSelectedTargetLanguageChanged(TranslationPair? value)
+    {
+        UpdateFormalityVisibility();
+    }
+
+    partial void OnSelectedFormalityChanged(DeepLFormalityItem? value)
+    {
+        var code = value?.Code ?? "default";
+        Configuration.Settings.Tools.AutoTranslateDeepLFormality = code;
+        Se.Settings.AutoTranslate.DeepLFormality = code;
+    }
+
+    // Formality only applies to DeepL, and only for target languages that support it
+    // (HasFormality - e.g. German/French/Spanish/Japanese..., but not English).
+    private void UpdateFormalityVisibility()
+    {
+        FormalityIsVisible = SelectedAutoTranslator is DeepLTranslate && SelectedTargetLanguage?.HasFormality == true;
+    }
+
+    private void LoadSelectedFormality()
+    {
+        var code = Configuration.Settings.Tools.AutoTranslateDeepLFormality;
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            code = "default";
+        }
+
+        SelectedFormality = Formalities.FirstOrDefault(f => f.Code.Equals(code, StringComparison.OrdinalIgnoreCase))
+                            ?? Formalities.FirstOrDefault();
+    }
+
     private void SetAutoTranslatorEngine(IAutoTranslator translator)
     {
         SelectedAutoTranslator = translator;
@@ -1444,8 +1509,7 @@ public partial class AutoTranslateViewModel : ObservableObject
         ApiUrlIsVisible = false;
         ApiUrlText = string.Empty;
         ButtonApiUrlIsVisible = false;
-        //LabelFormality.IsVisible = false;
-        //PickerFormality.IsVisible = false;
+        FormalityIsVisible = false;
         ModelIsVisible = false;
         ModelBrowseIsVisible = false;
         ButtonModelIsVisible = false;
@@ -1456,6 +1520,7 @@ public partial class AutoTranslateViewModel : ObservableObject
         SelectedCrispAsrModel = null;
         LlamaCppModelComboIsVisible = false;
         LlamaCppButtonsAreVisible = false;
+        LlamaCppRemoteToggleIsVisible = false;
         LlamaCppModels.Clear();
         SelectedLlamaCppModel = null;
         ModelText = string.Empty;
@@ -1490,9 +1555,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
         if (engineType == typeof(DeepLTranslate))
         {
-            //LabelFormality.IsVisible = true;
-            //PickerFormality.IsVisible = true;
-
             FillUrls(new List<string>
             {
                 Configuration.Settings.Tools.AutoTranslateDeepLUrl,
@@ -1502,7 +1564,8 @@ public partial class AutoTranslateViewModel : ObservableObject
             ApiKeyText = Configuration.Settings.Tools.AutoTranslateDeepLApiKey;
             ApiKeyIsVisible = true;
 
-            //SelectFormality();
+            LoadSelectedFormality();
+            UpdateFormalityVisibility();
 
             return;
         }
@@ -1629,6 +1692,30 @@ public partial class AutoTranslateViewModel : ObservableObject
 
         if (engineType == typeof(LlamaCppTranslate))
         {
+            // The remote toggle is always available for llama.cpp; its current value decides
+            // whether we show the local model/server controls or a plain API URL field (#11584).
+            LlamaCppRemoteToggleIsVisible = true;
+            _suppressLlamaCppRemoteToggle = true;
+            LlamaCppUseRemoteServer = Se.Settings.AutoTranslate.LlamaCppUseRemoteServer;
+            _suppressLlamaCppRemoteToggle = false;
+
+            if (LlamaCppUseRemoteServer)
+            {
+                // Remote/external server: just edit the URL (the llama.cpp server is OpenAI-compatible,
+                // same as the LM Studio engine). No local download or server management.
+                if (string.IsNullOrEmpty(Se.Settings.AutoTranslate.LlamaCppApiUrl))
+                {
+                    Se.Settings.AutoTranslate.LlamaCppApiUrl = "http://localhost:8080/v1/chat/completions";
+                }
+
+                FillUrls(new List<string>
+                {
+                    Se.Settings.AutoTranslate.LlamaCppApiUrl.TrimEnd('/'),
+                });
+
+                return;
+            }
+
             LlamaCppModelComboIsVisible = true;
             LlamaCppButtonsAreVisible = true;
             var savedModelName = Path.GetFileName(Se.Settings.AutoTranslate.LlamaCppModel ?? string.Empty);
@@ -1832,6 +1919,23 @@ public partial class AutoTranslateViewModel : ObservableObject
         throw new Exception($"Engine {translator.Name} not handled!");
     }
 
+    partial void OnLlamaCppUseRemoteServerChanged(bool value)
+    {
+        // Ignore the programmatic assignment made while SetAutoTranslatorEngine builds the panel.
+        if (_suppressLlamaCppRemoteToggle)
+        {
+            return;
+        }
+
+        Se.Settings.AutoTranslate.LlamaCppUseRemoteServer = value;
+
+        // Swap the llama.cpp panel between the local model/server controls and the remote URL field.
+        if (SelectedAutoTranslator is LlamaCppTranslate)
+        {
+            SetAutoTranslatorEngine(SelectedAutoTranslator);
+        }
+    }
+
     private void FillUrls(List<string> urls)
     {
         ApiUrlText = urls.Count > 0 ? urls[0] : string.Empty;
@@ -1956,6 +2060,11 @@ public partial class AutoTranslateViewModel : ObservableObject
         if (e.Key == Key.Escape)
         {
             Cancel();
+        }
+        else if (UiUtil.IsHelp(e))
+        {
+            e.Handled = true;
+            UiUtil.ShowHelp("features/auto-translate");
         }
     }
 

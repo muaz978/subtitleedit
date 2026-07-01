@@ -211,6 +211,15 @@ public class AssaStylesWindow : Window
         menuItemTakeUsagesFrom.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsTakeUsagesFromVisible)) { Source = vm });
         flyout.Items.Add(menuItemTakeUsagesFrom);
 
+        var menuItemReplaceWith = new MenuItem
+        {
+            Header = Se.Language.Assa.ReplaceStyleWithDotDotDot,
+            DataContext = vm,
+            Command = vm.FileReplaceWithCommand,
+        };
+        menuItemReplaceWith.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsFileStyleSelected)) { Source = vm });
+        flyout.Items.Add(menuItemReplaceWith);
+
         var buttonNew = UiUtil.MakeButton(vm.FileNewCommand, IconNames.Plus, Se.Language.General.New);
         var buttonRemove = UiUtil.MakeButton(vm.FileRemoveCommand, IconNames.Trash, Se.Language.General.Delete);
         var buttonDuplicate = UiUtil.MakeButton(vm.FilesDuplicateCommand, IconNames.Duplicate, Se.Language.General.Duplicate);
@@ -240,6 +249,7 @@ public class AssaStylesWindow : Window
             RowDefinitions =
             {
                 new RowDefinition { Height = new GridLength(2, GridUnitType.Auto) },
+                new RowDefinition { Height = new GridLength(2, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(2, GridUnitType.Star) },
                 new RowDefinition { Height = new GridLength(2, GridUnitType.Auto) },
             },
@@ -253,6 +263,16 @@ public class AssaStylesWindow : Window
 
         var label = UiUtil.MakeLabel(Se.Language.Assa.StylesSaved).WithBold();
 
+        var labelCategory = UiUtil.MakeLabel(Se.Language.Assa.Category);
+        var comboBoxCategory = UiUtil.MakeComboBox(vm.StorageCategories, vm, nameof(vm.SelectedStorageCategory)).WithMinWidth(160);
+        var buttonNewCategory = UiUtil.MakeButton(vm.NewCategoryCommand, IconNames.Plus, Se.Language.Assa.NewCategory);
+        var buttonRenameCategory = UiUtil.MakeButton(vm.RenameCategoryCommand, IconNames.Pencil, Se.Language.Assa.RenameCategory)
+            .WithBindIsVisible(nameof(vm.IsCategoryActionVisible));
+        var buttonDeleteCategory = UiUtil.MakeButton(vm.DeleteCategoryCommand, IconNames.Trash, Se.Language.Assa.DeleteCategory)
+            .WithBindIsVisible(nameof(vm.IsCategoryActionVisible));
+        var panelCategory = UiUtil.MakeHorizontalPanel(labelCategory, comboBoxCategory, buttonNewCategory, buttonRenameCategory, buttonDeleteCategory)
+            .WithAlignmentLeft();
+
         var dataGrid = new DataGrid
         {
             AutoGenerateColumns = false,
@@ -264,7 +284,7 @@ public class AssaStylesWindow : Window
             Width = double.NaN,
             Height = double.NaN,
             DataContext = vm,
-            ItemsSource = vm.StorageStyles,
+            ItemsSource = vm.StorageStylesView,
             Columns =
             {
                 new DataGridTextColumn
@@ -272,6 +292,13 @@ public class AssaStylesWindow : Window
                     Header = Se.Language.General.Name,
                     CellTheme = UiUtil.DataGridNoBorderNoPaddingCellTheme,
                     Binding = new Binding(nameof(StyleDisplay.Name)),
+                    IsReadOnly = true,
+                },
+                new DataGridTextColumn
+                {
+                    Header = Se.Language.Assa.Category,
+                    CellTheme = UiUtil.DataGridNoBorderNoPaddingCellTheme,
+                    Binding = new Binding(nameof(StyleDisplay.Category)),
                     IsReadOnly = true,
                 },
                 new DataGridTextColumn
@@ -343,6 +370,15 @@ public class AssaStylesWindow : Window
         menuItemClearSetAsDefault.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsSetStyleAsDefaultVisible)) { Source = vm });
         flyout.Items.Add(menuItemClearSetAsDefault);
 
+        var menuItemMoveToCategory = new MenuItem
+        {
+            Header = Se.Language.Assa.MoveToCategoryDotDotDot,
+            DataContext = vm,
+            Command = vm.MoveToCategoryCommand,
+        };
+        menuItemMoveToCategory.Bind(MenuItem.IsVisibleProperty, new Binding(nameof(vm.IsStorageStyleSelected)) { Source = vm });
+        flyout.Items.Add(menuItemMoveToCategory);
+
         var buttonNew = UiUtil.MakeButton(vm.StorageNewCommand, IconNames.Plus, Se.Language.General.New);
         var buttonDuplicate = UiUtil.MakeButton(vm.StorageDuplicateCommand, IconNames.Duplicate, Se.Language.General.Duplicate);
         var buttonRemove = UiUtil.MakeButton(vm.StorageRemoveCommand, IconNames.Trash, Se.Language.General.Delete);
@@ -361,8 +397,9 @@ public class AssaStylesWindow : Window
         ).WithAlignmentLeft();
 
         grid.Add(label, 0, 0);
-        grid.Add(dataGrid, 1, 0);
-        grid.Add(panelButtons, 2, 0);
+        grid.Add(panelCategory, 1, 0);
+        grid.Add(dataGrid, 2, 0);
+        grid.Add(panelButtons, 3, 0);
 
         return UiUtil.MakeBorderForControl(grid);
     }

@@ -1,19 +1,19 @@
 ﻿namespace Nikse.SubtitleEdit.Features.Ocr.FixEngine;
 
-public class GuessUsedItem
+public class ReplacementUsedItem
 {
     public string From { get; set; }
     public string To { get; set; }
     public int LineIndex { get; set; }
 
-    public GuessUsedItem()
+    public ReplacementUsedItem()
     {
         From = string.Empty;
         To = string.Empty;
         LineIndex = -1;
     }
-    
-    public GuessUsedItem(string from, string to, int lineLineIndex)
+
+    public ReplacementUsedItem(string from, string to, int lineLineIndex)
     {
         From = from;
         To = to;
@@ -22,8 +22,8 @@ public class GuessUsedItem
 
     public override string ToString()
     {
-        var from = From.Replace("\r\n", "↵").Replace("\n", "↵");
-        var to = To.Replace("\r\n", "↵").Replace("\n", "↵");
+        var from = From.Replace("\r\n", "·").Replace("\n", "·");
+        var to = To.Replace("\r\n", "·").Replace("\n", "·");
         return $"#{LineIndex + 1}: {from} → {to}";
     }
 }

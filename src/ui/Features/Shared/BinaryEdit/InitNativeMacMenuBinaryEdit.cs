@@ -20,6 +20,7 @@ public static class InitNativeMacMenuBinaryEdit
         Add(exportMenu, Se.Language.General.BdnXml, vm.ExportBdnXmlCommand);
         Add(exportMenu, "DOST/png", vm.ExportDostPngCommand);
         Add(exportMenu, "FCP/png", vm.ExportFcpPngCommand);
+        Add(exportMenu, Se.Language.General.ImagesWithHtmlIndex, vm.ExportHtmlIndexCommand);
         Add(exportMenu, Se.Language.General.ImagesWithTimeCode, vm.ExportImagesWithTimeCodeCommand);
         Add(exportMenu, Se.Language.File.Export.TitleExportVobSub, vm.ExportVobSubCommand);
         Add(exportMenu, "WebVTT png", vm.ExportWebVttThumbnailCommand);
@@ -32,15 +33,24 @@ public static class InitNativeMacMenuBinaryEdit
 
         // Tools menu
         var toolsMenu = new NativeMenu();
-        Add(toolsMenu, l.AdjustDurations, vm.AdjustDurationsCommand);
-        Add(toolsMenu, l.ApplyDurationLimits, vm.ApplyDurationLimitsCommand);
         Add(toolsMenu, Se.Language.General.AlignmentDotDotDot, vm.AlignmentCommand);
+        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.CenterHorizontally, vm.CenterHorizontallyCommand);
+        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.TopAlignLines, vm.TopAlignCommand);
+        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.BottomAlignLines, vm.BottomAlignCommand);
+        toolsMenu.Items.Add(new NativeMenuItemSeparator());
         Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.ResizeImagesDotDotDot, vm.ResizeImagesCommand);
+        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.CropImages, vm.CropCommand);
+        toolsMenu.Items.Add(new NativeMenuItemSeparator());
         Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.AdjustBrightnessDotDotDot, vm.AdjustBrightnessCommand);
         Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.AdjustAlphaDotDotDot, vm.AdjustAlphaCommand);
-        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.CenterHorizontally, vm.CenterHorizontallyCommand);
-        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.CropImages, vm.CropCommand);
-        root.Items.Add(new NativeMenuItem(Clean(l.ToolsSelectedLines)) { Menu = toolsMenu });
+        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.AdjustColorDotDotDot, vm.AdjustColorCommand);
+        toolsMenu.Items.Add(new NativeMenuItemSeparator());
+        Add(toolsMenu, l.AdjustDurations, vm.AdjustDurationsCommand);
+        Add(toolsMenu, l.ApplyDurationLimits, vm.ApplyDurationLimitsCommand);
+        toolsMenu.Items.Add(new NativeMenuItemSeparator());
+        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.SortByStartTime, vm.SortByStartTimeCommand);
+        Add(toolsMenu, Se.Language.Tools.ImageBasedEdit.AppendSubtitleDotDotDot, vm.AppendSubtitleCommand);
+        root.Items.Add(new NativeMenuItem(Clean(l.Tools)) { Menu = toolsMenu });
 
         // Synchronization menu
         var syncMenu = new NativeMenu();

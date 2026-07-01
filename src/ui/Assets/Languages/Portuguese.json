@@ -4,6 +4,8 @@
   "translatedBy": "Hugo Carvalho (hugok79) e Filipe Mota (BlackSpirits)\nE-mail: hugokarvalho@hotmail.com / blackspirits@gmail.com\nAntigo tradutor: Marco Barbosa (moob)",
   "cultureName": "pt-PT",
   "general": {
+    "selectNonForcedLines": "Selecionar linhas não forçadas",
+    "selectForcedLines": "Selecionar linhas forçadas",
     "abort": "Cancelar",
     "actor": "Ator",
     "actors": "Atores",
@@ -1062,8 +1064,8 @@
       "importFileLabel": "Escolher imagens a importar (suporta tempos nos nomes dos ficheiros)",
       "importFilesInfo": "Utilizar nomes de ficheiros com tempos:\nstart_HH_MM_SS_MMM__end_HH_MM_SS_MMM[_index].ext\n\nExemplos:\n0_00_01_042__0_00_03_919_0001.png\n0_00_01_042__0_00_03_919.png\n\nRegras:\n• HH_MM_SS_MMM para tempos de início e de fim\n• Sublinhado duplo separa início/fim\n• Índice opcional após o tempo de fim",
       "formattingDotDotDot": "Formatação...",
-      "imagedBasedSubtitleForEditDotDotDot": "Legenda baseada em imagem para edição...",
-      "imagedBasedSubtitleForOcrDotDotDot": "Legenda baseada em imagem para OCR...",
+      "imageBasedSubtitleForEditDotDotDot": "Legenda baseada em imagem para edição...",
+      "imageBasedSubtitleForOcrDotDotDot": "Legenda baseada em imagem para OCR...",
       "splitTextAt": "Dividir texto em",
       "blankLines": "Linhas em branco",
       "oneLineIsOneSubtitle": "Uma linha é uma legenda",
@@ -1742,6 +1744,7 @@
       "maximumXCharactersPerSecond": "Máximo de {0} caracteres por segundo"
     },
     "imageBasedEdit": {
+      "setText": "Definir texto",
       "editImagedBaseSubtitle": "Editar",
       "editImagedBaseSubtitleX": "Editar legenda baseada em imagem: {0}",
       "resizeImagesDotDotDot": "Redimensionar imagens...",
@@ -1910,6 +1913,7 @@
       "backendAndUpdateStatus": "Back-end e estado da atualização"
     },
     "textToSpeech": {
+      "piperSettings": "Definições do Piper",
       "title": "Texto para voz",
       "textToSpeechEngine": "Motor de conversão de texto em fala",
       "reviewAudioSegments": "TTS - Analisar segmentos de áudio",
@@ -2170,6 +2174,10 @@
   },
   "options": {
     "settings": {
+      "musicSymbolsToReplace": "Símbolos musicais a substituir (separados por vírgulas)",
+      "musicSymbol": "Símbolo musical",
+      "colorWordsPerMinute": "Colorir palavras/min se muito alto",
+      "colorCharactersPerSecond": "Colorir caracteres/seg se muito alto",
       "dialogStyle": "Estilo de diálogo",
       "dialogStyleDashSecondLineWithoutSpace": "Travessão apenas na segunda linha sem espaço",
       "dialogStyleDashSecondLineWithSpace": "Travessão apenas na segunda linha com espaço",
@@ -2458,6 +2466,7 @@
       "fixCommonErrorsSkipStep1": "Corrigir erros comuns: saltar passo 1 (escolher correções)"
     },
     "shortcuts": {
+      "generalUnbreakNoSpaceCjk": "Desquebrar sem espaço (CJK)",
       "title": "Atalhos",
       "searchShortcuts": "Atalhos de pesquisa...",
       "filter": "Filtro",

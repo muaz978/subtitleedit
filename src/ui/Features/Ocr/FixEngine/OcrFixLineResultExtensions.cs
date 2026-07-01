@@ -1,39 +1,18 @@
-﻿using Avalonia.Controls;
+using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Media;
+using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
-using System.Collections.Generic;
 
 namespace Nikse.SubtitleEdit.Features.Ocr.FixEngine;
 
-public class OcrFixLineResult
+/// <summary>
+/// UI-side (Avalonia) rendering for <see cref="OcrFixLineResult"/>. Kept separate from the data type
+/// so the OCR-fix engine can live in libuilogic without an Avalonia dependency (#11744).
+/// </summary>
+public static class OcrFixLineResultExtensions
 {
-    public int LineIndex { get; set; }
-    public List<OcrFixLinePartResult> Words { get; set; } = new();
-    public ReplacementUsedItem ReplacementUsed { get; set; } = new();
-
-    public OcrFixLineResult()
-    {
-    }
-
-    public OcrFixLineResult(int index, string text)
-    {
-        LineIndex = index;
-        Words = new List<OcrFixLinePartResult> { new() { Word = text, IsSpellCheckedOk = null } };
-    }
-
-    public string GetText()
-    {
-        var sb = new System.Text.StringBuilder();
-        foreach (var w in Words)
-        {
-            sb.Append(string.IsNullOrEmpty(w.FixedWord) ? w.Word : w.FixedWord);
-        }
-
-        return sb.ToString();
-    }
-
-    public TextBlock GetFormattedText(IBrush? errorBrush = null, IBrush? normalBrush = null)
+    public static TextBlock GetFormattedText(this OcrFixLineResult result, IBrush? errorBrush = null, IBrush? normalBrush = null)
     {
         var textBlock = new TextBlock();
         if (!string.IsNullOrEmpty(Se.Settings.Appearance.SubtitleTextBoxAndGridFontName))
@@ -41,12 +20,15 @@ public class OcrFixLineResult
             textBlock.FontFamily = new FontFamily(Se.Settings.Appearance.SubtitleTextBoxAndGridFontName);
         }
 
-        var errorColor = errorBrush ?? Brushes.LightPink;
-        var normalColor = normalBrush ?? Brushes.LightGreen;
+        // LightPink/LightGreen read well on a dark grid but wash out on a light background,
+        // so use darker, higher-contrast variants in non-dark themes.
+        var isDark = UiTheme.IsDarkThemeEnabled();
+        var errorColor = errorBrush ?? (isDark ? Brushes.LightPink : new SolidColorBrush(Color.FromRgb(0xC0, 0x00, 0x00)));
+        var normalColor = normalBrush ?? (isDark ? Brushes.LightGreen : new SolidColorBrush(Color.FromRgb(0x00, 0x80, 0x00)));
 
         if (textBlock.Inlines != null)
         {
-            foreach (var word in Words)
+            foreach (var word in result.Words)
             {
                 var displayText = string.IsNullOrEmpty(word.FixedWord) ? word.Word : word.FixedWord;
 
@@ -71,7 +53,6 @@ public class OcrFixLineResult
                     }
                     textBlock.Inlines.Add(run);
                 }
-
             }
         }
 

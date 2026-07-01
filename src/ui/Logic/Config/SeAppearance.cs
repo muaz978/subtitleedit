@@ -51,6 +51,7 @@ public class SeAppearance
     public bool ToolbarShowBurnIn { get; set; }
     public bool ToolbarShowSettings { get; set; }
     public bool ToolbarShowLayout { get; set; }
+    public bool ToolbarShowSourceView { get; set; }
     public bool ToolbarShowHelp { get; set; }
     public bool ToolbarShowEncoding { get; set; }
     public bool ToolbarShowFrameRate { get; set; }
@@ -76,7 +77,10 @@ public class SeAppearance
         IconTheme = string.Empty;
         MatchIconColorToDarkTheme = false;
         LayoutScale = 1.0;
-        FontName = "Default";
+        // On macOS default to Helvetica Neue rather than the hidden system font (.AppleSystemUIFont /
+        // San Francisco): SetFontName applies this family explicitly to every control, and Helvetica
+        // Neue avoids Avalonia's caret-misplacement with San Francisco's overhanging glyphs (#12009).
+        FontName = System.OperatingSystem.IsMacOS() ? "Helvetica Neue" : "Default";
         SubtitleTextBoxAndGridFontName = "Default";
         SubtitleGridFontSize = 13d;
         SubtitleGridTextSingleLineSeparator = " ⏎ "; // "<br />";
@@ -88,7 +92,7 @@ public class SeAppearance
         SubtitleTextBoxLiveSpellCheck = false;
         SubtitleGridFormattingType = (int)SubtitleGridFormattingTypes.ShowFormatting;
         GridLinesAppearance = DataGridGridLinesVisibility.None.ToString();
-        GridAlternatingRows = false;
+        GridAlternatingRows = true;
         GridAlternatingRowColor = new Color(255, 245, 245, 245).FromColorToHex();
         GridAlternatingRowColorDark = new Color(255, 45, 45, 45).FromColorToHex();
         DarkModeBackgroundColor = new Color(255, 33, 33, 33).FromColorToHex();
@@ -118,6 +122,7 @@ public class SeAppearance
         ToolbarShowBurnIn = false;
         ToolbarShowSettings = true;
         ToolbarShowLayout = true;
+        ToolbarShowSourceView = false;
         ToolbarShowHelp = true;
         ToolbarShowEncoding = false;
         ShowPluginsMenu = false;

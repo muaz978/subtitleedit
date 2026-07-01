@@ -4,6 +4,8 @@
   "CultureName": "nl-NL",
   "version": "v5.0.0",
   "General": {
+    "SelectNonForcedLines": "Niet-geforceerde regels selecteren",
+    "SelectForcedLines": "Geforceerde regels selecteren",
     "Abort": "Afbreken",
     "Actor": "Acteur",
     "Actors": "Acteurs",
@@ -251,7 +253,6 @@
     "Image": "Afbeelding",
     "ImageSaved": "Afbeelding opgeslagen",
     "ImageBasedSubtitles": "Op afbeeldingen gebaseerde ondertitels",
-    "ImagedBasedSubtitles": "Ondertitels gebaseerd op afbeeldingen",
     "Images": "Afbeeldingen",
     "ImagesWithTimeCode": "Afbeeldingen met tijdcode",
     "Import": "Importeren",
@@ -1086,8 +1087,8 @@
       "ImportFileLabel": "",
       "ImportFilesInfo": "",
       "FormattingDotDotDot": "",
-      "ImagedBasedSubtitleForEditDotDotDot": "",
-      "ImagedBasedSubtitleForOcrDotDotDot": "",
+      "ImageBasedSubtitleForEditDotDotDot": "",
+      "ImageBasedSubtitleForOcrDotDotDot": "",
       "SplitTextAt": "",
       "BlankLines": "",
       "OneLineIsOneSubtitle": "",
@@ -1756,6 +1757,7 @@
       "MaximumXCharactersPerSecond": "Maximaal {0} tekens per seconde"
     },
     "ImageBasedEdit": {
+      "SetText": "Tekst instellen",
       "EditImagedBaseSubtitle": "",
       "EditImagedBaseSubtitleX": "",
       "ResizeImagesDotDotDot": "",
@@ -1981,6 +1983,7 @@
       "BackendAndUpdateStatus": "Backend- en updatestatus"
     },
     "TextToSpeech": {
+      "PiperSettings": "Piper-instellingen",
       "Title": "",
       "TextToSpeechEngine": "",
       "ReviewAudioSegments": "",
@@ -2175,6 +2178,10 @@
   },
   "Options": {
     "Settings": {
+      "MusicSymbolsToReplace": "Te vervangen muzieksymbolen (gescheiden door komma)",
+      "MusicSymbol": "Muzieksymbool",
+      "ColorWordsPerMinute": "Woorden/min kleuren indien te hoog",
+      "ColorCharactersPerSecond": "Tekens/sec kleuren indien te hoog",
       "DialogStyle": "",
       "DialogStyleDashSecondLineWithoutSpace": "",
       "DialogStyleDashSecondLineWithSpace": "",
@@ -2465,6 +2472,7 @@
       "WaveformExportThemeDotDotDot": "Thema exporteren..."
     },
     "Shortcuts": {
+      "GeneralUnbreakNoSpaceCjk": "Samenvoegen zonder spatie (CJK)",
       "Title": "",
       "SearchShortcuts": "",
       "Filter": "",

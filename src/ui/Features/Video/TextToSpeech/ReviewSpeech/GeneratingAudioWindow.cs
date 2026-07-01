@@ -12,7 +12,12 @@ public class GeneratingAudioWindow : Window
         vm.Window = this;
         UiUtil.InitializeWindow(this, GetType().Name);
         Title = string.Empty;
-        SizeToContent = SizeToContent.WidthAndHeight;
+
+        // Fix the width and only auto-size the height. SizeToContent.WidthAndHeight
+        // renders far too wide on macOS, so keep an explicit width for a consistent
+        // look across platforms.
+        Width = 360;
+        SizeToContent = SizeToContent.Height;
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
 

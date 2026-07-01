@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml.Styling;
+using Avalonia.Media;
+using Avalonia.Media.Fonts;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
@@ -30,6 +32,10 @@ namespace Nikse.SubtitleEdit
         [STAThread]
         public static void Main(string[] args)
         {
+            // Must run before any SkiaSharp.HarfBuzz use so the bundled libHarfBuzzSharp
+            // deep-binds its own hb_* symbols and doesn't crash the export shaper on Linux (#11864).
+            Nikse.SubtitleEdit.UiLogic.HarfBuzzNativeFix.Apply();
+
             try
             {
                 // Global exception handling
@@ -65,20 +71,84 @@ namespace Nikse.SubtitleEdit
                 // Load settings
                 Se.LoadSettings();
 
+                // Wire the shared spell-check / OCR-fix engine (libuilogic) to the live UI settings so
+                // it reads the same values without depending on the UI's Se config type (#11744).
+                Nikse.SubtitleEdit.Features.SpellCheck.SpellCheckConfig.DictionariesFolder = () => Se.DictionariesFolder;
+                Nikse.SubtitleEdit.Features.SpellCheck.SpellCheckConfig.UseWordSplitList = () => Se.Settings.Ocr.UseWordSplitList;
+                Nikse.SubtitleEdit.Features.SpellCheck.SpellCheckConfig.TreatInApostropheAsIng = () => Se.Settings.Tools.SpellCheckEnglishTreatInApostropheAsIng;
+                Nikse.SubtitleEdit.Features.SpellCheck.SpellCheckConfig.LogError = msg => Se.LogError(msg);
+
                 // Load the UI translation before any window or the macOS native menu bar is built,
                 // so the menu bar isn't constructed with the default English strings (issue #11505).
                 Se.LoadLanguage();
 
                 // Build and configure the app
                 var appBuilder = AppBuilder.Configure<Application>()
-                    .UsePlatformDetect()
-                    // Register the embedded Inter font as the default. Avalonia v12's font manager
-                    // throws "Could not create glyphTypeface. Font family: $Default" at startup on
-                    // minimal Linux installs that ship without fontconfig-discoverable fonts
-                    // (e.g. Debian 13 trixie base — issue #11355). With Inter registered, FontFamily.Default
-                    // resolves to the embedded font when no system font is available; healthy systems
-                    // still pick up their own fonts for explicit family names.
-                    .WithInterFont()
+                    .UsePlatformDetect();
+
+                // Register the embedded Inter font as the default ONLY on Linux. Avalonia v12's font
+                // manager throws "Could not create glyphTypeface. Font family: $Default" at startup on
+                // minimal Linux installs that ship without fontconfig-discoverable fonts
+                // (e.g. Debian 13 trixie base — issue #11355). Forcing Inter as the default on macOS and
+                // Windows, however, overrides the system font and its CJK fallback, so Korean/Japanese/
+                // Chinese UI text renders as boxes (Inter has no CJK glyphs). Windows always has system
+                // fonts with proper fallback, so it uses the system default; macOS is handled below - a
+                // fixed default font works around an Avalonia caret-positioning bug with the hidden
+                // system font, while keeping CJK fallback.
+                if (OperatingSystem.IsLinux())
+                {
+                    // Inter is the default here, but it has no CJK glyphs and Avalonia does not fall
+                    // back to system fonts from a forced embedded default - so name the common Linux
+                    // CJK families explicitly. fontconfig resolves whichever of these is installed
+                    // (normal desktops ship Noto Sans CJK); minimal installs have no CJK font at all,
+                    // so CJK can't render there regardless. The non-CJK-suffixed Noto families and the
+                    // Nanum/WenQuanYi entries cover distros that ship a region-specific Korean/Chinese
+                    // font instead of the full Noto Sans CJK pack.
+                    appBuilder = appBuilder
+                        .WithInterFont()
+                        .With(new FontManagerOptions
+                        {
+                            FontFallbacks = new[]
+                            {
+                                new FontFallback { FontFamily = new FontFamily("Noto Sans CJK SC") },
+                                new FontFallback { FontFamily = new FontFamily("Noto Sans CJK KR") },
+                                new FontFallback { FontFamily = new FontFamily("Noto Sans CJK JP") },
+                                new FontFallback { FontFamily = new FontFamily("Noto Sans CJK TC") },
+                                new FontFallback { FontFamily = new FontFamily("Noto Sans KR") },
+                                new FontFallback { FontFamily = new FontFamily("Noto Sans JP") },
+                                new FontFallback { FontFamily = new FontFamily("Noto Sans SC") },
+                                new FontFallback { FontFamily = new FontFamily("NanumGothic") },
+                                new FontFallback { FontFamily = new FontFamily("Nanum Gothic") },
+                                new FontFallback { FontFamily = new FontFamily("UnDotum") },
+                                new FontFallback { FontFamily = new FontFamily("WenQuanYi Zen Hei") },
+                                new FontFallback { FontFamily = new FontFamily("WenQuanYi Micro Hei") },
+                            }
+                        });
+                }
+                else if (OperatingSystem.IsMacOS())
+                {
+                    // macOS exposes its default UI font (San Francisco) only as the private family
+                    // ".AppleSystemUIFont", and Avalonia mis-positions the caret / selection edge with it:
+                    // it places the caret at each glyph's advance width and ignores ink that overruns the
+                    // advance box (e.g. the ellipsis), so the caret lands inside the rendered glyph. Use a
+                    // real, always-present font (Helvetica Neue) as the default instead - it has no such
+                    // overhang - and name the macOS CJK families explicitly so Korean/Japanese/Chinese still
+                    // render (Helvetica Neue has no CJK glyphs). (#12009 follow-up)
+                    appBuilder = appBuilder
+                        .With(new FontManagerOptions
+                        {
+                            DefaultFamilyName = "Helvetica Neue",
+                            FontFallbacks = new[]
+                            {
+                                new FontFallback { FontFamily = new FontFamily("PingFang SC") },
+                                new FontFallback { FontFamily = new FontFamily("PingFang TC") },
+                                new FontFallback { FontFamily = new FontFamily("Hiragino Sans") },
+                                new FontFallback { FontFamily = new FontFamily("Apple SD Gothic Neo") },
+                            }
+                        });
+                }
+
+                appBuilder = appBuilder
                     .With(new X11PlatformOptions
                     {
                         RenderingMode = new[] { X11RenderingMode.Glx, X11RenderingMode.Egl }
@@ -179,6 +249,25 @@ namespace Nikse.SubtitleEdit
                 // Register Alt+Space handler for all windows (Windows-only)
                 UiUtil.RegisterWindowsSystemMenuClassHandler();
             }
+
+            // Apply scrollbar visibility based on OS preference
+            UiTheme.ApplyScrollBarStyle();
+
+            // Prevent scrollbar double-tap from triggering DataGrid/ListBox actions globally
+            DataGrid.DoubleTappedEvent.AddClassHandler<DataGrid>((_, e) =>
+            {
+                if (UiUtil.IsScrollBarSource(e))
+                {
+                    e.Handled = true;
+                }
+            });
+            ListBox.DoubleTappedEvent.AddClassHandler<ListBox>((_, e) =>
+            {
+                if (UiUtil.IsScrollBarSource(e))
+                {
+                    e.Handled = true;
+                }
+            });
 
             // Set custom font
             if (Application.Current != null && !string.IsNullOrEmpty(Se.Settings.Appearance.FontName))
