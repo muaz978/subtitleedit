@@ -15,6 +15,8 @@ namespace Nikse.SubtitleEdit.Logic.Config;
 
 public class Se
 {
+    internal const int CurrentMacOsFontMigrationVersion = 1;
+
     public static string Version { get; set; } = "v5.1.0-beta4";
 
     public SeGeneral General { get; set; } = new();
@@ -66,6 +68,7 @@ public class Se
     public static readonly bool IsPortable;
     public static readonly string ExePath;
     public static readonly string DataFolder;
+    internal static string? SettingsFilePathOverride { get; set; }
 
     static Se()
     {
@@ -257,13 +260,14 @@ public class Se
 
     public static string GetSettingsFilePath()
     {
-        return Path.Combine(DataFolder, "Settings.json");
+        return SettingsFilePathOverride ?? Path.Combine(DataFolder, "Settings.json");
     }
 
     public static void LoadSettings(string settingsFileName)
     {
         if (!System.IO.File.Exists(settingsFileName))
         {
+            MigrateMacOsFontSettings(Settings.Appearance, OperatingSystem.IsMacOS(), false);
             return;
         }
 
@@ -282,7 +286,25 @@ public class Se
 
         SetDefaultValues();
 
+        MigrateMacOsFontSettings(Settings.Appearance, OperatingSystem.IsMacOS(), true);
+
         UpdateLibSeSettings();
+    }
+
+    internal static void MigrateMacOsFontSettings(SeAppearance appearance, bool isMacOs, bool isLegacySettings)
+    {
+        if (!isMacOs || appearance.MacOsFontMigrationVersion.GetValueOrDefault() >= CurrentMacOsFontMigrationVersion)
+        {
+            return;
+        }
+
+        if (isLegacySettings && appearance.FontName is ".AppleSystemUIFont" or "Default")
+        {
+            appearance.FontName = "Helvetica Neue";
+        }
+
+        // Once marked, a later explicit System Font selection must remain untouched.
+        appearance.MacOsFontMigrationVersion = CurrentMacOsFontMigrationVersion;
     }
 
     /// <summary>
