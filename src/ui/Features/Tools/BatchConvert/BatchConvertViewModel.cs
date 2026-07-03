@@ -1098,8 +1098,11 @@ public partial class BatchConvertViewModel : ObservableObject
             return true;
         }
 
-        // Remote mode: the user pointed llama.cpp at their own running llama-server.
-        if (!string.IsNullOrWhiteSpace(AutoTranslateUrl))
+        // Remote mode: the user pointed llama.cpp at their own running llama-server. Detect it the same
+        // way the interactive Auto-translate window does - via the LlamaCppUseRemoteServer flag - not by
+        // whether AutoTranslateUrl is set, since that is pre-filled with the default localhost URL and so
+        // is never empty (which previously short-circuited the whole auto-start path).
+        if (Se.Settings.AutoTranslate.LlamaCppUseRemoteServer)
         {
             return true;
         }
@@ -2501,6 +2504,11 @@ public partial class BatchConvertViewModel : ObservableObject
     internal void OnClosing(object? sender, WindowClosingEventArgs e)
     {
         UiUtil.SaveWindowPosition(Window);
+
+        // Persist target format and function options also when the window is closed via
+        // X/Escape - especially important in /batchconvertui mode, where this window is the
+        // main window and nothing else flushes settings to disk on exit (#11699).
+        SaveSettings();
     }
 
     internal void ComboBoxSubtitleFormatChanged()

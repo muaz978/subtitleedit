@@ -233,7 +233,7 @@ public class ElevenLabs : ITtsEngine
             }
         }
 
-        if (model == "eleven_turbo_v2)")
+        if (model == "eleven_turbo_v2")
         {
             languages = new List<TtsLanguage>
             {
@@ -241,7 +241,7 @@ public class ElevenLabs : ITtsEngine
             };
         }
 
-        if (model == "eleven_multilingual_v1)")
+        if (model == "eleven_multilingual_v1")
         {
             languages = new List<TtsLanguage>
             {
@@ -281,19 +281,29 @@ public class ElevenLabs : ITtsEngine
             throw new ArgumentException("Voice is not an ElevenLabVoice");
         }
 
+        // Callers pass null when this engine is not the globally selected one (per-actor cast
+        // rows, cast-dialog voice test) - fall back to the saved/default model instead of
+        // throwing, which aborted the whole generation run at the first ElevenLabs row.
         if (string.IsNullOrEmpty(model))
         {
-            throw new ArgumentException("ElevenLabs model is empty");
+            model = Se.Settings.Video.TextToSpeech.ElevenLabsModel;
+        }
+
+        if (string.IsNullOrEmpty(model))
+        {
+            model = "eleven_multilingual_v2";
         }
 
         Se.WriteToolsLog($"ElevenLabs: voice={elevenLabVoice.Voice}, voiceId={elevenLabVoice.VoiceId}, model={model}, textLen={text.Length}");
 
         var ms = new MemoryStream();
-        var ok = await _ttsDownloadService.DownloadElevenLabsVoiceSpeak(text, elevenLabVoice, model, Se.Settings.Video.TextToSpeech.ElevenLabsApiKey, "en", ms, null, cancellationToken);
+        var (ok, error) = await _ttsDownloadService.DownloadElevenLabsVoiceSpeak(text, elevenLabVoice, model, Se.Settings.Video.TextToSpeech.ElevenLabsApiKey, language?.Code ?? string.Empty, ms, null, cancellationToken);
         if (!ok)
         {
-            Se.WriteToolsLog($"ElevenLabs: request failed (voice={elevenLabVoice.Voice})");
-            return new TtsResult { Text = text, FileName = string.Empty, Error = true };
+            // Forced: a failed API call must land in the tools log even when the setting is off,
+            // so a bug report shows which segments failed and why (#12093).
+            Se.WriteToolsLog($"ElevenLabs: request failed (voice={elevenLabVoice.Voice}, textLen={text.Length}): {error}", true);
+            return new TtsResult { Text = text, FileName = string.Empty, Error = true, ErrorMessage = error };
         }
 
         var fileName = Path.Combine(GetSetElevenLabsFolder(), Guid.NewGuid() + ".mp3");

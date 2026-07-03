@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -11,6 +12,8 @@ using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Logic.Config;
 using System;
+using System.Globalization;
+using System.Linq;
 
 namespace Nikse.SubtitleEdit.Controls
 {
@@ -80,6 +83,7 @@ namespace Nikse.SubtitleEdit.Controls
                 _textBox.RemoveHandler(TextInputEvent, OnTextInput);
                 _textBox.RemoveHandler(KeyDownEvent, OnTextBoxKeyDown);
                 _textBox.GotFocus -= OnTextBoxGotFocus;
+                _textBox.PastingFromClipboard -= OnPastingFromClipboard;
             }
 
             _textBox = e.NameScope.Find<TextBox>("PART_TextBox");
@@ -104,6 +108,7 @@ namespace Nikse.SubtitleEdit.Controls
                 _textBox.AddHandler(TextInputEvent, OnTextInput, RoutingStrategies.Tunnel);
                 _textBox.AddHandler(KeyDownEvent, OnTextBoxKeyDown, RoutingStrategies.Tunnel);
                 _textBox.GotFocus += OnTextBoxGotFocus;
+                _textBox.PastingFromClipboard += OnPastingFromClipboard;
             }
 
             // Initial MinWidth calculation with text measurement
@@ -215,6 +220,10 @@ namespace Nikse.SubtitleEdit.Controls
                     Name = "PART_Spinner",
                     ButtonSpinnerLocation = Location.Right,
                     ShowButtonSpinner = true,
+                    // Keep the icon-only up/down repeat buttons out of the tab order: the text box is
+                    // the single (named) tab stop and Up/Down arrows already step the value, so a
+                    // screen-reader user is not stopped on two nameless buttons per field (#12087).
+                    IsTabStop = false,
                     Content = grid,
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     VerticalAlignment = VerticalAlignment.Stretch,
@@ -293,8 +302,140 @@ namespace Nikse.SubtitleEdit.Controls
             e.Handled = true;
         }
 
+        // The text box is masked and edits character-by-character via OnTextInput, but paste bypasses
+        // that path, so without this the pasted text would corrupt the mask and leave Value out of sync.
+        // We take over paste entirely: parse the clipboard as a time code (or a bare number of
+        // milliseconds) and replace the whole value.
+        private async void OnPastingFromClipboard(object? sender, RoutedEventArgs e)
+        {
+            e.Handled = true; // suppress the default paste (must be set before the first await)
+
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard == null)
+            {
+                return;
+            }
+
+            var text = await ClipboardExtensions.TryGetTextAsync(clipboard);
+            if (TryParsePastedValue(text, out var value))
+            {
+                SetValue(ValueProperty, value); // OnPropertyChanged clamps, reformats the text and raises ValueChanged
+                if (_textBox != null)
+                {
+                    _textBox.CaretIndex = 0;
+                }
+            }
+        }
+
+        // Symmetric with paste: with no selection, copy grabs the whole time code (as shown, so it
+        // round-trips back through paste). Handled from the key gesture rather than the
+        // CopyingToClipboard event, because the text box's built-in copy does nothing when there is no
+        // selection, so that event never fires in this case. An explicit selection copies natively.
+        private bool TryHandleCopyWholeValue(KeyEventArgs e)
+        {
+            if (_textBox == null || _textBox.SelectionStart != _textBox.SelectionEnd)
+            {
+                return false; // let the text box copy an explicit selection itself
+            }
+
+            // Copy is Cmd+C on macOS, Ctrl+C elsewhere.
+            var commandModifier = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+            if (e.Key != Key.C || e.KeyModifiers != commandModifier)
+            {
+                return false;
+            }
+
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard != null)
+            {
+                _ = clipboard.SetTextAsync(_textBuffer);
+            }
+
+            return true;
+        }
+
+        // A bare number is taken as milliseconds and replaces the whole time code (e.g. "231" ->
+        // 00:00:00,231), which is the common paste intent (#12056). Anything with separators is parsed
+        // as a full or partial time code ("00:00:05,500", "01:02,300"; frames when in frame mode).
+        private bool TryParsePastedValue(string? clipboardText, out TimeSpan value)
+        {
+            value = TimeSpan.Zero;
+            if (string.IsNullOrWhiteSpace(clipboardText))
+            {
+                return false;
+            }
+
+            var text = clipboardText.Trim();
+            var newlineIndex = text.IndexOfAny(new[] { '\r', '\n' });
+            if (newlineIndex >= 0)
+            {
+                text = text.Substring(0, newlineIndex).Trim();
+            }
+
+            if (text.Length == 0)
+            {
+                return false;
+            }
+
+            if (long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var milliseconds))
+            {
+                if (milliseconds > TimeCode.MaxTimeTotalMilliseconds)
+                {
+                    return false; // beyond the control's range (max 99:59:59,999) - reject rather than overflow
+                }
+
+                value = RemoveVideoOffset(TimeSpan.FromMilliseconds(milliseconds));
+                return true;
+            }
+
+            var useFrameMode = Se.Settings.General.UseFrameMode;
+            var parts = text.Split(TimeCode.TimeSplitChars, StringSplitOptions.RemoveEmptyEntries);
+            var validCount = useFrameMode ? parts.Length == 4 : parts.Length is 3 or 4;
+            if (!validCount || !parts.All(p => int.TryParse(p, out _)))
+            {
+                return false; // ParseXxx returns 0 for junk, so reject anything that isn't clearly a time code
+            }
+
+            double ms;
+            try
+            {
+                ms = useFrameMode
+                    ? TimeCode.ParseHHMMSSFFToMilliseconds(text)
+                    : TimeCode.ParseToMilliseconds(text);
+            }
+            catch (Exception exception) when (exception is OverflowException or ArgumentOutOfRangeException)
+            {
+                return false; // int-parseable but out-of-range parts (e.g. "999999999:0:0,0") overflow the TimeSpan ctor
+            }
+
+            if (ms > TimeCode.MaxTimeTotalMilliseconds)
+            {
+                return false;
+            }
+
+            value = RemoveVideoOffset(TimeSpan.FromMilliseconds(ms));
+            return true;
+        }
+
         private TimeSpan ParseTime(string text)
         {
+            if (Se.Settings.General.UseFrameMode)
+            {
+                // In frame mode the last section is a frame number, not milliseconds
+                var frameParts = text.Split(':', ',', '.');
+                if (frameParts.Length == 4 &&
+                    int.TryParse(frameParts[0], out var frameHours) &&
+                    int.TryParse(frameParts[1], out var frameMinutes) &&
+                    int.TryParse(frameParts[2], out var frameSeconds) &&
+                    int.TryParse(frameParts[3], out var frames))
+                {
+                    var frameMs = SubtitleFormat.FramesToMillisecondsMax999(frames);
+                    return RemoveVideoOffset(new TimeSpan(0, frameHours, frameMinutes, frameSeconds, frameMs));
+                }
+
+                return TimeSpan.Zero;
+            }
+
             // Try parsing with milliseconds format (00:00:00:000 or 00:00:00.000)
             if (TimeSpan.TryParseExact(text, @"hh\:mm\:ss\:fff", null, out var result))
             {
@@ -342,6 +483,12 @@ namespace Nikse.SubtitleEdit.Controls
         {
             if (_textBox == null)
             {
+                return;
+            }
+
+            if (TryHandleCopyWholeValue(e))
+            {
+                e.Handled = true;
                 return;
             }
 
@@ -418,9 +565,11 @@ namespace Nikse.SubtitleEdit.Controls
             {
                 if (Se.Settings.General.UseFrameMode)
                 {
-                    //TODO: align to nearest frame before adjusting?
-                    var ms = SubtitleFormat.FramesToMilliseconds(delta);
-                    newVal = newVal.Add(TimeSpan.FromMilliseconds(ms));
+                    // Step by whole frames via the total frame count, so an unaligned value is
+                    // aligned to the nearest frame first - just adding one frame duration in ms
+                    // can otherwise round/cap back to the same displayed frame number.
+                    var totalFrames = SubtitleFormat.MillisecondsToFrames(newVal.TotalMilliseconds);
+                    newVal = TimeSpan.FromMilliseconds(SubtitleFormat.FramesToMilliseconds(totalFrames + delta));
                 }
                 else
                 {

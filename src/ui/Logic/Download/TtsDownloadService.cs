@@ -25,13 +25,13 @@ public interface ITtsDownloadService
     Task DownloadPiperVoice(string modelUrl, MemoryStream downloadStream, Progress<float> downloadProgress, CancellationToken token);
     Task DownloadPiperVoiceList(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken);
     Task DownloadAllTalkVoiceList(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken);
-    Task<string> AllTalkVoiceSpeak(string text, AllTalkVoice voice, string language);
+    Task<string> AllTalkVoiceSpeak(string text, AllTalkVoice voice, string language, CancellationToken cancellationToken);
     Task<bool> AllTalkIsInstalled();
     Task DownloadElevenLabsVoiceList(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken);
     Task DownloadAzureVoiceList(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken);
     Task DownloadMurfVoiceList(MemoryStream stream, IProgress<float>? progress, CancellationToken cancellationToken);
 
-    Task<bool> DownloadElevenLabsVoiceSpeak(
+    Task<(bool Ok, string Error)> DownloadElevenLabsVoiceSpeak(
         string inputText,
         ElevenLabVoice voice,
         string model,
@@ -132,11 +132,13 @@ public class TtsDownloadService : ITtsDownloadService
         await DownloadHelper.DownloadFileAsync(_httpClient, url, stream, progress, cancellationToken);
     }
 
-    public async Task<string> AllTalkVoiceSpeak(string inputText, AllTalkVoice voice, string language)
+    public async Task<string> AllTalkVoiceSpeak(string inputText, AllTalkVoice voice, string language, CancellationToken cancellationToken)
     {
         using var multipartContent = new MultipartFormDataContent();
         var text = Utilities.UnbreakLine(inputText);
-        multipartContent.Add(new StringContent(Json.EncodeJsonText(text)), "text_input");
+        // Plain multipart form field - no JSON escaping: Json.EncodeJsonText turned quotes and
+        // backslashes into \" and \\ that AllTalk then spoke/mangled.
+        multipartContent.Add(new StringContent(text), "text_input");
         multipartContent.Add(new StringContent("standard"), "text_filtering");
         multipartContent.Add(new StringContent(voice.Voice), "character_voice_gen");
         multipartContent.Add(new StringContent("false"), "narrator_enabled");
@@ -151,14 +153,16 @@ public class TtsDownloadService : ITtsDownloadService
         HttpResponseMessage result;
         try
         {
-            result = await _httpClient.PostAsync(Se.Settings.Video.TextToSpeech.AllTalkUrl.TrimEnd('/') + "/api/tts-generate", multipartContent);
+            // Honor the caller's token - a bulk-generate Cancel used to leave the AllTalk
+            // request running to completion.
+            result = await _httpClient.PostAsync(Se.Settings.Video.TextToSpeech.AllTalkUrl.TrimEnd('/') + "/api/tts-generate", multipartContent, cancellationToken);
         }
         catch (HttpRequestException ex)
         {
             SeLogger.Error(ex, "AllTalk TTS server connection failed.");
             throw new HttpRequestException("AllTalk TTS server is not reachable. Please check that the server is running.", ex);
         }
-        catch (TaskCanceledException ex) when (!ex.CancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             SeLogger.Error(ex, "AllTalk TTS server request timed out.");
             throw new HttpRequestException("AllTalk TTS server request timed out. Please check that the server is running.", ex);
@@ -168,12 +172,12 @@ public class TtsDownloadService : ITtsDownloadService
         {
             if (!result.IsSuccessStatusCode)
             {
-                var errorBody = await result.Content.ReadAsStringAsync();
+                var errorBody = await result.Content.ReadAsStringAsync(cancellationToken);
                 SeLogger.Error($"AllTalk TTS failed calling API at {_httpClient.BaseAddress}: Status code={result.StatusCode}" + Environment.NewLine + errorBody);
                 throw new HttpRequestException($"AllTalk TTS server returned error {(int)result.StatusCode} ({result.StatusCode}).");
             }
 
-            var bytes = await result.Content.ReadAsByteArrayAsync();
+            var bytes = await result.Content.ReadAsByteArrayAsync(cancellationToken);
             var resultJson = Encoding.UTF8.GetString(bytes);
 
             var jsonParser = new SeJsonParser();
@@ -184,17 +188,19 @@ public class TtsDownloadService : ITtsDownloadService
 
     public async Task<bool> AllTalkIsInstalled()
     {
-        var timeout = Task.Delay(2000); // 2 seconds timeout
-        var request = _httpClient.GetAsync(Se.Settings.Video.TextToSpeech.AllTalkUrl);
-
-        await Task.WhenAny(timeout, request); // wait for either timeout or the request
-
-        if (timeout.IsCompleted) // if the timeout ended first, then handle it
+        // The old Task.WhenAny check reported "installed" whenever the request completed before
+        // the 2 s timeout - including completing by *faulting*, so a connection refused (server
+        // not running, ~instant) counted as installed and generation failed later instead.
+        try
         {
-            return false;
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var response = await _httpClient.GetAsync(Se.Settings.Video.TextToSpeech.AllTalkUrl, cts.Token);
+            return response.IsSuccessStatusCode;
         }
-
-        return true;
+        catch
+        {
+            return false; // connection refused, timeout, bad URL - the server is not reachable
+        }
     }
 
     public async Task DownloadElevenLabsVoiceList(Stream ms, IProgress<float>? progress, CancellationToken cancellationToken)
@@ -211,12 +217,19 @@ public class TtsDownloadService : ITtsDownloadService
         }
 
         var result = await _httpClient.SendAsync(requestMessage, cancellationToken);
-        await result.Content.CopyToAsync(ms, cancellationToken);
 
+        // Throw on failure instead of copying the error body into the stream: the caller writes
+        // the stream over its cached voice-list JSON, and since the bundled fallback only kicks
+        // in when the file is *missing*, one failed refresh (expired key, network error) used to
+        // permanently empty the voice list.
         if (!result.IsSuccessStatusCode)
         {
-            SeLogger.Error($"ElevenLabs TTS failed calling API address {url} : Status code={result.StatusCode}");
+            var error = (await result.Content.ReadAsStringAsync(cancellationToken)).Trim();
+            SeLogger.Error($"ElevenLabs TTS failed calling API address {url} : Status code={result.StatusCode} {TruncateForLog(error)}");
+            throw new HttpRequestException($"ElevenLabs voice list request failed: HTTP {(int)result.StatusCode} {result.StatusCode}");
         }
+
+        await result.Content.CopyToAsync(ms, cancellationToken);
     }
 
     public async Task DownloadMurfVoiceList(MemoryStream ms, IProgress<float>? progress, CancellationToken cancellationToken)
@@ -225,26 +238,44 @@ public class TtsDownloadService : ITtsDownloadService
 
         using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url);
         requestMessage.Headers.TryAddWithoutValidation("Content-Type", "application/json");
-        requestMessage.Headers.TryAddWithoutValidation("Accept", "audio/mpeg");
+        requestMessage.Headers.TryAddWithoutValidation("Accept", "application/json");
         requestMessage.Headers.TryAddWithoutValidation("api-key", Se.Settings.Video.TextToSpeech.MurfApiKey);
 
         var result = await _httpClient.SendAsync(requestMessage, cancellationToken);
-        await result.Content.CopyToAsync(ms, cancellationToken);
 
+        // See DownloadElevenLabsVoiceList: an error body must not reach the cached voice list.
         if (!result.IsSuccessStatusCode)
         {
-            var error = Encoding.UTF8.GetString(ms.ToArray()).Trim();
-            SeLogger.Error($"Murf TTS failed calling API address {url} : Status code={result.StatusCode} {error}");
+            var error = (await result.Content.ReadAsStringAsync(cancellationToken)).Trim();
+            SeLogger.Error($"Murf TTS failed calling API address {url} : Status code={result.StatusCode} {TruncateForLog(error)}");
+            throw new HttpRequestException($"Murf voice list request failed: HTTP {(int)result.StatusCode} {result.StatusCode}");
         }
+
+        await result.Content.CopyToAsync(ms, cancellationToken);
     }
 
     public async Task DownloadAzureVoiceList(Stream stream, IProgress<float>? progress, CancellationToken cancellationToken)
     {
-        var url = "https://api.elevenlabs.io/v1/voices";
-        await DownloadHelper.DownloadFileAsync(_httpClient, url, stream, progress, cancellationToken);
+        // Azure's official voice-list endpoint (the previous URL pointed at the ElevenLabs API,
+        // whose response Azure's parser cannot read). Requires the user's region + subscription
+        // key; the response is a JSON array with DisplayName/ShortName/Gender/Locale fields -
+        // the exact shape AzureSpeech.Map parses. Throws on failure so a refresh cannot
+        // overwrite the cached voice list with an error body.
+        var region = Se.Settings.Video.TextToSpeech.AzureRegion;
+        if (string.IsNullOrWhiteSpace(region))
+        {
+            throw new InvalidOperationException("Azure region is not set - enter it in the TTS engine settings before refreshing voices.");
+        }
+
+        var url = $"https://{region.Trim()}.tts.speech.microsoft.com/cognitiveservices/voices/list";
+        using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url);
+        requestMessage.Headers.TryAddWithoutValidation("Ocp-Apim-Subscription-Key", Se.Settings.Video.TextToSpeech.AzureApiKey.Trim());
+        var result = await _httpClient.SendAsync(requestMessage, cancellationToken);
+        result.EnsureSuccessStatusCode();
+        await result.Content.CopyToAsync(stream, cancellationToken);
     }
 
-    public async Task<bool> DownloadElevenLabsVoiceSpeak(
+    public async Task<(bool Ok, string Error)> DownloadElevenLabsVoiceSpeak(
         string inputText,
         ElevenLabVoice voice,
         string model,
@@ -262,8 +293,11 @@ public class TtsDownloadService : ITtsDownloadService
         var url = "https://api.elevenlabs.io/v1/text-to-speech/" + voice.VoiceId;
         var text = Utilities.UnbreakLine(inputText);
 
+        // Only send language_code when the user actually picked a language: cross-engine cast
+        // rows pass none, and forcing "en" made ElevenLabs apply English normalization and
+        // pronunciation hints to non-English lines.
         var language = string.Empty;
-        if (model is "eleven_turbo_v2_5")
+        if (model is "eleven_turbo_v2_5" && !string.IsNullOrEmpty(languageCode))
         {
             language = $", \"language_code\": \"{languageCode}\"";
         }
@@ -273,26 +307,97 @@ public class TtsDownloadService : ITtsDownloadService
         var speed = Se.Settings.Video.TextToSpeech.ElevenLabsSpeed.ToString(CultureInfo.InvariantCulture);
         var styleExaggeration = Se.Settings.Video.TextToSpeech.ElevenLabsStyleeExaggeration.ToString(CultureInfo.InvariantCulture);
         var data = "{ \"text\": \"" + Json.EncodeJsonText(text) + $"\", \"model_id\": \"{model}\"{language}, \"voice_settings\": {{ \"stability\": {stability}, \"similarity_boost\": {similarityBoost}, \"speed\": {speed}, \"style\": {styleExaggeration} }} }}";
-        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, url);
-        requestMessage.Content = new StringContent(data, Encoding.UTF8);
-        requestMessage.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
-        requestMessage.Headers.TryAddWithoutValidation("Content-Type", "application/json");
-        requestMessage.Headers.TryAddWithoutValidation("Accept", "audio/mpeg");
-        requestMessage.Headers.TryAddWithoutValidation("xi-api-key", apiKey.Trim());
 
-        var result = await _httpClient.SendAsync(requestMessage, cancellationToken);
-        await result.Content.CopyToAsync(stream, cancellationToken);
-        if (!result.IsSuccessStatusCode)
-        {
-            var error = Encoding.UTF8.GetString(stream.ToArray()).Trim();
-            SeLogger.Error($"ElevenLabs TTS failed calling API as base address {_httpClient.BaseAddress} : Status code={result.StatusCode} {error}" + Environment.NewLine + "Data=" + data);
-            return false;
-        }
-
-        return true;
+        return await SendElevenLabsSpeakRequestAsync(url, data, apiKey, acceptAudioMpeg: true, stream, "ElevenLabs TTS", cancellationToken);
     }
 
-    private async Task<bool> DownloadElevenLabsVoiceSpeak3(
+    /// <summary>
+    /// Posts an ElevenLabs speak request and copies the audio response into <paramref name="stream"/>.
+    /// ElevenLabs enforces per-plan concurrency/request limits, and bulk generation fires one request
+    /// per subtitle line - so HTTP 429 (and transient 5xx) responses are retried with a backoff that
+    /// honors the Retry-After header instead of failing the segment outright (#12093). Returns a
+    /// human-readable error for the UI when all attempts fail.
+    /// </summary>
+    private async Task<(bool Ok, string Error)> SendElevenLabsSpeakRequestAsync(
+        string url,
+        string jsonData,
+        string apiKey,
+        bool acceptAudioMpeg,
+        MemoryStream stream,
+        string logContext,
+        CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 4;
+        for (var attempt = 1; ; attempt++)
+        {
+            // A new request message per attempt - HttpRequestMessage cannot be re-sent.
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, url);
+            requestMessage.Content = new StringContent(jsonData, Encoding.UTF8);
+            requestMessage.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
+            requestMessage.Headers.TryAddWithoutValidation("Content-Type", "application/json");
+            if (acceptAudioMpeg)
+            {
+                requestMessage.Headers.TryAddWithoutValidation("Accept", "audio/mpeg");
+            }
+            requestMessage.Headers.TryAddWithoutValidation("xi-api-key", apiKey.Trim());
+
+            using var result = await _httpClient.SendAsync(requestMessage, cancellationToken);
+            if (result.IsSuccessStatusCode)
+            {
+                stream.SetLength(0);
+                await result.Content.CopyToAsync(stream, cancellationToken);
+                return (true, string.Empty);
+            }
+
+            var errorBody = TruncateForLog((await result.Content.ReadAsStringAsync(cancellationToken)).Trim());
+            var retryable = result.StatusCode == System.Net.HttpStatusCode.TooManyRequests || (int)result.StatusCode >= 500;
+            if (retryable && attempt < maxAttempts)
+            {
+                var delay = GetRetryDelay(result, attempt);
+                SeLogger.Error($"{logContext}: HTTP {(int)result.StatusCode} {result.StatusCode} - retrying in {delay.TotalSeconds:0.#}s (attempt {attempt} of {maxAttempts}): {errorBody}");
+                await Task.Delay(delay, cancellationToken);
+                continue;
+            }
+
+            var error = result.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+                ? $"ElevenLabs rate limit (HTTP 429) still hit after {maxAttempts} attempts with backoff - the plan's concurrency/request limit is likely exceeded. {errorBody}"
+                : $"HTTP {(int)result.StatusCode} {result.StatusCode}: {errorBody}";
+            SeLogger.Error($"{logContext} failed calling {url}: {error}" + Environment.NewLine + "Data=" + jsonData);
+            return (false, error);
+        }
+    }
+
+    private static TimeSpan GetRetryDelay(HttpResponseMessage response, int attempt)
+    {
+        // Prefer the server's Retry-After (delta or absolute date); fall back to exponential
+        // backoff (2 s, 4 s, 8 s). Capped so a bogus header cannot stall generation for minutes.
+        var maxDelay = TimeSpan.FromSeconds(30);
+
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta && delta > TimeSpan.Zero)
+        {
+            return delta <= maxDelay ? delta : maxDelay;
+        }
+
+        if (retryAfter?.Date is { } date)
+        {
+            var untilDate = date - DateTimeOffset.UtcNow;
+            if (untilDate > TimeSpan.Zero)
+            {
+                return untilDate <= maxDelay ? untilDate : maxDelay;
+            }
+        }
+
+        return TimeSpan.FromSeconds(Math.Pow(2, attempt));
+    }
+
+    private static string TruncateForLog(string text)
+    {
+        const int maxLength = 300;
+        return text.Length <= maxLength ? text : text.Substring(0, maxLength) + "...";
+    }
+
+    private async Task<(bool Ok, string Error)> DownloadElevenLabsVoiceSpeak3(
         string inputText, 
         ElevenLabVoice voice, 
         string model, 
@@ -308,31 +413,18 @@ public class TtsDownloadService : ITtsDownloadService
         var stability = Se.Settings.Video.TextToSpeech.ElevenLabsStability.ToString(CultureInfo.InvariantCulture);
         var speed = Se.Settings.Video.TextToSpeech.ElevenLabsSpeed.ToString(CultureInfo.InvariantCulture);
     
+        var languageFragment = string.IsNullOrEmpty(languageCode)
+            ? string.Empty
+            : "\"language_code\": \"" + languageCode + "\", ";
         var data = "{ \"inputs\": [{ " +
                    "\"text\": \"" + Json.EncodeJsonText(text) + "\", " +
                    "\"voice_id\": \"" + voice.VoiceId + "\", " +
-                   "\"language_code\": \"" + languageCode + "\", " +
+                   languageFragment +
                    "\"stability\": " + stability + ", " +
-                   "\"speed\": " + speed + 
+                   "\"speed\": " + speed +
                    " }] }";
 
-        using var requestMessage = new HttpRequestMessage(HttpMethod.Post, url);
-        requestMessage.Content = new StringContent(data, Encoding.UTF8);
-        requestMessage.Content.Headers.ContentType = MediaTypeHeaderValue.Parse("application/json");
-        requestMessage.Headers.TryAddWithoutValidation("Content-Type", "application/json");
-        requestMessage.Headers.TryAddWithoutValidation("xi-api-key", apiKey.Trim());
-
-        var result = await _httpClient.SendAsync(requestMessage, cancellationToken);
-        await result.Content.CopyToAsync(stream, cancellationToken);
-    
-        if (!result.IsSuccessStatusCode)
-        {
-            var error = Encoding.UTF8.GetString(stream.ToArray()).Trim();
-            SeLogger.Error($"ElevenLabs TTS v3 failed calling API as base address {_httpClient.BaseAddress} : Status code={result.StatusCode} {error}" + Environment.NewLine + "Data=" + data);
-            return false;
-        }
-
-        return true;
+        return await SendElevenLabsSpeakRequestAsync(url, data, apiKey, acceptAudioMpeg: false, stream, "ElevenLabs TTS v3", cancellationToken);
     }
 
     public async Task<bool> DownloadAzureVoiceSpeak(
@@ -350,7 +442,11 @@ public class TtsDownloadService : ITtsDownloadService
 
         var text = Utilities.UnbreakLine(inputText);
 
-        var data = $"<speak version='1.0' xml:lang='en-US'><voice xml:lang='en-US' xml:gender='{voice.Gender}' name='{voice.ShortName}'>{System.Net.WebUtility.HtmlEncode(text)}</voice></speak>";
+        // Use the voice's own locale in the SSML instead of hardcoded en-US - the voice name
+        // usually wins, but a mismatched xml:lang can affect pronunciation of locale-ambiguous
+        // text (numbers, dates) for non-English voices.
+        var locale = string.IsNullOrWhiteSpace(voice.Locale) ? "en-US" : voice.Locale;
+        var data = $"<speak version='1.0' xml:lang='{locale}'><voice xml:lang='{locale}' xml:gender='{voice.Gender}' name='{voice.ShortName}'>{System.Net.WebUtility.HtmlEncode(text)}</voice></speak>";
         using var requestMessage = new HttpRequestMessage(HttpMethod.Post, url);
         requestMessage.Content = new StringContent(data, Encoding.UTF8);
 
@@ -423,12 +519,27 @@ public class TtsDownloadService : ITtsDownloadService
 
         var parser = new SeJsonParser();
         var fileUrl = parser.GetFirstObject(Encoding.UTF8.GetString(ms.ToArray()), "audioFile");
+
+        // A 200 response without an audioFile URL (schema change, quota message) would make
+        // GetAsync throw on a null/empty URI and abort the whole generation run instead of
+        // failing this one segment.
+        if (string.IsNullOrWhiteSpace(fileUrl) || !Uri.TryCreate(fileUrl, UriKind.Absolute, out _))
+        {
+            SeLogger.Error($"Murf TTS returned no usable audioFile URL (\"{fileUrl}\") - response: {TruncateForLog(Encoding.UTF8.GetString(ms.ToArray()).Trim())}");
+            return false;
+        }
+
         var audioResult = await _httpClient.GetAsync(fileUrl, cancellationToken);
         if (!audioResult.IsSuccessStatusCode)
         {
             SeLogger.Error($"Murf TTS failed calling API as base address {fileUrl} : Status code={audioResult.StatusCode}");
             return false;
         }
+
+        // The stream still holds the generate-call's JSON response (parsed above for the audio
+        // URL) - without resetting, the MP3 would be appended after it and every Murf segment
+        // file would start with JSON garbage.
+        ms.SetLength(0);
         await audioResult.Content.CopyToAsync(ms, cancellationToken);
 
         return true;
@@ -586,10 +697,13 @@ public class TtsDownloadService : ITtsDownloadService
 
         var result = await _httpClient.SendAsync(requestMessage, cancellationToken);
 
+        // Throw instead of returning with an empty stream: the caller writes the stream over its
+        // cached voice-list JSON, so a silently failed refresh permanently emptied the voice list
+        // (the bundled fallback only restores when the file is missing).
         if (!result.IsSuccessStatusCode)
         {
             SeLogger.Error($"Mistral TTS failed calling API address {url} : Status code={result.StatusCode}");
-            return;
+            throw new HttpRequestException($"Mistral voice list request failed: HTTP {(int)result.StatusCode} {result.StatusCode}");
         }
 
         await result.Content.CopyToAsync(ms, cancellationToken);

@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -51,7 +52,8 @@ public class FixCommonErrorsWindow : Window
         labelStep2.Bind(Label.ContentProperty, new Binding(nameof(vm.Step2Title)));
         labelStep2.Bind(IsVisibleProperty, new Binding(nameof(vm.Step2IsVisible)));
 
-        var textBoxSearch = UiUtil.MakeTextBox(250, vm, nameof(vm.SearchText)).WithMarginRight(25);
+        var textBoxSearch = UiUtil.MakeTextBox(250, vm, nameof(vm.SearchText)).WithMarginRight(25)
+            .WithAccessibleName(Se.Language.Tools.FixCommonErrors.SearchRulesDotDotDot);
         textBoxSearch.PlaceholderText = Se.Language.Tools.FixCommonErrors.SearchRulesDotDotDot;
         textBoxSearch.Bind(IsVisibleProperty, new Binding(nameof(vm.Step1IsVisible)));
         textBoxSearch.TextChanged += vm.TextBoxSearch_TextChanged;
@@ -63,7 +65,8 @@ public class FixCommonErrorsWindow : Window
             Children =
             {
                 UiUtil.MakeTextBlock(Se.Language.General.Language).WithMarginRight(5),
-                UiUtil.MakeComboBox(vm.Languages, vm, nameof(vm.SelectedLanguage)),
+                UiUtil.MakeComboBox(vm.Languages, vm, nameof(vm.SelectedLanguage))
+                    .WithAccessibleName(Se.Language.General.Language),
             },
         };
 
@@ -95,6 +98,9 @@ public class FixCommonErrorsWindow : Window
                             {
                                 Focusable = false,
                                 [!ToggleButton.IsCheckedProperty] = new Binding(nameof(FixRuleDisplayItem.IsSelected)),
+                                // The checkbox is unfocusable, so name it after the rule it toggles so a
+                                // screen reader can tell which rule's enabled state it is on (#11745).
+                                [!AutomationProperties.NameProperty] = new Binding(nameof(FixRuleDisplayItem.Name)),
                                 HorizontalAlignment = HorizontalAlignment.Center
                             }
                         };
@@ -119,18 +125,20 @@ public class FixCommonErrorsWindow : Window
             },
         };
         rulesGrid.Bind(IsVisibleProperty, new Binding(nameof(vm.Step1IsVisible)));
+        AutomationProperties.SetName(rulesGrid, Se.Language.General.Rules);
         _ = new DataGridCheckboxMultiSelect<FixRuleDisplayItem>(rulesGrid,
             item => item.IsSelected, (item, v) => item.IsSelected = v);
 
         var step2Grid = MakeStep2Grid();
         step2Grid.Bind(IsVisibleProperty, new Binding(nameof(_vm.Step2IsVisible)));
-        var comboProfile = UiUtil.MakeComboBox(vm.Profiles, vm, nameof(vm.SelectedProfile));
+        var comboProfile = UiUtil.MakeComboBox(vm.Profiles, vm, nameof(vm.SelectedProfile))
+            .WithAccessibleName(Se.Language.General.Profile);
         var buttonPanelRules = UiUtil.MakeButtonBar(
             UiUtil.MakeButton(Se.Language.General.SelectAll, vm.RulesSelectAllCommand),
             UiUtil.MakeButton(Se.Language.General.InvertSelection, vm.RulesInverseSelectedCommand),
             UiUtil.MakeTextBlock(Se.Language.General.Profile).WithMarginLeft(25).WithMarginRight(10),
             comboProfile,
-            UiUtil.MakeButton("...", vm.ShowProfileCommand).Compact()
+            UiUtil.MakeButton("...", vm.ShowProfileCommand).Compact().WithAccessibleName(Se.Language.General.Profiles)
         );
         buttonPanelRules.Bind(IsVisibleProperty, new Binding(nameof(vm.Step1IsVisible)));
 
@@ -273,6 +281,7 @@ public class FixCommonErrorsWindow : Window
         {
             RowDefinitions =
             {
+                new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Star) },
                 new RowDefinition { Height = new GridLength(1, GridUnitType.Auto) },
             },
@@ -297,7 +306,7 @@ public class FixCommonErrorsWindow : Window
             Width = double.NaN,
             Height = double.NaN,
             DataContext = _vm,
-            ItemsSource = _vm.Fixes,
+            ItemsSource = _vm.VisibleFixes,
             Columns =
             {
                 new DataGridTemplateColumn
@@ -314,6 +323,9 @@ public class FixCommonErrorsWindow : Window
                             {
                                 Focusable = false,
                                 [!ToggleButton.IsCheckedProperty] = new Binding(nameof(FixDisplayItem.IsSelected)),
+                                // Unfocusable checkbox - name it after the fix it applies so a screen
+                                // reader can tell which fix's apply state it is on (#11745).
+                                [!AutomationProperties.NameProperty] = new Binding(nameof(FixDisplayItem.ActionDisplay)),
                                 HorizontalAlignment = HorizontalAlignment.Center
                             }
                         };
@@ -327,12 +339,40 @@ public class FixCommonErrorsWindow : Window
                     Binding = new Binding(nameof(FixDisplayItem.Number)),
                     IsReadOnly = true,
                 },
-                new DataGridTextColumn
+                new DataGridTemplateColumn
                 {
                     Header = Se.Language.Tools.FixCommonErrors.Action,
                     CellTheme = UiUtil.DataGridNoBorderNoPaddingCellTheme,
-                    Binding = new Binding(nameof(FixDisplayItem.ActionDisplay)),
+                    CellTemplate = new FuncDataTemplate<FixDisplayItem>((item, _) =>
+                    {
+                        if (item == null)
+                        {
+                            return new Border();
+                        }
+
+                        return new Border
+                        {
+                            Background = Brushes.Transparent,
+                            Padding = new Thickness(4),
+                            Child = new Border
+                            {
+                                Background = _vm.GetActionBackgroundBrush(item.ActionDisplay),
+                                CornerRadius = new CornerRadius(5),
+                                Padding = new Thickness(7, 2),
+                                HorizontalAlignment = HorizontalAlignment.Left,
+                                VerticalAlignment = VerticalAlignment.Center,
+                                Child = new TextBlock
+                                {
+                                    Text = item.ActionDisplay,
+                                    FontSize = 12,
+                                    Foreground = _vm.GetActionBrush(item.ActionDisplay),
+                                    VerticalAlignment = VerticalAlignment.Center,
+                                },
+                            },
+                        };
+                    }),
                     IsReadOnly = true,
+                    Width = new DataGridLength(1, DataGridLengthUnitType.Auto),
                 },
                 new DataGridTemplateColumn
                 {
@@ -370,6 +410,7 @@ public class FixCommonErrorsWindow : Window
                 },
             },
         };
+        AutomationProperties.SetName(dataGridFixes, Se.Language.Tools.FixCommonErrors.Fixes);
         dataGridFixes.Bind(DataGrid.SelectedItemProperty, new Binding(nameof(_vm.SelectedFix)));
         _ = new DataGridCheckboxMultiSelect<FixDisplayItem>(dataGridFixes,
             item => item.IsSelected, (item, v) => item.IsSelected = v,
@@ -381,6 +422,14 @@ public class FixCommonErrorsWindow : Window
                 }
             });
 
+        var summaryText = new TextBlock
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = 0.8,
+            Margin = new Thickness(4, 0, 10, 0),
+        };
+        summaryText.Bind(TextBlock.TextProperty, new Binding(nameof(_vm.FixesSummaryText)) { Source = _vm });
+
         var leftButtons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -388,6 +437,7 @@ public class FixCommonErrorsWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Spacing = 0,
         };
+        leftButtons.Children.Add(summaryText);
         leftButtons.Children.Add(UiUtil.MakeButton(Se.Language.General.SelectAll, _vm.FixesSelectAllCommand));
         leftButtons.Children.Add(UiUtil.MakeButton(Se.Language.General.InvertSelection, _vm.FixesInverseSelectedCommand));
 
@@ -398,8 +448,8 @@ public class FixCommonErrorsWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Spacing = 0,
         };
-        rightButtons.Children.Add(UiUtil.MakeButton(Se.Language.Tools.FixCommonErrors.RefreshFixes, _vm.DoRefreshFixesCommand));
-        _buttonApplySelectedFixes = UiUtil.MakeButton(Se.Language.Tools.FixCommonErrors.ApplySelectedFixes, _vm.DoApplyFixesCommand);
+        rightButtons.Children.Add(UiUtil.MakeButton(Se.Language.Tools.FixCommonErrors.RefreshFixes, _vm.DoRefreshFixesCommand).WithIconLeft("fa-solid fa-rotate"));
+        _buttonApplySelectedFixes = UiUtil.MakeButton(Se.Language.Tools.FixCommonErrors.ApplySelectedFixes, _vm.DoApplyFixesCommand).WithIconLeft("fa-solid fa-check");
         rightButtons.Children.Add(_buttonApplySelectedFixes);
 
         var buttonBarFixes = new Grid
@@ -414,12 +464,58 @@ public class FixCommonErrorsWindow : Window
         buttonBarFixes.Add(leftButtons, 0, 0);
         buttonBarFixes.Add(rightButtons, 0, 1);
 
+        var chipsItems = new ItemsControl
+        {
+            Margin = new Thickness(10, 8, 10, 4),
+            ItemsSource = _vm.FixChips,
+            ItemsPanel = new FuncTemplate<Panel?>(() => new WrapPanel { Orientation = Orientation.Horizontal, ItemSpacing = 6, LineSpacing = 6 }),
+            ItemTemplate = new FuncDataTemplate<FixFilterChip>((chip, _) =>
+            {
+                var content = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 6,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                if (chip?.Action != null)
+                {
+                    content.Children.Add(new Avalonia.Controls.Shapes.Ellipse
+                    {
+                        Width = 7,
+                        Height = 7,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Fill = _vm.GetActionBrush(chip.Action),
+                    });
+                }
+
+                var chipText = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
+                chipText.Bind(TextBlock.TextProperty, new Binding(nameof(FixFilterChip.Display)));
+                content.Children.Add(chipText);
+
+                var toggle = new ToggleButton
+                {
+                    Padding = new Thickness(10, 3),
+                    CornerRadius = new CornerRadius(12),
+                    Command = _vm.SetFixFilterCommand,
+                    CommandParameter = chip,
+                    Content = content,
+                    [!ToggleButton.IsCheckedProperty] = new Binding(nameof(FixFilterChip.IsActive)),
+                };
+                AutomationProperties.SetName(toggle, chip?.Label ?? string.Empty);
+                return toggle;
+            }),
+        };
+
+        gridFixes.Children.Add(chipsItems);
+        Grid.SetRow(chipsItems, 0);
+        Grid.SetColumn(chipsItems, 0);
+
         gridFixes.Children.Add(dataGridFixes);
-        Grid.SetRow(dataGridFixes, 0);
+        Grid.SetRow(dataGridFixes, 1);
         Grid.SetColumn(dataGridFixes, 0);
 
         gridFixes.Children.Add(buttonBarFixes);
-        Grid.SetRow(buttonBarFixes, 1);
+        Grid.SetRow(buttonBarFixes, 2);
         Grid.SetColumn(buttonBarFixes, 0);
 
         var borderFixes = UiUtil.MakeBorderForControlNoPadding(gridFixes).WithMarginBottom(5);
@@ -555,6 +651,7 @@ public class FixCommonErrorsWindow : Window
             },
         };
         dataGridSubtitles.Bind(DataGrid.SelectedItemProperty, new Binding(nameof(_vm.SelectedParagraph)));
+        AutomationProperties.SetName(dataGridSubtitles, Se.Language.General.Preview);
         _vm.GridSubtitles = dataGridSubtitles;
         dataGridSubtitles.AddHandler(InputElement.KeyDownEvent, (object? _, KeyEventArgs e) =>
         {
@@ -636,6 +733,8 @@ public class FixCommonErrorsWindow : Window
         {
             textBox.FontFamily = new FontFamily(Se.Settings.Appearance.SubtitleTextBoxAndGridFontName);
         }
+
+        AutomationProperties.SetName(textBox, Se.Language.General.Text);
 
         textEditGrid.Add(textBox, 0, 0);
 

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Input;
@@ -37,9 +38,11 @@ public class ReviewSpeechWindow : Window
         var dataGrid = MakeDataGrid(vm);
         var waveform = MakeWaveform(vm);
 
-        var buttonExport = UiUtil.MakeButton(Se.Language.General.ExportDotDotDot, vm.ExportCommand);
-        var buttonOk = UiUtil.MakeButtonOk(vm.OkCommand);
-        var buttonCancel = UiUtil.MakeButtonCancel(vm.CancelCommand);
+        // Disabled while a regenerate runs: its progress popup is non-modal, and publishing
+        // (OK/Export) or closing mid-run would commit the row's half-updated step result.
+        var buttonExport = UiUtil.MakeButton(Se.Language.General.ExportDotDotDot, vm.ExportCommand).WithBindEnabled(nameof(vm.IsRegenerateEnabled));
+        var buttonOk = UiUtil.MakeButtonOk(vm.OkCommand).WithBindEnabled(nameof(vm.IsRegenerateEnabled));
+        var buttonCancel = UiUtil.MakeButtonCancel(vm.CancelCommand).WithBindEnabled(nameof(vm.IsRegenerateEnabled));
         var panelButtons = UiUtil.MakeButtonBar(buttonExport, buttonOk, buttonCancel);
 
         var grid = new Grid
@@ -77,6 +80,11 @@ public class ReviewSpeechWindow : Window
         Content = grid;
 
         Activated += delegate { buttonOk.Focus(); }; // hack to make OnKeyDown work
+
+        // Tunnel-stage handler: sees Space/R before the focused button does. Without this, the
+        // initially focused OK button swallowed bare Space as a button click - publishing the
+        // whole session when the user just wanted to play a line (#12093).
+        AddHandler(KeyDownEvent, (_, e) => vm.OnPreviewKeyDown(e), Avalonia.Interactivity.RoutingStrategies.Tunnel);
         Loaded += delegate
         {
             vm.Loaded();
@@ -108,23 +116,26 @@ public class ReviewSpeechWindow : Window
             VerticalAlignment = VerticalAlignment.Stretch,
             Columns =
             {
-                //new DataGridTemplateColumn
-                //{
-                //    Header = Se.Language.General.Enabled,
-                //    CellTheme = UiUtil.DataGridNoBorderNoPaddingCellTheme,
-                //    CellTemplate = new FuncDataTemplate<ReviewRow>((item, _) =>
-                //        new Border
-                //        {
-                //            Background = Brushes.Transparent, // Prevents highlighting
-                //            Padding = new Thickness(4),
-                //            Child = new CheckBox
-                //            {
-                //                [!ToggleButton.IsCheckedProperty] = new Binding(nameof(ReviewRow.Include)),
-                //                HorizontalAlignment = HorizontalAlignment.Center
-                //            }
-                //        }),
-                //    Width = new DataGridLength(1, DataGridLengthUnitType.Auto)
-                //},
+                // Re-enabled: OK publishes only rows with Include ticked and Export/Import
+                // round-trip the flag, so without this column an imported session's excluded
+                // rows were invisible and could never be re-included.
+                new DataGridTemplateColumn
+                {
+                    Header = Se.Language.General.Enabled,
+                    CellTheme = UiUtil.DataGridNoBorderNoPaddingCellTheme,
+                    CellTemplate = new FuncDataTemplate<ReviewRow>((item, _) =>
+                        new Border
+                        {
+                            Background = Brushes.Transparent, // Prevents highlighting
+                            Padding = new Thickness(4),
+                            Child = new CheckBox
+                            {
+                                [!ToggleButton.IsCheckedProperty] = new Binding(nameof(ReviewRow.Include)),
+                                HorizontalAlignment = HorizontalAlignment.Center
+                            }
+                        }),
+                    Width = new DataGridLength(1, DataGridLengthUnitType.Auto)
+                },
                 new DataGridTemplateColumn
                 {
                     CellTheme = UiUtil.DataGridNoBorderNoPaddingCellTheme,

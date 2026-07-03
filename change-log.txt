@@ -1,6 +1,58 @@
 
 Subtitle Edit Changelog
 
+v5.1.0-beta6 (3rd of July 2026)
+
+* Add SE4's "Column" list view shortcuts (delete text, delete text and shift up, insert text, paste, text up/down) - thx SiaL8er
+* Text to speech: fix stuck/silent generation - failures now show an error, cancel stops the running ffmpeg, and rate-limited ElevenLabs requests retry with backoff - thx cvrle77
+* Text to speech: fix export/import round-trip (import file filter, portable relative paths, missing-file handling) - thx cvrle77
+* Text to speech: large bug-fix pass across the engines and the review window (60+ fixes - voice-list refreshes no longer wipe cached voices, Azure/Piper voice refresh, Murf audio corruption, per-actor cast fixes, review playback/regenerate state fixes, the voice instruction is now applied when generating, Qwen3 model choice is persisted, and more)
+* Text to speech: play/stop the review window's selected line with the play/pause shortcut (Space) - thx cvrle77
+* Text to speech: the review window's Regenerate now offers the engine/model download prompts
+* Accessibility: fix Alt not activating the menu bar (e.g. with NVDA), and name splitters, waveform and Settings controls - thx Shaima-Almarzooqi
+* Make tool-dialog buttons consistent and fix "Remove text for HI" undo - thx mjuhasz
+* Fix seconv OCR (Tesseract/PaddleOCR) garbling non-ASCII output on Windows - thx Gorkycreator
+* Update Bulgarian translation - thx jekovcar
+* Update Czech translation - thx Matěj
+* Update Japanese translation - thx hisui3393
+* Update Korean translation - thx 12si27
+* Update Russian translation - thx jekovcar
+* Update Turkish translation - thx bilimiyorum
+
+-----------------------------------------------------------------------------------------------------
+
+v5.1.0-beta5 (2nd of July 2026)
+
+* Add AI review (Tools > AI review) - proofread subtitles with a local LLM via llama.cpp or Ollama, with a before/after grid and editable prompt
+* Add llama.cpp translation to Batch convert (auto-detect/start/download)
+* Add interjection lists for German, Italian, Swedish, Norwegian and Dutch
+* Add copy/paste support to the time code boxes (a bare number is milliseconds) - thx RobertoHN
+* Waveform: show the duration inside the new-selection rectangle while dragging - thx geroyannis
+* Open the source view with the caret at the selected subtitle - thx pdjdev
+* Settings: "Color text if more than N lines" now tracks "Max number of lines" live - thx subcor
+* Accessibility: fix the text-editor Tab focus trap, name status-bar icons, and label Settings/Shortcuts/AutoTranslate/FixCommonErrors/SpeechToText controls - thx kylesskim-sys
+* Polish Fix common errors, Netflix errors, Split/re-balance long lines, Compare and Restore auto-backup (filter chips, colored tags, word diffs, live counts, icons)
+* Fix ChatGPT auto-translate failing with "This is not a chat model" (bad default model) - thx EspritIT
+* Speech to text: add smaller model quants for FunASR nano/MLT-nano and Parakeet Japanese, and fix dead MADLAD download links
+* OCR: select the just-downloaded spell-check dictionary on any UI language
+* Spell check: clean up dictionary names with variant suffixes (e.g. de_DE_frami)
+* Fix keyboard shortcuts in "Adjust all times" not working, now moving 10/100/500 ms - or 1 frame / 10 frames / 1 second in frame mode - thx KaDeeKe
+* Fix up/down time code and duration stepping in frame mode not wrapping frames correctly - thx KaDeeKe
+* Fix invalid PTS/DTS in exported Blu-ray sup files (broke SupMover negative delay) - thx GCRaistlin/MonoS
+* Fix batch convert forgetting settings when the window is closed via X/Escape - thx MonsterSe7en
+* Fix batch convert llama.cpp auto-start never running
+* Fix crash when pasting an out-of-range value into a time code box
+* Fix stale RTL text-box selection anchor after mouse/native selection changes - thx muaz978
+* Fix change detection not including the original subtitle file name
+* Fix macOS legacy UI font defaults migration - thx mjuhasz
+* Fix UI tests overwriting user settings - thx mjuhasz
+* Add discard assignment to DataGridCheckboxMultiSelect instantiations - thx ivandrofly
+* Update Polish translation - thx potplayer-fanpack
+* Update Italian translation - thx bovirus
+* Update Korean translation - thx 12si27
+
+-----------------------------------------------------------------------------------------------------
+
 v5.1.0-beta4 (1st of July 2026)
 
 * Add CSV import/export to Multiple replace - thx faon-92

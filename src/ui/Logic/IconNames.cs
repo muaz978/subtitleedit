@@ -3,6 +3,7 @@
 internal class IconNames
 {
     public const string Account = "mdi-account";
+    public const string AccountVoice = "mdi-account-voice";
     public const string AlignHorizontalCenter = "mdi-align-horizontal-center";
     public const string AlignHorizontalDistribute = "mdi-align-horizontal-distribute";
     public const string AnimationPlay = "mdi-animation-play";
@@ -37,6 +38,8 @@ internal class IconNames
     public const string Duplicate = "mdi-content-duplicate";
     public const string Electron = "mdi-electron-framework";
     public const string Export = "mdi-export";
+    public const string Eye = "mdi-eye";
+    public const string EyeOff = "mdi-eye-off";
     public const string EyeSettings = "mdi-eye-settings";
     public const string FileCog = "mdi-file-cog";
     public const string FileMultiple = "mdi-file-multiple";

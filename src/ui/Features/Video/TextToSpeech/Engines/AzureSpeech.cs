@@ -118,8 +118,10 @@ public class AzureSpeech : ITtsEngine
 
     public async Task<Voice[]> RefreshVoices(string language, CancellationToken cancellationToken)
     {
+        // Was DownloadElevenLabsVoiceList - which overwrote the Azure voice cache with an
+        // ElevenLabs-shaped JSON that Map() cannot parse, permanently emptying the voice combo.
         var ms = new MemoryStream();
-        await _ttsDownloadService.DownloadElevenLabsVoiceList(ms, null, cancellationToken);
+        await _ttsDownloadService.DownloadAzureVoiceList(ms, null, cancellationToken);
         await File.WriteAllBytesAsync(Path.Combine(GetSetAzureFolder(), JsonFileName), ms.ToArray(), cancellationToken);
         return await GetVoices(language);
     }
@@ -138,10 +140,26 @@ public class AzureSpeech : ITtsEngine
             throw new ArgumentException("Voice is not an AzureVoice");
         }
 
+        // Callers pass null region/model when this engine is not the globally selected one
+        // (per-actor cast rows, cast-dialog voice test) - fall back to the saved settings
+        // instead of dereferencing null into the request URL, which produced a nonsense host
+        // (https://.tts.speech...) and aborted the whole generation run.
+        if (string.IsNullOrWhiteSpace(region))
+        {
+            region = Se.Settings.Video.TextToSpeech.AzureRegion;
+        }
+
+        if (string.IsNullOrWhiteSpace(region))
+        {
+            var error = "Azure region is not set - enter it in the Azure engine settings.";
+            Se.WriteToolsLog("AzureSpeech: " + error, true);
+            return new TtsResult { Text = text, FileName = string.Empty, Error = true, ErrorMessage = error };
+        }
+
         Se.WriteToolsLog($"AzureSpeech: voice={azureVoice.ShortName}, locale={azureVoice.Locale}, region={region}, model={model}, textLen={text.Length}");
 
         var ms = new MemoryStream();
-        var ok = await _ttsDownloadService.DownloadAzureVoiceSpeak(text, azureVoice, model!, Se.Settings.Video.TextToSpeech.AzureApiKey, "en", region!, ms, null, cancellationToken);
+        var ok = await _ttsDownloadService.DownloadAzureVoiceSpeak(text, azureVoice, model ?? string.Empty, Se.Settings.Video.TextToSpeech.AzureApiKey, "en", region, ms, null, cancellationToken);
         if (!ok)
         {
             Se.WriteToolsLog($"AzureSpeech: request failed (voice={azureVoice.ShortName}, region={region})");

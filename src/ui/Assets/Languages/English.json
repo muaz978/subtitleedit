@@ -1,6 +1,6 @@
 ﻿{
   "title": "Subtitle Edit",
-  "version": "v5.1.0-beta2",
+  "version": "v5.1.0-beta6",
   "translatedBy": "",
   "cultureName": "en-US",
   "general": {
@@ -460,6 +460,7 @@
     "replaceWith": "Replace with",
     "requiresRestart": "Requires restart",
     "reset": "Reset",
+    "resizePanels": "Resize panels",
     "resolution": "Resolution",
     "resolutionX": "Resolution: {0}",
     "reverseRightToLeftStartEnd": "Reverse RTL start/end",
@@ -680,6 +681,7 @@
     "voice": "Voice",
     "volume": "Volume",
     "warning": "Warning",
+    "waveform": "Waveform",
     "waveformCenterOnVideoPosition": "Waveform center on video position",
     "waveformPasteFromClipboard": "Paste from clipboard",
     "waveformSpectrogram": "Waveform/spectrogram",
@@ -791,6 +793,7 @@
       "applyMinGap": "Apply min. gap between subtitles...",
       "changeCasing": "_Change casing...",
       "changeFormatting": "Change formatting...",
+      "aiReview": "AI review...",
       "fixCommonErrors": "_Fix common errors...",
       "checkAndFixNetflixErrors": "Check and fix Netfli_x errors...",
       "makeEmptyTranslationFromCurrentSubtitle": "Make new _empty translation from current subtitle",
@@ -1330,6 +1333,32 @@
     "restoreSelected": "Restore selected"
   },
   "tools": {
+    "aiReview": {
+      "title": "AI review",
+      "review": "Review",
+      "stop": "Stop",
+      "editPrompt": "Edit prompt...",
+      "editPromptTitle": "Edit review prompt",
+      "promptInfo": "Instructions sent to the model - {language} is replaced with the subtitle language.",
+      "protocolInfo": "Subtitle Edit appends a strict JSON contract to the prompt: lines are sent as numbered JSON, and the model must answer with valid JSON containing only the changed lines. Replies that break the contract are retried, then skipped.",
+      "resetToDefault": "Reset to default",
+      "applyXFixes": "Apply {0} fixes",
+      "xSuggestionsYSelected": "{0} suggestions - {1} selected",
+      "reviewingLineXOfY": "Reviewing line {0} of {1}...",
+      "reviewDone": "Review done - {0} suggestions in {1} lines",
+      "noIssuesFound": "No issues found",
+      "categoryAll": "All",
+      "categorySpelling": "Spelling",
+      "categoryGrammar": "Grammar",
+      "categoryPunctuation": "Punctuation",
+      "categoryCasing": "Casing",
+      "categoryOther": "Other",
+      "xNeedACloserLook": "{0} suggestion(s) need a closer look",
+      "lineX": "Line {0}",
+      "linesXToY": "Lines {0}-{1}",
+      "largeChangeWarning": "Large change - looks like a rewrite, review carefully",
+      "engineError": "The AI engine could not be reached: {0}"
+    },
     "fixCommonErrors": {
       "title": "Fix common errors",
       "step1": "Step 1/2 - Choose which errors to fix",
@@ -1399,6 +1428,7 @@
       "nothingToFix": "Nothing to fix :)",
       "fixesFoundX": "Fixes found: {0}",
       "xFixesApplied": "Fixes applied: {0}",
+      "xFixesYSelected": "{0} fixes - {1} selected",
       "nothingFixableBut": "Nothing could be fixed automatically. The subtitle contains errors - see log for details",
       "xFixedBut": "{0} issue(s) fixed but the subtitle still contains errors - see log for details",
       "xCouldBeFixedBut": "{0} issue(s) could be fixed but the subtitle will still contain errors - see log for details",
@@ -1480,7 +1510,8 @@
       "extendOnly": "Extend only",
       "enforceDurationLimits": "Enforce minimum and maximum duration",
       "checkShotChanges": "Don't extend past shot changes",
-      "batchCheckShotChanges": "Respect shot changes (if available)"
+      "batchCheckShotChanges": "Respect shot changes (if available)",
+      "recalculateRequiresOcrNote": "Recalculate is unavailable — one or more subtitles have no OCR text. Run OCR first."
     },
     "applyDurationLimits": {
       "title": "Apply duration limits",
@@ -1800,7 +1831,12 @@
       "resizeImagesInfo": "Enter the percentage to resize images.\nPreview updates automatically.",
       "adjustColorDotDotDot": "Adjust color...",
       "adjustColor": "Adjust color",
-      "colorAdjustmentInfo": "Click the color swatch to pick a color. Bright subtitle pixels shift toward the chosen hue; dark outlines and shadows are preserved.\nPreview shows the first selected subtitle."
+      "colorAdjustmentInfo": "Click the color swatch to pick a color. Bright subtitle pixels shift toward the chosen hue; dark outlines and shadows are preserved.\nPreview shows the first selected subtitle.",
+      "topAlignLines": "Top align",
+      "bottomAlignLines": "Bottom align",
+      "appendSubtitleDotDotDot": "Append subtitle...",
+      "shiftTimeCodes": "Shift time codes by",
+      "sortByStartTime": "Sort by start time"
     },
     "removeTextForHearingImpaired": {
       "title": "Remove text for hearing impaired",
@@ -1816,9 +1852,11 @@
       "onlyIfTextIsUppercase": "Only if text is uppercase",
       "onlyOnSeparateLine": "Only on separate line",
       "ifLineIsUppercase": "If line is uppercase",
+      "keepUppercaseWords": "Keep these words (comma separated)",
       "ifLineContains": "If line contains",
       "ifLineOnlyContainsMusicSymbols": "If line only contains music symbols",
-      "removeInterjections": "Remove interjections"
+      "removeInterjections": "Remove interjections",
+      "linesFoundX": "Lines found: {0}"
     },
     "pickAlignmentTitle": "Choose alignment",
     "pickFontNameTitle": "Choose font name",
@@ -1864,7 +1902,14 @@
     "undoX": "Undo: {0}",
     "editWholeText": "Edit whole text",
     "continueFromCurrentLine": "Continue spell check from the current line?\n\nYes = continue from the current line\nNo = start from the beginning",
-    "continueFromTop": "Spell check reached the end of the subtitle.\n\nContinue from the top?"
+    "continueFromTop": "Spell check reached the end of the subtitle.\n\nContinue from the top?",
+    "spellCheckCompleted": "Spell check completed",
+    "changedWordsX": "Changed words: {0}",
+    "skippedWordsX": "Skipped words: {0}",
+    "correctWordsX": "Correct words: {0}",
+    "namesX": "Names: {0}",
+    "addedToDictionaryX": "Added to dictionary: {0}",
+    "doNotShowThisAgain": "Do not show this message again"
   },
   "video": {
     "burnIn": {
@@ -1968,6 +2013,16 @@
       "generateSpeechFromText": "Generate speech from text",
       "testVoice": "Test voice",
       "addAudioToVideoFile": "Add audio to video file",
+      "engineAndVoice": "Engine & voice",
+      "output": "Output",
+      "xLinesFromY": "{0} lines from {1}",
+      "xLines": "{0} lines",
+      "videoX": "Video: {0}",
+      "xVoices": "{0} voices",
+      "reviewAudioSegmentsHint": "Check each line before the final mix",
+      "addAudioToVideoFileHint": "Mux the result into a new video file",
+      "xElapsedYLeft": "{0} elapsed · ~{1} left",
+      "xElapsed": "{0} elapsed",
       "voiceSettings": "TTS - Voice settings",
       "voiceSampleText": "Voice sample text",
       "refreshVoices": "Refresh voices",
@@ -2183,8 +2238,10 @@
     "adjustmentX": "Adjustment: {0}",
     "totalAdjustmentX": "Total adjustment: {0}",
     "adjustAllShortcuts": "Keyboard shortcuts:\r\n\r\n• Shift + Left/Right: Move 10 ms\r\n• Ctrl + Left/Right: Move 100 ms\r\n• Alt + Left/Right: Move 500 ms",
+    "adjustAllShortcutsFrames": "Keyboard shortcuts:\r\n\r\n• Shift + Left/Right: Move 1 frame\r\n• Ctrl + Left/Right: Move 10 frames\r\n• Alt + Left/Right: Move 1 second",
     "offsetInSeconds": "Offset in seconds",
-    "speedFactor": "Speed factor"
+    "speedFactor": "Speed factor",
+    "showEarlierLaterDotDotDot": "Show earlier/later..."
   },
   "translate": {
     "translateViaCopyPaste": "Auto-translate via copy/paste",
@@ -2326,6 +2383,7 @@
       "colorTextTooLong": "Color text if too long",
       "colorTextTooWide": "Color text if too wide (pixels)",
       "colorTextTooManyLines": "Color text if more than 2 lines",
+      "colorTextTooManyLinesX": "Color text if more than {0} lines",
       "colorCharactersPerSecond": "Color characters/sec if too high",
       "colorWordsPerMinute": "Color words/min if too high",
       "colorOverlap": "Color time code overlap",
@@ -2465,6 +2523,7 @@
       "gridGoToSubtitleAndPause": "Go to subtitle and pause",
       "gridGoToSubtitleAndPlay": "Go to subtitle and play",
       "gridGoToSubtitleAndPauseAndFocusTextBox": "Go to subtitle and pause and focus text box",
+      "gridGoToSubtitleAndPlayAndFocusTextBox": "Go to subtitle and play and focus text box",
       "subtitleGridFormattingNone": "No formatting",
       "subtitleGridFormattingShowFormatting": "Show formatting",
       "subtitleGridFormattingShowTags": "Show tags",
@@ -2664,6 +2723,14 @@
       "subtitleGridCut": "Subtitle grid: Cut",
       "subtitleGridCopy": "Subtitle grid: Copy",
       "subtitleGridPaste": "Subtitle grid: Paste",
+      "listViewColumnDeleteText": "Column, delete text",
+      "listViewColumnDeleteTextAndShiftUp": "Column, delete text and shift up",
+      "listViewColumnInsertText": "Column, insert text",
+      "listViewColumnPaste": "Column, paste",
+      "listViewColumnTextUp": "Column, text up",
+      "listViewColumnTextDown": "Column, text down",
+      "autoTranslateSelectedLines": "Auto-translate selected lines...",
+      "setAssaResolution": "Set ASSA resolution (PlayResX/PlayResY)",
       "setShortcutForX": "Set shortcut for \"{0}\"",
       "commandFileNewKeepVideo": "New (keep video)",
       "fileOpenOriginal": "Open original",

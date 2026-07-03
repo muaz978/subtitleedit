@@ -50,7 +50,9 @@ public partial class ReviewSpeechViewModel : ObservableObject
     [ObservableProperty] private string? _selectedStyle;
     [ObservableProperty] private ObservableCollection<ReviewRow> _lines;
     [ObservableProperty] private ReviewRow? _selectedLine;
-    [ObservableProperty] private bool _isRegenerateEnabled;
+    // True whenever no regenerate is in flight. Must start true: OK/Export/Cancel and Escape
+    // are gated on it, and the default false left them dead until the first regenerate ran.
+    [ObservableProperty] private bool _isRegenerateEnabled = true;
     [ObservableProperty] private bool _isElevenLabsControlsVisible;
     [ObservableProperty] private bool _autoContinue;
     [ObservableProperty] private bool _isPlayVisible;
@@ -121,6 +123,10 @@ public partial class ReviewSpeechViewModel : ObservableObject
     private long _startPlayTicks;
     private readonly List<string> _tempAudioFiles = new();
 
+    // The row whose audio is currently playing. Auto-continue must advance from this row, not
+    // from SelectedLine - grid selection is two-way and can move during playback.
+    private ReviewRow? _playingRow;
+
     public ReviewSpeechViewModel(IFolderHelper folderHelper, IWindowService windowService)
     {
         _folderHelper = folderHelper;
@@ -160,33 +166,58 @@ public partial class ReviewSpeechViewModel : ObservableObject
         {
             _timer.Stop();
 
-            if (_cancellationTokenSource.IsCancellationRequested || _mpvContext == null)
+            // Read mpv state under the play lock: Stop()/OnClosing dispose _mpvContext under the
+            // same lock on the UI thread, and this tick runs on a threadpool thread - the old
+            // unguarded IsPaused read raced the dispose (NRE / native use-after-free window).
+            var stopped = false;
+            var paused = false;
+            lock (_playLock)
             {
-                IsPlayVisible = true;
-                IsStopVisible = false;
-                foreach (var l in Lines)
+                if (_cancellationTokenSource.IsCancellationRequested || _mpvContext == null)
                 {
-                    l.IsPlaying = false;
-                    l.IsPlayingEnabled = true;
+                    stopped = true;
                 }
+                else
+                {
+                    paused = _mpvContext.IsPaused;
+                }
+            }
 
+            if (stopped)
+            {
+                await Dispatcher.UIThread.InvokeAsync(ResetPlaybackUiState);
                 return;
             }
 
-            var paused = _mpvContext.IsPaused;
-
-            var line = SelectedLine;
+            // The row that is actually playing - not SelectedLine: two-way grid selection meant
+            // clicking another row during playback made auto-continue advance from the *clicked*
+            // row, stranding the playing row's stop icon and skipping the clicked one.
+            var line = _playingRow;
             var timeSinceStart = TimeSpan.FromTicks(DateTime.UtcNow.Ticks - _startPlayTicks);
             if (paused && AutoContinue && !_skipAutoContinue && line != null && timeSinceStart.TotalMilliseconds > 500)
             {
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
+                    // Re-check on the UI thread: Stop/Space pressed between this tick's threadpool
+                    // checks and this lambda running used to be ignored - the advance started a
+                    // fresh mpv for the next row while the UI had already reset to idle, leaving
+                    // audio playing with nothing able to stop it. The timer is already stopped and
+                    // this lambda is the last thing to run, so it must also reset the playback UI:
+                    // a bare return left the finished row's stop icon showing and every row
+                    // disabled, with no way to recover in the window.
+                    if (_skipAutoContinue || _cancellationTokenSource.IsCancellationRequested || !ReferenceEquals(_playingRow, line))
+                    {
+                        ResetPlaybackUiState();
+                        return;
+                    }
+
                     line.IsPlaying = false;
                     var index = Lines.IndexOf(line);
-                    if (index < Lines.Count - 1)
+                    if (index >= 0 && index < Lines.Count - 1)
                     {
                         var nextLine = Lines[index + 1];
                         nextLine.IsPlaying = true;
+                        _playingRow = nextLine;
                         SelectedLine = nextLine;
                         LineGrid.ScrollIntoView(nextLine, null);
                         await PlayAudio(nextLine.StepResult.CurrentFileName);
@@ -194,43 +225,74 @@ public partial class ReviewSpeechViewModel : ObservableObject
                     else
                     {
                         _skipAutoContinue = true; // no more lines to play
-
-                        IsPlayVisible = true;
-                        IsStopVisible = false;
-                        foreach (var l in Lines)
-                        {
-                            l.IsPlaying = false;
-                            l.IsPlayingEnabled = true;
-                        }
+                        ResetPlaybackUiState();
                     }
                 });
 
                 return;
             }
 
-            IsPlayVisible = paused;
-            IsStopVisible = !paused;
-
             if (paused)
             {
-                foreach (var l in Lines)
-                {
-                    l.IsPlaying = false;
-                    l.IsPlayingEnabled = true;
-                }
+                await Dispatcher.UIThread.InvokeAsync(ResetPlaybackUiState);
                 return;
             }
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                IsPlayVisible = false;
+                IsStopVisible = true;
+            });
 
             _timer.Start();
         }
         catch (Exception ex)
         {
             SeLogger.Error(ex, "Error in ReviewSpeech playback timer.");
+            // A throw used to kill the timer for good, leaving every row disabled (PlayRow
+            // disables them and only this timer re-enables) - reset instead of wedging.
+            Dispatcher.UIThread.Post(ResetPlaybackUiState);
+        }
+    }
+
+    /// <summary>
+    /// Returns the playback UI to idle: play button showing, no row marked as playing, all
+    /// rows clickable again. Must run on the UI thread.
+    /// </summary>
+    private void ResetPlaybackUiState()
+    {
+        IsPlayVisible = true;
+        IsStopVisible = false;
+        _playingRow = null;
+        foreach (var l in Lines)
+        {
+            l.IsPlaying = false;
+            l.IsPlayingEnabled = true;
         }
     }
 
     private async Task PlayAudio(string fileName)
     {
+        // A row can point at a deleted/moved file (e.g. an imported session whose folder was
+        // cleaned). mpv's failed loadfile is only logged, so playback used to sit in "playing"
+        // forever with every row disabled and no error. Reset and tell the user instead.
+        if (string.IsNullOrEmpty(fileName) || !File.Exists(fileName))
+        {
+            SeLogger.Error($"ReviewSpeech: cannot play missing audio file \"{fileName}\"");
+            ResetPlaybackUiState();
+            if (Window != null)
+            {
+                await MessageBox.Show(
+                    Window,
+                    Se.Language.General.Error,
+                    "The audio file for this line does not exist:" + Environment.NewLine + fileName,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            return;
+        }
+
         lock (_playLock)
         {
             _mpvContext?.Stop();
@@ -255,7 +317,7 @@ public partial class ReviewSpeechViewModel : ObservableObject
         ITtsEngine[] engines,
         ITtsEngine engine,
         Voice[] voices,
-        Voice voice,
+        Voice? voice,
         TtsLanguage[] languages,
         TtsLanguage? language,
         string videoFileName,
@@ -266,7 +328,7 @@ public partial class ReviewSpeechViewModel : ObservableObject
         {
             var row = new ReviewRow
             {
-                Include = true,
+                Include = p.Include,
                 Number = p.Paragraph.Number,
                 Text = p.Text,
                 Voice = p.Voice == null ? string.Empty : p.Voice.ToString(),
@@ -438,8 +500,29 @@ public partial class ReviewSpeechViewModel : ObservableObject
             }
         }
 
-        // Copy files
+        // Copy files. Files still referenced by rows or their history entries must not be
+        // overwritten: re-exporting to the folder a session was imported from used to replace an
+        // original take (e.g. 0002.wav) that a history entry still pointed at - "pick from
+        // history" then played and published the wrong audio with no warning.
+        var referencedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var l in Lines)
+        {
+            if (!string.IsNullOrEmpty(l.StepResult.CurrentFileName))
+            {
+                referencedFiles.Add(Path.GetFullPath(l.StepResult.CurrentFileName));
+            }
+
+            foreach (var h in l.HistoryItems)
+            {
+                if (!string.IsNullOrEmpty(h.FileName))
+                {
+                    referencedFiles.Add(Path.GetFullPath(h.FileName));
+                }
+            }
+        }
+
         var index = 0;
+        var missingAudioCount = 0;
         var exportFormat = new TtsImportExport
         {
             VideoFileName = _videoFileName,
@@ -451,7 +534,39 @@ public partial class ReviewSpeechViewModel : ObservableObject
             var sourceFileName = line.StepResult.CurrentFileName;
             var targetFileName = Path.Combine(folder, index.ToString().PadLeft(4, '0') + Path.GetExtension((string?)sourceFileName));
 
-            if (File.Exists(targetFileName))
+            // A row can point at a deleted/moved file (e.g. an imported session whose folder was
+            // cleaned). File.Copy used to throw unhandled mid-export, leaving some files copied
+            // and no JSON written. Export the row without audio instead and report the count.
+            if (string.IsNullOrEmpty(sourceFileName) || !File.Exists(sourceFileName))
+            {
+                missingAudioCount++;
+                SeLogger.Error($"ReviewSpeech export: audio file missing for line {index}: \"{sourceFileName}\"");
+                targetFileName = string.Empty;
+            }
+
+            // Re-exporting to the folder the session was imported from makes source and target
+            // the SAME file (import resolves names against the JSON folder). The overwrite path
+            // then deleted the target - destroying the source - and the copy threw with the
+            // audio gone and no JSON written. An identical path needs no copy at all.
+            var sourceIsTarget = !string.IsNullOrEmpty(targetFileName) &&
+                                 string.Equals(Path.GetFullPath(sourceFileName), Path.GetFullPath(targetFileName), StringComparison.OrdinalIgnoreCase);
+
+            // Divert to a suffixed name when the default target is a *different* file that a row
+            // or history entry still references.
+            if (!sourceIsTarget && !string.IsNullOrEmpty(targetFileName) && referencedFiles.Contains(Path.GetFullPath(targetFileName)))
+            {
+                var suffix = 1;
+                string candidate;
+                do
+                {
+                    candidate = Path.Combine(folder, $"{index.ToString().PadLeft(4, '0')}_{suffix}{Path.GetExtension((string?)sourceFileName)}");
+                    suffix++;
+                }
+                while (referencedFiles.Contains(Path.GetFullPath(candidate)) || File.Exists(candidate));
+                targetFileName = candidate;
+            }
+
+            if (!sourceIsTarget && !string.IsNullOrEmpty(targetFileName) && File.Exists(targetFileName))
             {
                 try
                 {
@@ -469,11 +584,16 @@ public partial class ReviewSpeechViewModel : ObservableObject
                 }
             }
 
-            File.Copy(sourceFileName, targetFileName, true);
+            if (!sourceIsTarget && !string.IsNullOrEmpty(targetFileName))
+            {
+                File.Copy(sourceFileName, targetFileName, true);
+            }
 
             exportFormat.Items.Add(new TtsImportExportItem
             {
-                AudioFileName = targetFileName,
+                // File name only, not the absolute path: the export folder is meant to be moved
+                // or shared, and Import resolves the name against the JSON's own directory.
+                AudioFileName = string.IsNullOrEmpty(targetFileName) ? string.Empty : Path.GetFileName(targetFileName),
                 StartMs = (long)Math.Round((double)line.StepResult.Paragraph.StartTime.TotalMilliseconds, MidpointRounding.AwayFromZero),
                 EndMs = (long)Math.Round((double)line.StepResult.Paragraph.EndTime.TotalMilliseconds, MidpointRounding.AwayFromZero),
                 VoiceName = line.StepResult.Voice?.Name ?? string.Empty,
@@ -494,6 +614,16 @@ public partial class ReviewSpeechViewModel : ObservableObject
         // Export json
         var json = JsonSerializer.Serialize(exportFormat, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(jsonFileName, json);
+
+        if (missingAudioCount > 0)
+        {
+            await MessageBox.Show(
+                Window,
+                Se.Language.General.Warning,
+                $"{missingAudioCount} line(s) had no audio file and were exported without audio - see error-log.txt in the Subtitle Edit data folder.",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
 
         await _folderHelper.OpenFolder(Window!, folder);
     }
@@ -535,6 +665,9 @@ public partial class ReviewSpeechViewModel : ObservableObject
         line.StepResult.EngineName = picked.EngineName ?? string.Empty;
         line.StepResult.Model = picked.Model ?? string.Empty;
         line.StepResult.Instruction = picked.Instruction ?? string.Empty;
+        // Restore the real speed factor too, not just the display string - otherwise Export
+        // writes the previous SpeedFactor next to this entry's audio file.
+        line.StepResult.SpeedFactor = picked.Speed;
         line.Speed = Math.Round(picked.Speed, 2).ToString(CultureInfo.CurrentCulture);
 
         // Mirror the click-to-sync behaviour so the left panel immediately reflects the picked
@@ -592,10 +725,10 @@ public partial class ReviewSpeechViewModel : ObservableObject
         var old = _cancellationTokenSource;
         _cancellationTokenSource = next;
         _cancellationToken = next.Token;
-        if (!ReferenceEquals(old, next))
-        {
-            try { old.Dispose(); } catch (ObjectDisposedException) { }
-        }
+        // The old CTS is deliberately not disposed: it may still be held by a non-modal
+        // GeneratingAudioWindow whose Cancel button calls Cancel() on it - disposing here made
+        // that throw ObjectDisposedException. A CTS without timers has no unmanaged state that
+        // needs deterministic disposal; window close disposes the final instance.
     }
 
     [RelayCommand]
@@ -640,84 +773,171 @@ public partial class ReviewSpeechViewModel : ObservableObject
             return;
         }
 
-        var isEngineInstalled = await engine.IsInstalled(SelectedRegion);
-        if (!isEngineInstalled)
-        {
-            return;
-        }
-
-        if (!await TtsVoiceInstaller.EnsureVoiceInstalled(engine, voice, Window, _windowService))
-        {
-            return;
-        }
-
+        // Gate the whole grid BEFORE the engine probes below: IsInstalled / EnsureVoiceInstalled
+        // can take seconds (process spawn, HTTP), and with the gate applied only after them a
+        // second regenerate or a play started in that window swapped the shared cancellation
+        // source under this run. The per-row play/regenerate buttons, Ctrl+R and the Space
+        // shortcut all honor IsPlayingEnabled; OK/Export/Escape honor IsRegenerateEnabled.
+        // The outer try/finally guarantees the gate is lifted on every exit, including the
+        // engine-probe early returns.
         IsRegenerateEnabled = false;
-
-        var oldStyle = SelectedStyle;
-        if (engine is Murf && !string.IsNullOrEmpty(SelectedStyle))
+        foreach (var l in Lines)
         {
-            Se.Settings.Video.TextToSpeech.MurfStyle = SelectedStyle;
+            l.IsPlayingEnabled = false;
         }
 
-        var generatingAudioVm = _windowService.ShowWindow<GeneratingAudioWindow, GeneratingAudioViewModel>(Window!);
-        ReplaceCts(generatingAudioVm.CancellationTokenSource);
-
-        TtsResult speakResult;
         try
         {
-            speakResult = await TtsInstructionSwap.RunAsync(engine, Instruction, () =>
-                engine.Speak(Utilities.UnbreakLine(line.Text), _waveFolder, voice, SelectedLanguage, SelectedRegion, SelectedModel, _cancellationToken));
-
-            line.StepResult.CurrentFileName = speakResult.FileName;
-            line.StepResult.Voice = voice;
-
-            var adjustSpeedStepResult = await TrimAndAdjustSpeed(line);
-            var postProcessedFileName = await TtsPostProcessor.ApplyPostProcessing(adjustSpeedStepResult.CurrentFileName, _waveFolder, _cancellationToken);
-
-            if (_cancellationToken.IsCancellationRequested)
+            // Same install/download flow as the main window: this used to be a bare
+            // IsInstalled check that silently returned, so picking a not-yet-downloaded
+            // engine (e.g. CosyVoice3) here made Regenerate do nothing with no prompt.
+            if (!await TtsEngineInstaller.EnsureEngineInstalled(engine, Window, _windowService, SelectedRegion, SelectedModel, null, null, async () => await SelectedEngineChangedAsync()))
             {
                 return;
             }
 
-            adjustSpeedStepResult.CurrentFileName = postProcessedFileName;
-            // Record which engine/model/instruction this regenerate used so the row's "click to
-            // sync left panel" feature can restore them later.
-            adjustSpeedStepResult.EngineName = engine.Name;
-            adjustSpeedStepResult.Model = SelectedModel ?? string.Empty;
-            adjustSpeedStepResult.Instruction = Instruction ?? string.Empty;
-            line.Speed = Math.Round(adjustSpeedStepResult.SpeedFactor, 2).ToString(CultureInfo.CurrentCulture);
-            line.Cps = Math.Round(adjustSpeedStepResult.Paragraph.GetCharactersPerSecond(), 2).ToString(CultureInfo.CurrentCulture);
-            line.StepResult = adjustSpeedStepResult;
-            line.Voice = voice.ToString();
-
-            line.AddHistory(voice, line.StepResult.CurrentFileName, engine.Name, SelectedModel ?? string.Empty, Instruction ?? string.Empty);
-        }
-        catch (HttpRequestException ex)
-        {
-            SeLogger.Error(ex, "TTS server error during regeneration.");
-            if (Window != null)
+            if (!await TtsVoiceInstaller.EnsureVoiceInstalled(engine, voice, Window, _windowService))
             {
-                await MessageBox.Show(
-                    Window,
-                    Se.Language.General.Error,
-                    "TTS server error: " + ex.Message,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                return;
             }
-            return;
+
+            // Capture the *saved* style, not SelectedStyle: capturing the new value made the
+            // finally-block restore a no-op, so a one-line style override silently became the
+            // permanent global Murf style.
+            var oldStyle = Se.Settings.Video.TextToSpeech.MurfStyle;
+            if (engine is Murf && !string.IsNullOrEmpty(SelectedStyle))
+            {
+                Se.Settings.Video.TextToSpeech.MurfStyle = SelectedStyle;
+            }
+
+            var generatingAudioVm = _windowService.ShowWindow<GeneratingAudioWindow, GeneratingAudioViewModel>(Window!);
+            ReplaceCts(generatingAudioVm.CancellationTokenSource);
+
+            // Snapshot the panel state this regenerate runs with: the progress popup is non-modal,
+            // so clicking another row mid-run rewrites SelectedModel/Instruction (via the row-click
+            // panel sync) - reading them after the awaits recorded settings that never produced the
+            // audio into the row snapshot and its history entry.
+            var model = SelectedModel;
+            var instruction = Instruction;
+            var language = SelectedLanguage;
+            var region = SelectedRegion;
+
+            // The row's live StepResult must only change once the whole regenerate pipeline has
+            // succeeded - it used to be mutated right after Speak, so a cancel or a failed
+            // trim/post-process left the row half-updated (raw un-stretched clip with the old
+            // speed/voice display) and OK/Export published that state.
+            var originalFileName = line.StepResult.CurrentFileName;
+            var originalVoice = line.StepResult.Voice;
+
+            try
+            {
+                var speakResult = await TtsInstructionSwap.RunAsync(engine, instruction, () =>
+                    engine.Speak(Utilities.UnbreakLine(line.Text), _waveFolder, voice, language, region, model, _cancellationToken));
+
+                if (speakResult.Error || string.IsNullOrEmpty(speakResult.FileName) || !File.Exists(speakResult.FileName))
+                {
+                    if (Window != null)
+                    {
+                        var detail = string.IsNullOrEmpty(speakResult.ErrorMessage)
+                            ? "The engine produced no audio - see error-log.txt in the Subtitle Edit data folder."
+                            : speakResult.ErrorMessage;
+                        await MessageBox.Show(
+                            Window,
+                            Se.Language.General.Error,
+                            "Regenerating audio failed: " + detail,
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
+
+                    return;
+                }
+
+                line.StepResult.CurrentFileName = speakResult.FileName;
+                line.StepResult.Voice = voice;
+
+                var adjustSpeedStepResult = await TrimAndAdjustSpeed(line);
+                var postProcessedFileName = await TtsPostProcessor.ApplyPostProcessing(adjustSpeedStepResult.CurrentFileName, _waveFolder, _cancellationToken);
+
+                if (_cancellationToken.IsCancellationRequested)
+                {
+                    line.StepResult.CurrentFileName = originalFileName;
+                    line.StepResult.Voice = originalVoice;
+                    return;
+                }
+
+                adjustSpeedStepResult.CurrentFileName = postProcessedFileName;
+                // Record which engine/model/instruction this regenerate used so the row's "click to
+                // sync left panel" feature can restore them later.
+                adjustSpeedStepResult.EngineName = engine.Name;
+                adjustSpeedStepResult.Model = model ?? string.Empty;
+                adjustSpeedStepResult.Instruction = instruction ?? string.Empty;
+                line.Speed = Math.Round(adjustSpeedStepResult.SpeedFactor, 2).ToString(CultureInfo.CurrentCulture);
+                line.Cps = Math.Round(adjustSpeedStepResult.Paragraph.GetCharactersPerSecond(), 2).ToString(CultureInfo.CurrentCulture);
+                line.StepResult = adjustSpeedStepResult;
+                line.Voice = voice.ToString();
+
+                line.AddHistory(voice, line.StepResult.CurrentFileName, engine.Name, model ?? string.Empty, instruction ?? string.Empty);
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancel in the GeneratingAudio popup: Speak and the ffmpeg steps surface it as a
+                // throw (it used to escape as an unhandled exception). Undo the partial row update.
+                line.StepResult.CurrentFileName = originalFileName;
+                line.StepResult.Voice = originalVoice;
+                return;
+            }
+            catch (HttpRequestException ex)
+            {
+                line.StepResult.CurrentFileName = originalFileName;
+                line.StepResult.Voice = originalVoice;
+                SeLogger.Error(ex, "TTS server error during regeneration.");
+                if (Window != null)
+                {
+                    await MessageBox.Show(
+                        Window,
+                        Se.Language.General.Error,
+                        "TTS server error: " + ex.Message,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+                return;
+            }
+            catch (Exception ex)
+            {
+                line.StepResult.CurrentFileName = originalFileName;
+                line.StepResult.Voice = originalVoice;
+                SeLogger.Error(ex, "Regenerating audio failed.");
+                if (Window != null)
+                {
+                    await MessageBox.Show(
+                        Window,
+                        Se.Language.General.Error,
+                        "Regenerating audio failed: " + ex.Message,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+                return;
+            }
+            finally
+            {
+                generatingAudioVm.Close();
+                if (engine is Murf && oldStyle != null)
+                {
+                    Se.Settings.Video.TextToSpeech.MurfStyle = oldStyle;
+                }
+            }
+
+            _skipAutoContinue = true;
+            await PlayAudio(line.StepResult.CurrentFileName);
         }
         finally
         {
-            generatingAudioVm.Close();
             IsRegenerateEnabled = true;
-            if (engine is Murf && oldStyle != null)
+            foreach (var l in Lines)
             {
-                Se.Settings.Video.TextToSpeech.MurfStyle = oldStyle;
+                l.IsPlayingEnabled = true;
             }
         }
-
-        _skipAutoContinue = true;
-        await PlayAudio(line.StepResult.CurrentFileName);
     }
 
     [RelayCommand]
@@ -732,7 +952,12 @@ public partial class ReviewSpeechViewModel : ObservableObject
         _skipAutoContinue = false;
         _startPlayTicks = DateTime.UtcNow.Ticks;
 
+        // Playing a row selects it, so the keyboard (Space to replay, R to regenerate) always
+        // targets the line just heard - previously selection stayed on the old row (#12093).
+        SelectedLine = line;
+
         line.IsPlaying = true;
+        _playingRow = line;
         foreach (var l in Lines)
         {
             l.IsPlayingEnabled = false;
@@ -754,6 +979,7 @@ public partial class ReviewSpeechViewModel : ObservableObject
         ReplaceCts(new CancellationTokenSource());
         _skipAutoContinue = false;
         _startPlayTicks = DateTime.UtcNow.Ticks;
+        _playingRow = line;
         await PlayAudio(line.StepResult.CurrentFileName);
     }
 
@@ -769,6 +995,7 @@ public partial class ReviewSpeechViewModel : ObservableObject
             _mpvContext = null;
         }
 
+        _playingRow = null;
         IsPlayVisible = true;
         IsStopVisible = false;
     }
@@ -812,13 +1039,17 @@ public partial class ReviewSpeechViewModel : ObservableObject
         var vadMaxSilence = Se.Settings.Video.TextToSpeech.VadMaxSilenceSeconds;
         var doHighQualityStretch = Se.Settings.Video.TextToSpeech.HighQualityTimeStretchEnabled;
 
-        // Step 1: Trim silence from start and end
+        // Step 1: Trim silence from start and end. A failed trim (misconfigured/failing ffmpeg)
+        // must fall back to the untrimmed audio - adopting the missing output blindly made
+        // FfmpegMediaInfo.Parse below return a null Duration and the factor math NRE'd.
         var outputFileNameTrim = Path.Combine(_waveFolder, Guid.NewGuid() + ".wav");
         _tempAudioFiles.Add(outputFileNameTrim);
         var trimProcess = FfmpegGenerator.TrimSilenceStartAndEnd(item.CurrentFileName, outputFileNameTrim);
         await trimProcess.StartAndWaitAsync(_cancellationToken);
 
-        var currentFile = outputFileNameTrim;
+        var currentFile = File.Exists(outputFileNameTrim) && new FileInfo(outputFileNameTrim).Length > 0
+            ? outputFileNameTrim
+            : item.CurrentFileName;
 
         // Step 2: VAD-based internal silence compression
         if (doVad)
@@ -846,7 +1077,9 @@ public partial class ReviewSpeechViewModel : ObservableObject
         }
 
         var mediaInfo = FfmpegMediaInfo.Parse(currentFile);
-        if (mediaInfo.Duration.TotalMilliseconds <= p.DurationTotalMilliseconds + addDuration)
+        // Duration is null when ffmpeg could not read the file - keep the audio unstretched
+        // (same policy as the main pipeline) instead of NRE'ing into the generic error dialog.
+        if (mediaInfo.Duration == null || mediaInfo.Duration.TotalMilliseconds <= p.DurationTotalMilliseconds + addDuration)
         {
             return new TtsStepResult
             {
@@ -925,6 +1158,14 @@ public partial class ReviewSpeechViewModel : ObservableObject
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
+            // Closing mid-regenerate would publish/roll back a half-updated row and delete temp
+            // files under the running pipeline - the window buttons are disabled for the same
+            // reason; cancel the regenerate from its own popup instead.
+            if (!IsRegenerateEnabled)
+            {
+                return;
+            }
+
             Window?.Close();
         }
         else if (UiUtil.IsHelp(e))
@@ -935,16 +1176,119 @@ public partial class ReviewSpeechViewModel : ObservableObject
         else if (e.Key == Key.R && e.KeyModifiers == KeyModifiers.Control)
         {
             e.Handled = true;
-            var line = SelectedLine;
-            if (line == null || line.IsPlaying || !line.IsPlayingEnabled)
+            RegenerateSelectedLine();
+        }
+    }
+
+    /// <summary>
+    /// Tunnel-stage keys (see the window's AddHandler): play/pause and regenerate must fire
+    /// before the focused control gets the key, otherwise a focused button treats bare Space
+    /// as a click - the initially focused OK button then published the session (#12093).
+    /// </summary>
+    internal void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        // A modifier-less key must still type into a focused text box; with modifiers held the
+        // shortcut works everywhere.
+        var isTextBoxFocused = Window?.FocusManager?.GetFocusedElement() is TextBox;
+
+        if (MatchesPlayPauseShortcut(e))
+        {
+            if (e.KeyModifiers == KeyModifiers.None && isTextBoxFocused)
             {
                 return;
             }
 
-            if (RegenerateAudioCommand.CanExecute(line))
+            e.Handled = true;
+            TogglePlayPauseSelectedRow();
+        }
+        else if (e.Key == Key.R && e.KeyModifiers == KeyModifiers.None && !isTextBoxFocused)
+        {
+            // Bare R = regenerate the selected line: pairs with Space for fast keyboard-only
+            // review (space to listen, R to redo), as requested in #12093.
+            e.Handled = true;
+            RegenerateSelectedLine();
+        }
+    }
+
+    private void RegenerateSelectedLine()
+    {
+        var line = SelectedLine;
+        if (line == null || line.IsPlaying || !line.IsPlayingEnabled)
+        {
+            return;
+        }
+
+        if (RegenerateAudioCommand.CanExecute(line))
+        {
+            RegenerateAudioCommand.Execute(line);
+        }
+    }
+
+    /// <summary>
+    /// True when the pressed keys match the user's main-window play/pause bindings
+    /// (TogglePlayPause / TogglePlayPause2; defaults Space and Ctrl/Cmd+Space), so the review
+    /// window plays with the same keys as the rest of the app (#12093).
+    /// </summary>
+    private static bool MatchesPlayPauseShortcut(KeyEventArgs e)
+    {
+        var cmdOrWin = OperatingSystem.IsMacOS() ? "Win" : "Ctrl";
+        var toggleKeys = Se.Settings.Shortcuts.FirstOrDefault(s => s.ActionName == nameof(MainViewModel.TogglePlayPauseCommand))?.Keys
+                         ?? [nameof(Key.Space)];
+        var toggle2Keys = Se.Settings.Shortcuts.FirstOrDefault(s => s.ActionName == nameof(MainViewModel.TogglePlayPause2Command))?.Keys
+                          ?? [cmdOrWin, nameof(Key.Space)];
+        return MatchesKeys(e, toggleKeys) || MatchesKeys(e, toggle2Keys);
+    }
+
+    // Matches a stored shortcut key list (modifier tokens + one main key) against a key event.
+    // Multi-key non-modifier chords are not supported here - the full ShortcutManager handles
+    // those in the main window; a dialog only needs the simple form.
+    private static bool MatchesKeys(KeyEventArgs e, List<string> keys)
+    {
+        var modifiers = KeyModifiers.None;
+        Key? mainKey = null;
+        foreach (var token in keys)
+        {
+            if (token is "Ctrl" or "Control" or "LeftCtrl" or "RightCtrl")
             {
-                RegenerateAudioCommand.Execute(line);
+                modifiers |= KeyModifiers.Control;
             }
+            else if (token is "Alt" or "LeftAlt" or "RightAlt")
+            {
+                modifiers |= KeyModifiers.Alt;
+            }
+            else if (token is "Shift" or "LeftShift" or "RightShift")
+            {
+                modifiers |= KeyModifiers.Shift;
+            }
+            else if (token is "Win" or "Meta" or "LWin" or "RWin" or "Cmd" or "Command")
+            {
+                modifiers |= KeyModifiers.Meta;
+            }
+            else if (Enum.TryParse<Key>(token, out var key) && mainKey == null)
+            {
+                mainKey = key;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        return mainKey != null && mainKey == e.Key && e.KeyModifiers == modifiers;
+    }
+
+    private void TogglePlayPauseSelectedRow()
+    {
+        if (IsStopVisible || Lines.Any(l => l.IsPlaying))
+        {
+            Stop();
+            return;
+        }
+
+        var line = SelectedLine;
+        if (line is { IsPlayingEnabled: true } && PlayRowCommand.CanExecute(line))
+        {
+            PlayRowCommand.Execute(line);
         }
     }
 
@@ -980,7 +1324,21 @@ public partial class ReviewSpeechViewModel : ObservableObject
             return;
         }
 
-        var voices = await engine.GetVoices(SelectedLanguage?.Code ?? string.Empty);
+        // Guarded like the main window's engine switch: a throwing GetVoices was swallowed by
+        // PostSafe and Voices.First() on an empty list (e.g. Qwen3 voice-clone model with no
+        // imported reference WAVs) threw - either way the panel was left half-switched with the
+        // previous engine's voices, and Regenerate handed the wrong engine's Voice to Speak.
+        Voice[] voices;
+        try
+        {
+            voices = await engine.GetVoices(SelectedLanguage?.Code ?? string.Empty);
+        }
+        catch (Exception ex)
+        {
+            SeLogger.Error(ex, $"ReviewSpeech: loading voices for {engine.Name} failed");
+            voices = [];
+        }
+
         Voices.Clear();
         foreach (var vo in voices)
         {
@@ -994,9 +1352,9 @@ public partial class ReviewSpeechViewModel : ObservableObject
                                                   p.Name.Contains("English", StringComparison.OrdinalIgnoreCase));
         }
 
-        SelectedVoice = lastVoice ?? Voices.First();
+        SelectedVoice = lastVoice ?? Voices.FirstOrDefault();
 
-        if (engine.HasLanguageParameter)
+        if (engine.HasLanguageParameter && SelectedVoice != null)
         {
             var languages = await engine.GetLanguages(SelectedVoice, null); // SelectedModel);
             Languages.Clear();
@@ -1374,12 +1732,21 @@ public partial class ReviewSpeechViewModel : ObservableObject
 
     internal void OnClosing(WindowClosingEventArgs e)
     {
+        // Title-bar X / Alt+F4 bypass the Escape guard, so a regenerate can still be in flight
+        // here. Cancel it, but leave its popup-owned CTS undisposed (the popup's Cancel button
+        // still holds it) and skip the temp-file sweep below - the unwinding pipeline may still
+        // be writing those files.
+        var regenerateInFlight = !IsRegenerateEnabled;
+
         _skipAutoContinue = true;
         _timer.Stop();
         _timer.Elapsed -= OnTimerOnElapsed;
         _timer.Dispose();
         try { _cancellationTokenSource.Cancel(); } catch (ObjectDisposedException) { }
-        try { _cancellationTokenSource.Dispose(); } catch (ObjectDisposedException) { }
+        if (!regenerateInFlight)
+        {
+            try { _cancellationTokenSource.Dispose(); } catch (ObjectDisposedException) { }
+        }
         lock (_playLock)
         {
             _mpvContext?.Dispose();
@@ -1399,15 +1766,29 @@ public partial class ReviewSpeechViewModel : ObservableObject
         // Intermediate WAVs from TrimAndAdjustSpeed land in _waveFolder and would
         // otherwise pile up across regenerate cycles. Best-effort — _waveFolder is
         // usually a session-scoped temp dir but a stray locked file shouldn't tank
-        // window close.
-        foreach (var f in _tempAudioFiles)
+        // window close. A regenerated row's *final* audio file is tracked here too,
+        // and on OK it was just published via StepResults for the merge step —
+        // deleting it would silently break that line in the final audio — so keep
+        // anything a published result still references.
+        var publishedFiles = OkPressed
+            ? new HashSet<string>(StepResults.Select(r => r.CurrentFileName), StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!regenerateInFlight)
         {
-            try { if (File.Exists(f))
+            foreach (var f in _tempAudioFiles)
             {
-                File.Delete(f);
-            } } catch { /* ignore */ }
+                if (publishedFiles.Contains(f))
+                {
+                    continue;
+                }
+
+                try { if (File.Exists(f))
+                {
+                    File.Delete(f);
+                } } catch { /* ignore */ }
+            }
+            _tempAudioFiles.Clear();
         }
-        _tempAudioFiles.Clear();
 
         UiUtil.SaveWindowPosition(Window);
     }

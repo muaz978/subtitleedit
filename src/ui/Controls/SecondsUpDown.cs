@@ -113,6 +113,10 @@ public class SecondsUpDown : TemplatedControl
                 Name = "PART_Spinner",
                 ButtonSpinnerLocation = Location.Right,
                 ShowButtonSpinner = true,
+                // Keep the icon-only up/down repeat buttons out of the tab order: the text box is
+                // the single (named) tab stop and Up/Down arrows already step the value, so a
+                // screen-reader user is not stopped on two nameless buttons per field (#12087).
+                IsTabStop = false,
                 Content = grid,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
@@ -209,8 +213,11 @@ public class SecondsUpDown : TemplatedControl
 
         if (Se.Settings.General.UseFrameMode)
         {
-            var ms = SubtitleFormat.FramesToMilliseconds(delta);
-            val = val.Add(TimeSpan.FromMilliseconds(ms));
+            // Step by whole frames via the total frame count, so an unaligned value is
+            // aligned to the nearest frame first - just adding one frame duration in ms
+            // can otherwise round/cap back to the same displayed frame number.
+            var totalFrames = SubtitleFormat.MillisecondsToFrames(val.TotalMilliseconds);
+            val = TimeSpan.FromMilliseconds(SubtitleFormat.FramesToMilliseconds(totalFrames + delta));
         }
         else
         {

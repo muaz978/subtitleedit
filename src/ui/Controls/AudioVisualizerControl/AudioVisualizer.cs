@@ -316,6 +316,7 @@ public class AudioVisualizer : Control
     private readonly Pen _centerLinePen = new Pen(Brushes.DarkGray, 0.5);
     private readonly HashSet<int> _paragraphStartPositions = new();
     private readonly HashSet<int> _paragraphEndPositions = new();
+    private readonly HashSet<SubtitleLineViewModel> _selectedParagraphsRenderSet = new();
     private double _fontSize = Se.Settings.Waveform.WaveformTextFontSize;
     private static readonly Cursor _cursorArrow = new Cursor(StandardCursorType.Arrow);
     private static readonly Cursor _cursorHand = new Cursor(StandardCursorType.Hand);
@@ -1528,12 +1529,17 @@ public class AudioVisualizer : Control
         var pointX = point.X;
         var startPosSeconds = StartPositionSeconds;
 
+        // Runs per pointer move for every displayable paragraph; SecondsToXPosition reads the
+        // WavePeaks/ZoomFactor StyledProperties on each call, so resolve the factor once here.
+        var xFactor = WavePeaks == null ? 0.0 : WavePeaks.SampleRate * ZoomFactor;
+        int ToX(double seconds) => (int)Math.Round(seconds * xFactor, MidpointRounding.AwayFromZero);
+
         // Check NewSelectionParagraph first as it's typically the active interaction target
         var newSelection = NewSelectionParagraph;
         if (newSelection != null)
         {
-            var left = SecondsToXPosition(newSelection.StartTime.TotalSeconds - startPosSeconds);
-            var right = SecondsToXPosition(newSelection.EndTime.TotalSeconds - startPosSeconds);
+            var left = ToX(newSelection.StartTime.TotalSeconds - startPosSeconds);
+            var right = ToX(newSelection.EndTime.TotalSeconds - startPosSeconds);
 
             if (pointX >= left - ResizeMargin && pointX <= right + ResizeMargin)
             {
@@ -1557,8 +1563,8 @@ public class AudioVisualizer : Control
         for (var i = 0; i < _displayableParagraphs.Count; i++)
         {
             var p = _displayableParagraphs[i];
-            var left = SecondsToXPosition(p.StartTime.TotalSeconds - startPosSeconds);
-            var right = SecondsToXPosition(p.EndTime.TotalSeconds - startPosSeconds);
+            var left = ToX(p.StartTime.TotalSeconds - startPosSeconds);
+            var right = ToX(p.EndTime.TotalSeconds - startPosSeconds);
 
             // Check if in middle (not near edges)
             if (pointX >= left + ResizeMargin && pointX <= right - ResizeMargin)
@@ -1595,7 +1601,7 @@ public class AudioVisualizer : Control
             {
                 // Check if previous paragraph's right edge is closer
                 var prev = _displayableParagraphs[closestEdgeIndex - 1];
-                var prevRight = SecondsToXPosition(prev.EndTime.TotalSeconds - startPosSeconds);
+                var prevRight = ToX(prev.EndTime.TotalSeconds - startPosSeconds);
                 var distToPrevRight = Math.Abs(pointX - prevRight);
 
                 if (distToPrevRight <= ResizeMargin && distToPrevRight < closestEdgeDistance)
@@ -1607,7 +1613,7 @@ public class AudioVisualizer : Control
             {
                 // Check if next paragraph's left edge is closer
                 var next = _displayableParagraphs[closestEdgeIndex + 1];
-                var nextLeft = SecondsToXPosition(next.StartTime.TotalSeconds - startPosSeconds);
+                var nextLeft = ToX(next.StartTime.TotalSeconds - startPosSeconds);
                 var distToNextLeft = Math.Abs(pointX - nextLeft);
 
                 if (distToNextLeft <= ResizeMargin && distToNextLeft < closestEdgeDistance)
@@ -1790,6 +1796,13 @@ public class AudioVisualizer : Control
     {
         if (!_timeLineTextCache.TryGetValue(text, out var formatted))
         {
+            // Same cap as the paragraph text caches - in frame mode at high zoom every
+            // distinct label is a new entry, so without a bound this grows for hours.
+            if (_timeLineTextCache.Count > 8000)
+            {
+                _timeLineTextCache.Clear();
+            }
+
             formatted = new FormattedText(
                 text,
                 CultureInfo.CurrentCulture,
@@ -1999,6 +2012,9 @@ public class AudioVisualizer : Control
 
     public MenuFlyout MenuFlyout { get; set; }
 
+    // Pooled x positions for the grid, so the per-frame collection below doesn't allocate.
+    private readonly List<double> _gridLineXPositions = new(256);
+
     private void DrawAllGridLines(DrawingContext context, ref RenderContext renderCtx)
     {
         if (!DrawGridLines)
@@ -2013,21 +2029,20 @@ public class AudioVisualizer : Control
         // grid stays square, matching the look users are familiar with from SE4.
         double stepPixels;
 
+        var xPositions = _gridLineXPositions;
+        xPositions.Clear();
+
         if (renderCtx.SampleRate == 0)
         {
             stepPixels = 10;
             for (var i = 0d; i < width; i += stepPixels)
             {
-                context.DrawLine(_paintGridLines, new Point(i, 0), new Point(i, height));
+                xPositions.Add(i);
             }
-
-            DrawHorizontalGridLines(context, width, height, stepPixels);
-            return;
         }
-
-        var fps = Se.Settings.General.CurrentFrameRate;
-        if (Se.Settings.General.UseFrameMode && fps >= 1)
+        else if (Se.Settings.General.UseFrameMode && Se.Settings.General.CurrentFrameRate >= 1)
         {
+            var fps = Se.Settings.General.CurrentFrameRate;
             var pixelsPerFrame = renderCtx.SampleRate * renderCtx.ZoomFactor / fps;
             if (pixelsPerFrame <= 0)
             {
@@ -2059,7 +2074,7 @@ public class AudioVisualizer : Control
 
                 if (xPosition >= 0)
                 {
-                    context.DrawLine(_paintGridLines, new Point(xPosition, 0), new Point(xPosition, height));
+                    xPositions.Add(xPosition);
                 }
             }
         }
@@ -2075,26 +2090,43 @@ public class AudioVisualizer : Control
 
             while (xPosition < width)
             {
-                context.DrawLine(_paintGridLines, new Point(xPosition, 0), new Point(xPosition, height));
+                xPositions.Add(xPosition);
                 seconds += interval;
                 xPosition = SecondsToXPositionOptimized(seconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
             }
         }
 
-        DrawHorizontalGridLines(context, width, height, stepPixels);
-    }
-
-    private void DrawHorizontalGridLines(DrawingContext context, double width, double height, double stepPixels)
-    {
-        if (stepPixels < 1)
+        // Batch the whole grid into one geometry - hundreds of individual DrawLine calls per
+        // frame add real scene-graph overhead at 60 fps (same approach as the timeline ticks).
+        var drawHorizontal = stepPixels >= 1;
+        if (xPositions.Count == 0 && !drawHorizontal)
         {
             return;
         }
 
-        for (var y = stepPixels; y < height; y += stepPixels)
+        var geom = new StreamGeometry();
+        using (var gctx = geom.Open())
         {
-            context.DrawLine(_paintGridLines, new Point(0, y), new Point(width, y));
+            for (var i = 0; i < xPositions.Count; i++)
+            {
+                var x = xPositions[i];
+                gctx.BeginFigure(new Point(x, 0), false);
+                gctx.LineTo(new Point(x, height));
+                gctx.EndFigure(false);
+            }
+
+            if (drawHorizontal)
+            {
+                for (var y = stepPixels; y < height; y += stepPixels)
+                {
+                    gctx.BeginFigure(new Point(0, y), false);
+                    gctx.LineTo(new Point(width, y));
+                    gctx.EndFigure(false);
+                }
+            }
         }
+
+        context.DrawGeometry(null, _paintGridLines, geom);
     }
 
     private static readonly int[] FrameStepCandidates = { 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000 };
@@ -2256,6 +2288,12 @@ public class AudioVisualizer : Control
         var invMediumMinusLow = 1.0 / (mediumThreshold - lowThreshold);
         var invHighMinusMedium = 1.0 / (highestPeak - mediumThreshold);
 
+        // StyledProperty getters go through Avalonia's value store - keep them out of the
+        // per-pixel loop below.
+        var waveformColor = WaveformColor;
+        var waveformSelectedColor = WaveformSelectedColor;
+        var waveformFancyHighColor = WaveformFancyHighColor;
+
         // Reset pooled batches for this render
         var batches = _fancyBatches;
         var keysInUse = _fancyBatchKeysInUse;
@@ -2309,7 +2347,7 @@ public class AudioVisualizer : Control
             int colorKey;
 
             // Determine base color (selected or normal)
-            var baseColor = isSelected ? WaveformSelectedColor : WaveformColor;
+            var baseColor = isSelected ? waveformSelectedColor : waveformColor;
             var baseColorKeyOffset = isSelected ? 10000 : 0; // Use different cache key range for selected
 
             // Dynamic coloring based on amplitude - quantize to reduce cache variations
@@ -2323,7 +2361,7 @@ public class AudioVisualizer : Control
             {
                 // Medium amplitude - blend from base to high color
                 var blend = (amplitude - lowThreshold) * invMediumMinusLow;
-                var highColor = WaveformFancyHighColor;
+                var highColor = waveformFancyHighColor;
                 var r = (byte)(baseColor.R + blend * (highColor.R - baseColor.R));
                 var g = (byte)(baseColor.G + blend * (highColor.G - baseColor.G));
                 var b = (byte)(baseColor.B + blend * (highColor.B - baseColor.B));
@@ -2336,7 +2374,7 @@ public class AudioVisualizer : Control
             {
                 // High amplitude - use high color with increased opacity
                 var blend = Math.Min(1.0, (amplitude - mediumThreshold) * invHighMinusMedium);
-                var highColor = WaveformFancyHighColor;
+                var highColor = waveformFancyHighColor;
                 var a = (byte)Math.Min(255, highColor.A + blend * (255 - highColor.A));
                 color = Color.FromArgb(a, highColor.R, highColor.G, highColor.B);
                 // Quantize blend to 10 steps for caching
@@ -2620,6 +2658,18 @@ public class AudioVisualizer : Control
         var startPositionMilliseconds = renderCtx.StartPositionSeconds * 1000.0;
         var endPositionMilliseconds = RelativeXPositionToSecondsOptimized(renderCtx.Width, renderCtx.SampleRate, renderCtx.StartPositionSeconds, renderCtx.ZoomFactor) * 1000.0;
 
+        // List.Contains per visible paragraph is O(selection) - with "select all" on a large
+        // subtitle that is millions of compares per frame, so probe a set instead.
+        _selectedParagraphsRenderSet.Clear();
+        var allSelected = AllSelectedParagraphs;
+        if (allSelected != null)
+        {
+            foreach (var selected in allSelected)
+            {
+                _selectedParagraphsRenderSet.Add(selected);
+            }
+        }
+
         foreach (var p in paragraphs)
         {
             if (p.EndTime.TotalMilliseconds >= startPositionMilliseconds && p.StartTime.TotalMilliseconds <= endPositionMilliseconds)
@@ -2693,7 +2743,7 @@ public class AudioVisualizer : Control
         var height = renderCtx.Height;
 
         // Draw background rectangle
-        context.FillRectangle(AllSelectedParagraphs.Contains(paragraph) ? _paintParagraphSelectedBackground : _paintParagraphBackground,
+        context.FillRectangle(_selectedParagraphsRenderSet.Contains(paragraph) ? _paintParagraphSelectedBackground : _paintParagraphBackground,
             new Rect(currentRegionLeft, 0, currentRegionWidth, height));
 
         // Draw left and right borders
@@ -2814,7 +2864,11 @@ public class AudioVisualizer : Control
 
     private void DrawShotChanges(DrawingContext context, ref RenderContext renderCtx)
     {
-        var index = 0;
+        if (_shotChanges.Count == 0)
+        {
+            return;
+        }
+
         var currentPositionPos = SecondsToXPositionOptimized(renderCtx.CurrentVideoPositionSeconds - renderCtx.StartPositionSeconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
 
         var startPositionMilliseconds = renderCtx.StartPositionSeconds * 1000.0;
@@ -2830,12 +2884,34 @@ public class AudioVisualizer : Control
             }
         }
 
-        while (index < _shotChanges.Count)
+        // The list is sorted, so binary search the first shot change at/after the visible window
+        // instead of walking all shot changes before it, and stop once past the right edge.
+        var low = 0;
+        var high = _shotChanges.Count;
+        while (low < high)
         {
-            var time = _shotChanges[index++];
+            var mid = low + (high - low) / 2;
+            if (_shotChanges[mid] < renderCtx.StartPositionSeconds)
+            {
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid;
+            }
+        }
+
+        for (var index = low; index < _shotChanges.Count; index++)
+        {
+            var time = _shotChanges[index];
             var pos = SecondsToXPositionOptimized(time - renderCtx.StartPositionSeconds, renderCtx.SampleRate, renderCtx.ZoomFactor);
 
-            if (pos > 0 && pos < renderCtx.Width)
+            if (pos >= renderCtx.Width)
+            {
+                break;
+            }
+
+            if (pos > 0)
             {
                 if (currentPositionPos == pos)
                 {
@@ -3142,28 +3218,43 @@ public class AudioVisualizer : Control
 
     internal int GetShotChangeIndex(double seconds)
     {
-        if (ShotChanges == null)
+        var shotChanges = ShotChanges;
+        if (shotChanges == null || shotChanges.Count == 0)
         {
             return -1;
         }
 
-        try
+        // The list is sorted, so binary search the insertion point and check the two neighbors
+        // (called per frame from the render loop to pick the cursor pen).
+        var low = 0;
+        var high = shotChanges.Count;
+        while (low < high)
         {
-            for (var index = 0; index < ShotChanges.Count; index++)
+            var mid = low + (high - low) / 2;
+            if (shotChanges[mid] < seconds)
             {
-                var shotChange = ShotChanges[index];
-                if (Math.Abs(shotChange - seconds) < 0.04)
-                {
-                    return index;
-                }
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid;
             }
         }
-        catch
+
+        var bestIndex = -1;
+        var bestDistance = 0.04;
+        if (low < shotChanges.Count && Math.Abs(shotChanges[low] - seconds) < bestDistance)
         {
-            // ignored
+            bestIndex = low;
+            bestDistance = Math.Abs(shotChanges[low] - seconds);
         }
 
-        return -1;
+        if (low > 0 && Math.Abs(shotChanges[low - 1] - seconds) < bestDistance)
+        {
+            bestIndex = low - 1;
+        }
+
+        return bestIndex;
     }
 
     internal void SetSpectrogram(SpectrogramData2? spectrogram)

@@ -131,7 +131,7 @@ public partial class AdjustAllTimesViewModel : ObservableObject
         await MessageBox.Show(
             Window,
             Se.Language.General.Information,
-            Se.Language.Sync.AdjustAllShortcuts,
+            GetShortcutsText(),
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
     }
@@ -190,33 +190,60 @@ public partial class AdjustAllTimesViewModel : ObservableObject
         }
         else if ((e.Key == Key.Right || e.Key == Key.FnRightArrow) && e.KeyModifiers == KeyModifiers.Shift)
         {
-            ShowLaterTimeSpan(TimeSpan.FromMilliseconds(10));
+            e.Handled = true;
+            ShowLaterTimeSpan(GetSmallStep());
         }
         else if ((e.Key == Key.Right || e.Key == Key.FnRightArrow) && e.KeyModifiers == KeyModifiers.Control)
         {
-            ShowLaterTimeSpan(TimeSpan.FromMilliseconds(100));
+            e.Handled = true;
+            ShowLaterTimeSpan(GetMediumStep());
         }
         else if ((e.Key == Key.Right || e.Key == Key.FnRightArrow) && e.KeyModifiers == KeyModifiers.Alt)
         {
-            ShowLaterTimeSpan(TimeSpan.FromMilliseconds(500));
+            e.Handled = true;
+            ShowLaterTimeSpan(GetLargeStep());
         }
         else if ((e.Key == Key.Left || e.Key == Key.FnLeftArrow) && e.KeyModifiers == KeyModifiers.Shift)
         {
-            ShowEarlierTimeSpan(TimeSpan.FromMilliseconds(10));
+            e.Handled = true;
+            ShowEarlierTimeSpan(GetSmallStep());
         }
         else if ((e.Key == Key.Left || e.Key == Key.FnLeftArrow) && e.KeyModifiers == KeyModifiers.Control)
         {
-            ShowEarlierTimeSpan(TimeSpan.FromMilliseconds(100));
+            e.Handled = true;
+            ShowEarlierTimeSpan(GetMediumStep());
         }
         else if ((e.Key == Key.Left || e.Key == Key.FnLeftArrow) && e.KeyModifiers == KeyModifiers.Alt)
         {
-            ShowEarlierTimeSpan(TimeSpan.FromMilliseconds(500));
+            e.Handled = true;
+            ShowEarlierTimeSpan(GetLargeStep());
         }
         else if (UiUtil.IsHelp(e))
         {
             e.Handled = true;
             UiUtil.ShowHelp("features/adjust-all-times");
         }
+    }
+
+    // The shortcut steps follow the time code display mode: frames when the time codes are
+    // shown as frames, plain milliseconds otherwise.
+    private static TimeSpan GetSmallStep() => Se.Settings.General.UseFrameMode ? GetFrameDuration(1) : TimeSpan.FromMilliseconds(10);
+    private static TimeSpan GetMediumStep() => Se.Settings.General.UseFrameMode ? GetFrameDuration(10) : TimeSpan.FromMilliseconds(100);
+    private static TimeSpan GetLargeStep() => Se.Settings.General.UseFrameMode ? TimeSpan.FromSeconds(1) : TimeSpan.FromMilliseconds(500);
+
+    internal static string GetShortcutsText() => Se.Settings.General.UseFrameMode
+        ? Se.Language.Sync.AdjustAllShortcutsFrames
+        : Se.Language.Sync.AdjustAllShortcuts;
+
+    private static TimeSpan GetFrameDuration(int frames)
+    {
+        var frameRate = Se.Settings.General.CurrentFrameRate;
+        if (frameRate < 10 || frameRate > 500)
+        {
+            frameRate = 25.0;
+        }
+
+        return TimeSpan.FromMilliseconds(Math.Round(frames * 1000.0 / frameRate, MidpointRounding.AwayFromZero));
     }
 
     internal void OnClosing(WindowClosingEventArgs e)

@@ -118,6 +118,7 @@ using Nikse.SubtitleEdit.Features.Tools.BridgeGaps;
 using Nikse.SubtitleEdit.Features.Tools.ChangeCasing;
 using Nikse.SubtitleEdit.Features.Tools.ChangeFormatting;
 using Nikse.SubtitleEdit.Features.Tools.ConvertActors;
+using Nikse.SubtitleEdit.Features.Tools.AiReview;
 using Nikse.SubtitleEdit.Features.Tools.FixCommonErrors;
 using Nikse.SubtitleEdit.Features.Tools.FixNetflixErrors;
 using Nikse.SubtitleEdit.Features.Tools.JoinSubtitles;
@@ -293,7 +294,6 @@ public partial class MainViewModel :
     FindViewModel? _findViewModel;
     Control? _findPreviousFocus;
     Control? _focusBeforeMainMenu;
-    bool _altMenuTogglePending;
     bool _findClosingProgrammatically;
     ReplaceViewModel? _replaceViewModel;
     Control? _replacePreviousFocus;
@@ -5279,6 +5279,30 @@ public partial class MainViewModel :
     }
 
     [RelayCommand]
+    private async Task ShowToolsAiReview()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        if (IsEmpty)
+        {
+            ShowSubtitleNotLoadedMessage();
+            return;
+        }
+
+        var idx = SelectedSubtitleIndex ?? 0;
+        var viewModel = await ShowDialogAsync<AiReviewWindow, AiReviewViewModel>(vm => { vm.Initialize(GetUpdateSubtitle(), SelectedSubtitleFormat); });
+
+        if (viewModel.OkPressed)
+        {
+            ApplyFixedSubtitle(viewModel.FixedSubtitle, idx, SelectedSubtitleFormat);
+            ShowStatus(string.Format(Se.Language.Main.FixedXLines, viewModel.FixedSubtitle.Paragraphs.Count));
+        }
+    }
+
+    [RelayCommand]
     private async Task ShowToolsFixCommonErrors()
     {
         if (Window == null)
@@ -5509,18 +5533,20 @@ public partial class MainViewModel :
 
         void ApplyToGrid(Subtitle applied)
         {
-            ReplaceSubtitles(applied.Paragraphs.Select(p => new SubtitleLineViewModel(p, SelectedSubtitleFormat)));
-            SelectAndScrollToRow(0);
-            _updateAudioVisualizer = true;
+            // Stop change detection during the rewrite so the background undo snapshotter can't
+            // race the Subtitles Clear/AddRange (matches every other bulk grid operation).
+            RunWithoutChangeDetection(() =>
+            {
+                ReplaceSubtitles(applied.Paragraphs.Select(p => new SubtitleLineViewModel(p, SelectedSubtitleFormat)));
+                SelectAndScrollToRow(0);
+                _updateAudioVisualizer = true;
+            });
         }
 
-        var result = await ShowDialogAsync<RemoveTextForHearingImpairedWindow, RemoveTextForHearingImpairedViewModel>(
+        // Menu mode uses Apply + Done: the change is applied live via the ApplyToGrid callback,
+        // so there is nothing to commit when the dialog closes.
+        await ShowDialogAsync<RemoveTextForHearingImpairedWindow, RemoveTextForHearingImpairedViewModel>(
             vm => { vm.Initialize(GetUpdateSubtitle(), ApplyToGrid); });
-
-        if (result.OkPressed)
-        {
-            ApplyToGrid(result.FixedSubtitle);
-        }
     }
 
     [RelayCommand]
@@ -7476,7 +7502,8 @@ public partial class MainViewModel :
             .ToList();
 
         // The dialog applies the change itself (idempotently, from a snapshot taken when it
-        // opened), so we must not re-apply here - doing so compounded the factor (Apply + OK).
+        // opened) via Apply, so we must not re-apply here. Done just signals via OkPressed
+        // that timings may have changed so the audio visualizer can refresh.
         var result = await ShowDialogAsync<ChangeSpeedWindow, ChangeSpeedViewModel>(vm => { vm.Initialize(Subtitles, selectedIndices); });
         if (result.OkPressed)
         {
@@ -8047,35 +8074,41 @@ public partial class MainViewModel :
             return;
         }
 
-        var result = await ShowDialogAsync<RemoveTextForHearingImpairedWindow, RemoveTextForHearingImpairedViewModel>(vm =>
+        // Apply + Done, like the whole-file menu path: each Apply replaces the current block in the
+        // grid. Track the block by id so repeated passes replace what the previous pass produced -
+        // the removal can drop emptied lines, so the block is not 1:1 with the selection, and the
+        // first pass also collapses a possibly non-contiguous selection into one contiguous block.
+        var blockIds = ordered.Select(s => s.Id).ToHashSet();
+
+        void ApplyToGrid(Subtitle applied)
         {
-            var sub = new Subtitle();
-            foreach (var line in ordered)
+            // Stop change detection during the rewrite so the background undo snapshotter can't race
+            // the Subtitles Clear/AddRange (matches every other bulk grid operation).
+            RunWithoutChangeDetection(() =>
             {
-                sub.Paragraphs.Add(line.ToParagraph(SelectedSubtitleFormat));
-            }
+                var anchor = Subtitles.FirstOrDefault(s => blockIds.Contains(s.Id));
+                var firstIndex = anchor != null ? Subtitles.IndexOf(anchor) : Subtitles.Count;
+                var kept = Subtitles.Where(s => !blockIds.Contains(s.Id)).ToList();
+                var insertPos = Math.Min(firstIndex, kept.Count);
+                var newLines = applied.Paragraphs.Select(p => new SubtitleLineViewModel(p, SelectedSubtitleFormat)).ToList();
+                kept.InsertRange(insertPos, newLines);
 
-            vm.Initialize(sub);
-        });
-
-        if (!result.OkPressed)
-        {
-            _shortcutManager.ClearKeys();
-            return;
+                ReplaceSubtitles(kept);
+                Renumber();
+                SelectAndScrollToRow(insertPos);
+                blockIds = newLines.Select(s => s.Id).ToHashSet();
+                _updateAudioVisualizer = true;
+            });
         }
 
-        // The HI removal can drop lines that become empty, so the result is not 1:1 with the
-        // selection - replace the selected block with the fixed lines (inserted where it started).
-        var selectedIds = ordered.Select(s => s.Id).ToHashSet();
-        var firstIndex = Subtitles.IndexOf(ordered[0]);
-        var kept = Subtitles.Where(s => !selectedIds.Contains(s.Id)).ToList();
-        var insertPos = Math.Min(firstIndex, kept.Count);
-        kept.InsertRange(insertPos, result.FixedSubtitle.Paragraphs.Select(p => new SubtitleLineViewModel(p, SelectedSubtitleFormat)));
+        var sub = new Subtitle();
+        foreach (var line in ordered)
+        {
+            sub.Paragraphs.Add(line.ToParagraph(SelectedSubtitleFormat));
+        }
 
-        ReplaceSubtitles(kept);
-        Renumber();
-        SelectAndScrollToRow(insertPos);
-        _updateAudioVisualizer = true;
+        await ShowDialogAsync<RemoveTextForHearingImpairedWindow, RemoveTextForHearingImpairedViewModel>(
+            vm => { vm.Initialize(sub, ApplyToGrid); });
     }
 
     [RelayCommand]
@@ -16288,6 +16321,14 @@ public partial class MainViewModel :
     // 14-byte invalid file produced when these formats went through the text save path (#11910).
     private async Task<bool> SaveBinarySubtitle(IBinaryPersistableSubtitle binaryFormat, bool isAutoSave)
     {
+        // This is the save-to-existing-file path; without a file name there is nothing to write
+        // to (callers route to Save As first). The local also proves non-null to the compiler.
+        var fileName = _subtitleFileName;
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return false;
+        }
+
         try
         {
             // EBU STL needs a UI helper to resolve its header; reuse the same one as File > Export.
@@ -16297,17 +16338,17 @@ public partial class MainViewModel :
             }
 
             using var ms = new MemoryStream();
-            if (!binaryFormat.Save(_subtitleFileName, ms, GetUpdateSubtitle(true), batchMode: true))
+            if (!binaryFormat.Save(fileName, ms, GetUpdateSubtitle(true), batchMode: true))
             {
                 if (!isAutoSave)
                 {
-                    ShowStatus(string.Format(Se.Language.General.CouldNotSaveFileXErrorY, _subtitleFileName, string.Empty));
+                    ShowStatus(string.Format(Se.Language.General.CouldNotSaveFileXErrorY, fileName, string.Empty));
                 }
 
                 return false;
             }
 
-            await File.WriteAllBytesAsync(_subtitleFileName, ms.ToArray());
+            await File.WriteAllBytesAsync(fileName, ms.ToArray());
         }
         catch (Exception ex)
         {
@@ -17747,7 +17788,7 @@ public partial class MainViewModel :
     public int GetFastHashOriginal()
     {
         _subtitleOriginal ??= new Subtitle();
-        var pre = _subtitleOriginal + SelectedEncoding.DisplayName;
+        var pre = _subtitleFileNameOriginal + SelectedEncoding.DisplayName;
 
         unchecked
         {
@@ -18711,9 +18752,10 @@ public partial class MainViewModel :
     }
 
     /// <summary>
-    /// Activates the main menu bar for keyboard navigation (Windows standard Alt/F10), remembering
-    /// the control that had focus so it can be restored on deactivation. Returns false on platforms
-    /// with a native menu (macOS), where the in-window <see cref="Menu"/> has no items (#11745).
+    /// Activates the main menu bar for keyboard navigation (Windows standard F10; bare Alt is handled
+    /// by Avalonia's built-in AccessKeyHandler), remembering the control that had focus so it can be
+    /// restored on deactivation. Returns false on platforms with a native menu (macOS), where the
+    /// in-window <see cref="Menu"/> has no items (#11745).
     /// </summary>
     private bool ActivateMainMenu()
     {
@@ -18724,11 +18766,10 @@ public partial class MainViewModel :
 
         _focusBeforeMainMenu = Window?.FocusManager?.GetFocusedElement() as Control;
 
-        // Defer focusing the menu bar: when this runs from a key handler (bare Alt key-up, F10),
-        // Avalonia's own access-key handler also processes the same key and resets focus afterwards,
-        // which undid a synchronous focus here - so bare Alt showed the access-key underlines but
-        // never actually activated the bar. Let the current key event finish first, mirroring the
-        // deferred focus restore in DeactivateMainMenu (#11745).
+        // Defer focusing the menu bar: moving focus from inside the key handler is racy (Avalonia's
+        // access-key handling may still process the same key afterwards and reset focus). Let the
+        // current key event finish first, mirroring the deferred focus restore in DeactivateMainMenu
+        // (#11745).
         Dispatcher.UIThread.Post(() => TryFocusMainMenu());
         return true;
     }
@@ -18741,7 +18782,6 @@ public partial class MainViewModel :
     private void DeactivateMainMenu()
     {
         Menu?.Close();
-        _altMenuTogglePending = false;
 
         var restore = _focusBeforeMainMenu;
         _focusBeforeMainMenu = null;
@@ -18760,13 +18800,10 @@ public partial class MainViewModel :
     }
 
     /// <summary>
-    /// A task switch (e.g. Alt+Tab) must not leave a pending bare-Alt menu toggle armed; otherwise the
-    /// next Alt release after returning to the window would spuriously activate the menu bar (#11745).
+    /// Cleans up keyboard state that a task switch (e.g. Alt+Tab) would otherwise leave behind (#11745).
     /// </summary>
     internal void OnWindowDeactivated(object? sender, EventArgs e)
     {
-        _altMenuTogglePending = false;
-
         // Drop any held-key state when focus leaves the window. A modal dialog (e.g. the
         // "Save changes?" prompt that Ctrl+O raises on a changed file) steals focus, so the KeyUp
         // for the held keys never reaches the main window and they stay "stuck down". That left
@@ -18895,7 +18932,17 @@ public partial class MainViewModel :
         // While extending a selection, navigate from the moving end we tracked ourselves. AvaloniaEdit
         // relocates the caret of a programmatic selection back to its anchor between key presses, so
         // box.CaretIndex would otherwise recompute the same word every time and the selection wouldn't grow.
-        var continuingSelection = shift && _rtlSelectionAnchor >= 0 && box.SelectionLength > 0;
+        // But only trust the tracked ends if they still describe the box's current selection: a mouse drag
+        // or a native Shift+Home/End changes the selection without going through this handler, which would
+        // otherwise leave the tracked fields stale and make us extend from the wrong place.
+        var selectionStart = box.SelectionStart;
+        var selectionEnd = box.SelectionEnd;
+        var hasSelection = box.SelectionLength > 0;
+        var trackedMatchesSelection = _rtlSelectionAnchor >= 0 && _rtlSelectionCaret >= 0 && hasSelection
+            && Math.Min(selectionStart, selectionEnd) == Math.Min(_rtlSelectionAnchor, _rtlSelectionCaret)
+            && Math.Max(selectionStart, selectionEnd) == Math.Max(_rtlSelectionAnchor, _rtlSelectionCaret);
+
+        var continuingSelection = shift && trackedMatchesSelection;
         var from = Math.Clamp(continuingSelection ? _rtlSelectionCaret : box.CaretIndex, 0, text.Length);
 
         if (!IsRightToLeftAtCaret(text, from))
@@ -18919,7 +18966,25 @@ public partial class MainViewModel :
 
         if (shift)
         {
-            var anchor = Math.Clamp(continuingSelection ? _rtlSelectionAnchor : from, 0, text.Length);
+            int anchor;
+            if (continuingSelection)
+            {
+                anchor = _rtlSelectionAnchor;
+            }
+            else if (hasSelection)
+            {
+                // Adopt an existing selection made outside this handler (e.g. by mouse): the caret is the
+                // moving end, so the opposite end of the selection is the fixed anchor to extend from.
+                anchor = box.CaretIndex == Math.Max(selectionStart, selectionEnd)
+                    ? Math.Min(selectionStart, selectionEnd)
+                    : Math.Max(selectionStart, selectionEnd);
+            }
+            else
+            {
+                anchor = from;
+            }
+
+            anchor = Math.Clamp(anchor, 0, text.Length);
             box.Select(Math.Min(anchor, target), Math.Abs(target - anchor));
             _rtlSelectionAnchor = anchor;
             _rtlSelectionCaret = target; // remember the moving end ourselves
@@ -19029,12 +19094,19 @@ public partial class MainViewModel :
 
             _lastKeyPressedMs = ms;
 
-            // Arm a "bare Alt" toggle so its release can activate/deactivate the menu bar (Windows
-            // standard). This must run before the early-returns below so that any other key in an Alt
-            // chord (e.g. Space in Alt+Space, which opens the window system menu and returns early)
-            // clears it; the modifier check rejects AltGr (Ctrl+Alt) on international keyboards. The
-            // toggle itself happens on key-up (OnKeyUpHandler) (#11745).
-            _altMenuTogglePending = (k is Key.LeftAlt or Key.RightAlt) && keyEventArgs.KeyModifiers == KeyModifiers.Alt;
+            // Bare Alt activating/deactivating the menu bar is owned by Avalonia's built-in
+            // AccessKeyHandler: it opens the menu on Alt release and closes it again (restoring
+            // focus) when Alt is pressed while the menu is open. SE used to run its own bare-Alt
+            // toggle on key-up as well; whenever a control inside the window had keyboard focus -
+            // the normal state, and the one a screen reader always keeps the window in - both
+            // toggles fired and cancelled each other out, so Alt appeared dead (#12087). Only
+            // remember the focused control here, so an Escape deactivation after a built-in Alt
+            // activation can restore it (the built-in handler keeps its own copy private).
+            if (k is Key.LeftAlt or Key.RightAlt && keyEventArgs.KeyModifiers == KeyModifiers.Alt &&
+                Menu is not { IsOpen: true } && !IsMainMenuFocused())
+            {
+                _focusBeforeMainMenu = Window?.FocusManager?.GetFocusedElement() as Control;
+            }
 
             if (UiUtil.TryHandleWindowSystemMenu(keyEventArgs, Window))
             {
@@ -19075,16 +19147,19 @@ public partial class MainViewModel :
             // When the main menu has keyboard focus (opened via F10 or Alt), let it own its arrow/Enter
             // navigation instead of consuming those keys as shortcuts. The window key handler tunnels
             // (runs before the focused menu item), so without this the shortcut manager would eat
-            // Left/Right etc. Escape is handled here so that, once no drop-down is open, it fully
-            // deactivates the bar and restores focus instead of leaving it half-focused (#11745).
-            // Escape leaves the menu bar in two deterministic steps (Windows standard): if a drop-down
-            // is open, the first Escape closes it but keeps the bar active; the next Escape (nothing
-            // open) fully deactivates and restores focus. We also gate on Menu.IsOpen, because focus can
-            // briefly leave the menu right after a drop-down closes - relying on focus alone previously
-            // needed a third Escape to leave the bar (#11745 beta-2 feedback).
+            // Left/Right etc. Escape is handled here so that it fully deactivates the bar and restores
+            // focus instead of leaving it half-focused (#11745). Escape leaves the menu bar in two
+            // deterministic steps (Windows standard): if a drop-down is open, the first Escape closes
+            // it but keeps the bar active; the next Escape fully deactivates and restores focus. The
+            // drop-down check must look at the top-level items, not Menu.IsOpen: the built-in bare-Alt
+            // activation sets IsOpen with no drop-down showing, and treating that as "drop-down open"
+            // would demand an extra Escape to leave an Alt-activated bar (#12087). We still gate the
+            // whole branch on Menu.IsOpen too, because focus can briefly leave the menu right after a
+            // drop-down closes - relying on focus alone previously needed a third Escape to leave the
+            // bar (#11745 beta-2 feedback).
             if (k == Key.Escape && keyEventArgs.KeyModifiers == KeyModifiers.None && (IsMainMenuFocused() || Menu.IsOpen))
             {
-                if (Menu.IsOpen)
+                if (Menu.Items.OfType<MenuItem>().Any(mi => mi.IsSubMenuOpen))
                 {
                     Menu.Close();
                     TryFocusMainMenu(); // keep the bar focused so the next Escape deactivates it
@@ -19318,23 +19393,6 @@ public partial class MainViewModel :
 
     public void OnKeyUpHandler(object? sender, KeyEventArgs e)
     {
-        // A bare Alt press+release toggles the main menu bar (Windows standard). _altMenuTogglePending
-        // is cleared if any other key was pressed while Alt was held, or on a window task switch, so
-        // this fires only for Alt-alone (#11745).
-        if (e.Key is Key.LeftAlt or Key.RightAlt && _altMenuTogglePending)
-        {
-            _altMenuTogglePending = false;
-            if (IsMainMenuFocused())
-            {
-                DeactivateMainMenu();
-                e.Handled = true;
-            }
-            else if (ActivateMainMenu())
-            {
-                e.Handled = true;
-            }
-        }
-
         if (_setEndAtKeyUpLine != null)
         {
             _setEndAtKeyUpLine = null;
@@ -20348,6 +20406,11 @@ public partial class MainViewModel :
                             for (var i = 0; i < subtitle.Count; i++)
                             {
                                 var p = subtitle[i];
+                                if (p.StartTime.TotalSeconds > mediaPlayerSeconds)
+                                {
+                                    break; // sorted by start time, no later line can contain the position
+                                }
+
                                 if (mediaPlayerSeconds >= p.StartTime.TotalSeconds &&
                                     mediaPlayerSeconds <= p.EndTime.TotalSeconds)
                                 {

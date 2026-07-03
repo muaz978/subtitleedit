@@ -285,7 +285,18 @@ public class VoxCPM2CrispAsr : ITtsEngine
                     var sidecarDest = Path.ChangeExtension(dest, ".txt");
                     if (!File.Exists(sidecarDest))
                     {
-                        try { File.Copy(sidecar, sidecarDest); } catch { }
+                        // The qwen3-tts.cpp voice pack's .txt sidecars are Wikimedia attribution
+                        // blurbs, not spoken transcriptions - used as ref-text they produce
+                        // runaway, off-voice output, and being non-empty they also defeat the
+                        // missing-transcription prompt. Same filter Qwen3 (CrispASR) applies.
+                        try
+                        {
+                            if (!Qwen3TtsCrispAsr.LooksLikeAttributionBlurb(File.ReadAllText(sidecar)))
+                            {
+                                File.Copy(sidecar, sidecarDest);
+                            }
+                        }
+                        catch { }
                     }
                 }
             }
@@ -498,7 +509,16 @@ public class VoxCPM2CrispAsr : ITtsEngine
         try
         {
             var sidecar = Path.ChangeExtension(wavPath, ".txt");
-            return File.Exists(sidecar) ? File.ReadAllText(sidecar).Trim() : string.Empty;
+            if (!File.Exists(sidecar))
+            {
+                return string.Empty;
+            }
+
+            // Sidecars written by pre-filter seeding can be Wikimedia attribution blurbs, not
+            // transcriptions - treat them as "no transcript" (same read-time filter Qwen3
+            // CrispASR applies) so they neither poison ref-text nor suppress the prompt.
+            var text = File.ReadAllText(sidecar).Trim();
+            return Qwen3TtsCrispAsr.LooksLikeAttributionBlurb(text) ? string.Empty : text;
         }
         catch
         {

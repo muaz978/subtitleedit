@@ -73,6 +73,14 @@ public partial class TextToSpeechViewModel : ObservableObject
     [ObservableProperty] private bool _hasModel;
     [ObservableProperty] private int _voiceCount;
     [ObservableProperty] private string _voiceCountInfo;
+    [ObservableProperty] private bool _isVoiceCountVisible;
+    [ObservableProperty] private string _linesInfo = string.Empty;
+    [ObservableProperty] private bool _hasVideoFile;
+    [ObservableProperty] private string _videoInfo = string.Empty;
+    [ObservableProperty] private string _engineDescription = string.Empty;
+    [ObservableProperty] private bool _hasEngineDescription;
+    [ObservableProperty] private string _progressPercentText = string.Empty;
+    [ObservableProperty] private string _progressEtaText = string.Empty;
     [ObservableProperty] private bool _isVoiceTestEnabled;
     [ObservableProperty] private bool _isVoiceComboEnabled;
     [ObservableProperty] private bool _doReviewAudioClips;
@@ -350,6 +358,9 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             Se.Settings.Video.TextToSpeech.ElevenLabsApiKey = ApiKey;
             Se.Settings.Video.TextToSpeech.ElevenLabsModel = SelectedModel ?? string.Empty;
+            // Read back by name on model change (this file + ReviewSpeechViewModel) but was never
+            // written anywhere, so the language choice silently reset to English every time.
+            Se.Settings.Video.TextToSpeech.ElevenLabsLanguage = SelectedLanguage?.Name ?? string.Empty;
         }
         else if (SelectedEngine is MistralSpeech)
         {
@@ -654,7 +665,15 @@ public partial class TextToSpeechViewModel : ObservableObject
         try
         {
             var sidecar = Path.ChangeExtension(wavPath, ".txt");
-            return File.Exists(sidecar) ? File.ReadAllText(sidecar).Trim() : null;
+            if (!File.Exists(sidecar))
+            {
+                return null;
+            }
+
+            // An attribution-blurb sidecar (pre-filter seeding) is not a transcript - report it
+            // as missing so the transcript prompt still fires instead of being suppressed.
+            var text = File.ReadAllText(sidecar).Trim();
+            return Qwen3TtsCrispAsr.LooksLikeAttributionBlurb(text) ? null : text;
         }
         catch
         {
@@ -777,6 +796,18 @@ public partial class TextToSpeechViewModel : ObservableObject
 
         _videoFileName = videoFileName;
         _wavePeakData = wavePeakData;
+
+        // Context line under the title: what is about to be spoken, and whether a video is
+        // loaded (the add-to-video option depends on it).
+        var subtitleName = Path.GetFileName(subtitle.FileName ?? string.Empty);
+        LinesInfo = string.IsNullOrEmpty(subtitleName)
+            ? string.Format(Se.Language.Video.TextToSpeech.XLines, subtitle.Paragraphs.Count)
+            : string.Format(Se.Language.Video.TextToSpeech.XLinesFromY, subtitle.Paragraphs.Count, subtitleName);
+        HasVideoFile = !string.IsNullOrEmpty(videoFileName);
+        VideoInfo = HasVideoFile
+            ? string.Format(Se.Language.Video.TextToSpeech.VideoX, CapFileName(Path.GetFileName(videoFileName), 40))
+            : string.Empty;
+
         _cancellationTokenSource = new CancellationTokenSource();
         _cancellationToken = _cancellationTokenSource.Token;
         IsGenerating = false;
@@ -998,7 +1029,20 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
 
         var voice = SelectedVoice;
-        if (voice != null && !await TtsVoiceInstaller.EnsureVoiceInstalled(engine, voice, Window, _windowService))
+        if (voice == null)
+        {
+            // A failed engine switch (network blip, missing API key) legitimately leaves the
+            // voice list empty now - without this, Generate ended instantly with no message.
+            await MessageBox.Show(
+                Window!,
+                Se.Language.General.Error,
+                "No voices are loaded for the selected engine - check the engine settings (e.g. API key) and re-select the engine to reload its voices.",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return;
+        }
+
+        if (!await TtsVoiceInstaller.EnsureVoiceInstalled(engine, voice, Window, _windowService))
         {
             return;
         }
@@ -1016,6 +1060,9 @@ public partial class TextToSpeechViewModel : ObservableObject
         _cancellationToken = _cancellationTokenSource.Token;
         ProgressValue = 0;
         ProgressText = string.Empty;
+        ProgressPercentText = string.Empty;
+        ProgressEtaText = string.Empty;
+        _generateStopwatch.Restart();
         IsGenerating = true;
         IsNotGenerating = false;
         ProgressOpacity = 1.0;
@@ -1032,56 +1079,96 @@ public partial class TextToSpeechViewModel : ObservableObject
             $", reviewAudioClips={DoReviewAudioClips}" +
             $", generateVideoFile={DoGenerateVideoFile}");
 
-        // Generate
-        var generateSpeechResult = await GenerateSpeech(_cancellationToken);
-        if (generateSpeechResult == null)
+        // The speed/merge stages shell out to ffmpeg, so record which build actually runs - a too
+        // old or missing ffmpeg is a common cause of "stuck"/failed generation in bug reports
+        // (#12093). Gated on the setting so the version probe only runs when logging is on.
+        if (Se.Settings.Tools.WriteToolsLog)
         {
-            DoneOrCancelText = Se.Language.General.Done;
-            IsGenerating = false;
-            IsNotGenerating = true;
-            ProgressOpacity = 0;
-            return;
+            var ffmpegPath = string.IsNullOrEmpty(Se.Settings.General.FfmpegPath) ? "ffmpeg" : Se.Settings.General.FfmpegPath;
+            var banner = FfmpegHelper.GetVersionBanner(ffmpegPath);
+            Se.WriteToolsLog($"Text-to-speech: ffmpeg=\"{ffmpegPath}\" - {(string.IsNullOrEmpty(banner) ? "version probe failed (ffmpeg missing or not runnable?)" : banner)}");
         }
 
-        // Fix speed
-        var fixSpeedResult = await FixSpeed(generateSpeechResult, _cancellationToken);
-        if (fixSpeedResult == null)
+        // Every step below reports expected failures by returning null (after logging/showing the
+        // error itself). This catch is the safety net for everything unexpected: without it, an
+        // exception escaping the async command was swallowed and the window stayed disabled on the
+        // last progress text forever - the "stuck on Adjusting speed" state in #12093.
+        try
         {
-            DoneOrCancelText = Se.Language.General.Done;
-            IsGenerating = false;
-            IsNotGenerating = true;
-            ProgressOpacity = 0;
-            return;
-        }
-
-        // Post-processing (pro audio chain, silence padding, sample rate)
-        var postProcessResult = await ApplyPostProcessing(fixSpeedResult, _cancellationToken);
-        if (postProcessResult == null)
-        {
-            DoneOrCancelText = Se.Language.General.Done;
-            IsGenerating = false;
-            IsNotGenerating = true;
-            ProgressOpacity = 0;
-            return;
-        }
-
-        // Review audio clips
-        if (DoReviewAudioClips)
-        {
-            var reviewAudioClipsResult = await ReviewAudioClips(postProcessResult);
-            if (reviewAudioClipsResult == null)
+            // Generate
+            var generateSpeechResult = await GenerateSpeech(_cancellationToken);
+            if (generateSpeechResult == null)
             {
-                DoneOrCancelText = Se.Language.General.Done;
-                IsGenerating = false;
-                IsNotGenerating = true;
-                ProgressOpacity = 0;
+                ResetGeneratingUiState();
                 return;
             }
 
-            postProcessResult = reviewAudioClipsResult;
-        }
+            // Fix speed
+            var fixSpeedResult = await FixSpeed(generateSpeechResult, _cancellationToken);
+            if (fixSpeedResult == null)
+            {
+                ResetGeneratingUiState();
+                return;
+            }
 
-        await MergeAndAddToVideo(postProcessResult);
+            // Post-processing (pro audio chain, silence padding, sample rate)
+            var postProcessResult = await ApplyPostProcessing(fixSpeedResult, _cancellationToken);
+            if (postProcessResult == null)
+            {
+                ResetGeneratingUiState();
+                return;
+            }
+
+            // Review audio clips
+            if (DoReviewAudioClips)
+            {
+                var reviewAudioClipsResult = await ReviewAudioClips(postProcessResult);
+                if (reviewAudioClipsResult == null)
+                {
+                    ResetGeneratingUiState();
+                    return;
+                }
+
+                postProcessResult = reviewAudioClipsResult;
+            }
+
+            await MergeAndAddToVideo(postProcessResult);
+        }
+        catch (OperationCanceledException)
+        {
+            ResetGeneratingUiState();
+        }
+        catch (Exception ex)
+        {
+            SeLogger.Error(ex, "Text-to-speech: generation failed unexpectedly");
+            Se.WriteToolsLog("Text-to-speech failed unexpectedly: " + ex, true);
+            ResetGeneratingUiState();
+
+            if (Window != null)
+            {
+                await MessageBox.Show(
+                    Window,
+                    Se.Language.General.Error,
+                    "Text to speech failed: " + ex.Message + Environment.NewLine + Environment.NewLine +
+                    "See error-log.txt in the Subtitle Edit data folder for details.",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns the window from "generating" (buttons disabled, progress showing) to its idle state.
+    /// </summary>
+    private void ResetGeneratingUiState()
+    {
+        _generateStopwatch.Stop();
+        ProgressPercentText = string.Empty;
+        ProgressEtaText = string.Empty;
+        DoneOrCancelText = Se.Language.General.Done;
+        IsGenerating = false;
+        IsNotGenerating = true;
+        ProgressOpacity = 0;
     }
 
     [RelayCommand]
@@ -1232,26 +1319,7 @@ public partial class TextToSpeechViewModel : ObservableObject
     // keys read like "Q8_0 (~2.8 GB)").
     public string GetModelDownloadSizeText(ITtsEngine? engine, string? modelKey)
     {
-        if (engine == null || string.IsNullOrEmpty(modelKey))
-        {
-            return string.Empty;
-        }
-
-        return engine switch
-        {
-            Qwen3TtsCpp => Qwen3TtsCpp.ResolveModelKey(modelKey) switch
-            {
-                Qwen3TtsCpp.ModelKey17BBase => "~2.7 GB",
-                Qwen3TtsCpp.ModelKey17BVoiceDesign => "~2.8 GB",
-                _ => "~1.6 GB",
-            },
-            // Both keys ship the same ~358 MB 12 Hz codec; the talker is ~2 GB regardless.
-            Qwen3TtsCrispAsr => "~2.4 GB",
-            ChatterboxTtsCpp => ChatterboxTtsCpp.ResolveModelKey(modelKey) == ChatterboxTtsCpp.ModelKeyTurbo
-                ? "~1 GB"
-                : "~990 MB",
-            _ => string.Empty,
-        };
+        return TtsEngineInstaller.GetModelDownloadSizeText(engine, modelKey);
     }
 
     // Display text for a model combo entry: the model key plus its approximate download size when
@@ -1309,8 +1377,10 @@ public partial class TextToSpeechViewModel : ObservableObject
     {
         var engine = SelectedEngine;
         var voice = SelectedVoice;
-        if (engine == null || voice == null || Window == null)
+        if (engine == null || voice == null || Window == null || IsGenerating)
         {
+            // IsGenerating guard: the button's IsVoiceTestEnabled binding is timer-driven (mpv
+            // idle) and stays true during a generate run, so this can be clicked mid-pipeline.
             return;
         }
 
@@ -1342,12 +1412,15 @@ public partial class TextToSpeechViewModel : ObservableObject
         text = Utilities.UnbreakLine(text);
 
         var generatingAudioVm = _windowService.ShowWindow<GeneratingAudioWindow, GeneratingAudioViewModel>(Window!);
-        _cancellationTokenSource = generatingAudioVm.CancellationTokenSource;
-        _cancellationToken = _cancellationTokenSource.Token;
+        // A local token only: assigning the popup's CTS into the shared _cancellationTokenSource/
+        // _cancellationToken fields hijacked a running generate pipeline (the pipeline re-reads
+        // the fields per stage) - the popup's Cancel then aborted the whole run, and the main
+        // Cancel button cancelled the popup instead of the generation.
+        var testVoiceToken = generatingAudioVm.CancellationTokenSource.Token;
         try
         {
-            var result = await engine.Speak(text, _waveFolder, voice, SelectedLanguage, SelectedRegion, SelectedModel, _cancellationToken);
-            if (!_cancellationToken.IsCancellationRequested)
+            var result = await engine.Speak(text, _waveFolder, voice, SelectedLanguage, SelectedRegion, SelectedModel, testVoiceToken);
+            if (!testVoiceToken.IsCancellationRequested)
             {
                 if (!File.Exists(result.FileName))
                 {
@@ -1414,13 +1487,39 @@ public partial class TextToSpeechViewModel : ObservableObject
 
     private async Task RefreshVoices(ITtsEngine engine)
     {
-        var voices = await engine.RefreshVoices(string.Empty, CancellationToken.None);
+        Voice[] voices;
+        try
+        {
+            voices = await engine.RefreshVoices(string.Empty, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // The voice-list downloads throw on HTTP failure (so an error body cannot overwrite
+            // the cached list). Keep the current voices and tell the user instead of crashing
+            // whichever command triggered the refresh.
+            SeLogger.Error(ex, $"Refreshing voices for {engine.Name} failed - keeping the cached voice list");
+            if (Window != null)
+            {
+                await MessageBox.Show(
+                    Window,
+                    Se.Language.General.Error,
+                    $"Refreshing voices failed: {ex.Message}",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            return;
+        }
+
         Voices.Clear();
         foreach (var voice in voices)
         {
             Voices.Add(voice);
         }
         SelectedVoice = Voices.FirstOrDefault(v => v.Name == Se.Settings.Video.TextToSpeech.Voice) ?? Voices.FirstOrDefault();
+        VoiceCount = Voices.Count;
+        VoiceCountInfo = string.Format(Se.Language.Video.TextToSpeech.XVoices, Voices.Count);
+        IsVoiceCountVisible = Voices.Count > 0;
     }
 
     [RelayCommand]
@@ -1449,7 +1548,10 @@ public partial class TextToSpeechViewModel : ObservableObject
         _cancellationTokenSource = new CancellationTokenSource();
         _cancellationToken = _cancellationTokenSource.Token;
 
-        var fileName = await _fileHelper.PickOpenFile(Window, "Open SubtitleEditTts.json file", "TTS json files", "SubtitleEditTts.json");
+        // The pattern must start with '*' as-is: passing "SubtitleEditTts.json" would get a "*."
+        // prefix from PickOpenFile, and that pattern cannot match the exported file itself (Export
+        // writes exactly "SubtitleEditTts.json"), hiding it in SE's own open dialog (#12093).
+        var fileName = await _fileHelper.PickOpenFile(Window, "Open SubtitleEditTts.json file", "TTS json files", "*SubtitleEditTts.json");
         if (string.IsNullOrEmpty(fileName))
         {
             return;
@@ -1504,6 +1606,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
 
         var stepResults = new List<TtsStepResult>();
+        var jsonFolder = Path.GetDirectoryName(fileName) ?? string.Empty;
         for (var index = 0; index < importExport.Items.Count; index++)
         {
             var item = importExport.Items[index];
@@ -1518,7 +1621,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             stepResults.Add(new TtsStepResult
             {
                 Text = item.Text,
-                CurrentFileName = item.AudioFileName,
+                CurrentFileName = ResolveImportedAudioFileName(item.AudioFileName, jsonFolder),
                 Paragraph = paragraph,
                 SpeedFactor = item.SpeedFactor <= 0 ? 1.0f : item.SpeedFactor,
                 Voice = voice,
@@ -1528,6 +1631,7 @@ public partial class TextToSpeechViewModel : ObservableObject
                 EngineName = item.EngineName ?? string.Empty,
                 Model = item.Model ?? string.Empty,
                 Instruction = item.Instruction ?? string.Empty,
+                Include = item.Include,
             });
         }
 
@@ -1539,6 +1643,21 @@ public partial class TextToSpeechViewModel : ObservableObject
         if (string.IsNullOrEmpty(_videoFileName) && !string.IsNullOrEmpty(videoFileNameForReview))
         {
             _videoFileName = videoFileNameForReview;
+        }
+
+        // The review window needs at least one engine to offer regeneration; an empty global
+        // voice list is fine (each imported line resolved its own engine's voices above, and
+        // the review window guards regenerate on a missing voice) - blocking on it rejected
+        // perfectly reviewable sessions whenever the *selected* engine's voice load failed.
+        if (Engines.Count == 0)
+        {
+            await MessageBox.Show(
+                Window,
+                Se.Language.General.Error,
+                "No usable TTS engines are available - check the engine settings and try again.",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return;
         }
 
         // Try to populate _wavePeakData synchronously from the on-disk cache (fast, no ffmpeg).
@@ -1553,7 +1672,7 @@ public partial class TextToSpeechViewModel : ObservableObject
                 Engines.ToArray(),
                 SelectedEngine ?? Engines.First(),
                 Voices.ToArray(),
-                SelectedVoice ?? Voices.First(),
+                SelectedVoice ?? Voices.FirstOrDefault(),
                 Languages.ToArray(),
                 SelectedLanguage,
                 videoFileNameForReview,
@@ -1568,6 +1687,72 @@ public partial class TextToSpeechViewModel : ObservableObject
                 _ = GenerateWavePeaksIfNeededAsync(videoFileNameForReview, vm);
             }
         });
+
+        // OK means "publish": run the same merge/add-to-video tail as the generate pipeline.
+        // This result used to be discarded, so OK after an import behaved exactly like Cancel -
+        // no merged wav, no dialog, nothing (#12093).
+        if (result.OkPressed)
+        {
+            try
+            {
+                await MergeAndAddToVideo(result.StepResults);
+            }
+            catch (OperationCanceledException)
+            {
+                ResetGeneratingUiState();
+            }
+            catch (Exception ex)
+            {
+                SeLogger.Error(ex, "Text-to-speech: merging imported audio segments failed");
+                Se.WriteToolsLog("Text-to-speech: merging imported audio segments failed: " + ex, true);
+                ResetGeneratingUiState();
+
+                await MessageBox.Show(
+                    Window,
+                    Se.Language.General.Error,
+                    "Merging the audio segments failed: " + ex.Message + Environment.NewLine + Environment.NewLine +
+                    "See error-log.txt in the Subtitle Edit data folder for details.",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves an imported item's audio file. New exports store just the file name (resolved
+    /// against the JSON's own folder, so the export folder can be moved or shared); older exports
+    /// stored absolute paths - honored when they still exist, otherwise the same name is tried
+    /// next to the JSON.
+    /// </summary>
+    private static string ResolveImportedAudioFileName(string? audioFileName, string jsonFolder)
+    {
+        if (string.IsNullOrEmpty(audioFileName))
+        {
+            return string.Empty;
+        }
+
+        // A Windows path is not recognized as rooted on Unix ("C:\...", "\\server\share\...",
+        // "\folder\..."), so Path.IsPathRooted alone let legacy Windows exports opened on
+        // macOS/Linux fall through to a garbage jsonFolder + "C:\..." combine - skipping the
+        // sibling retry that would find the file. New-format exports store bare file names
+        // (never containing a backslash), so any backslash marks a legacy Windows path.
+        var isLegacyWindowsPath = audioFileName.Contains('\\');
+
+        if (Path.IsPathRooted(audioFileName) || isLegacyWindowsPath)
+        {
+            if (File.Exists(audioFileName))
+            {
+                return audioFileName;
+            }
+
+            // Path.GetFileName does not treat '\' as a separator on Unix - split on both.
+            var separatorIndex = Math.Max(audioFileName.LastIndexOf('\\'), audioFileName.LastIndexOf('/'));
+            var name = separatorIndex >= 0 ? audioFileName.Substring(separatorIndex + 1) : audioFileName;
+            var siblingFileName = Path.Combine(jsonFolder, name);
+            return File.Exists(siblingFileName) ? siblingFileName : audioFileName;
+        }
+
+        return Path.Combine(jsonFolder, audioFileName);
     }
 
     private static WavePeakData2? TryLoadWavePeaksFromDisk(string videoFileName)
@@ -1710,656 +1895,7 @@ public partial class TextToSpeechViewModel : ObservableObject
 
     private async Task<bool> IsEngineInstalled(ITtsEngine engine)
     {
-        if (Window == null)
-        {
-            return false;
-        }
-
-        if (engine is Qwen3TtsCpp)
-        {
-            if (!await engine.IsInstalled(SelectedRegion))
-            {
-                var qwen3Variant = Qwen3TtsCppDownloadService.WindowsVariantVulkan;
-                if (Configuration.IsRunningOnWindows)
-                {
-                    var variantAnswer = await MessageBox.Show(
-                        Window,
-                        "Download Qwen3 TTS?",
-                        $"{Environment.NewLine}\"Text to speech\" requires Qwen3 TTS.{Environment.NewLine}{Environment.NewLine}Select a build to download:",
-                        MessageBoxButtons.Cancel,
-                        MessageBoxIcon.Question,
-                        "CPU",
-                        "Vulkan (GPU)",
-                        "CUDA (NVIDIA GPU)");
-
-                    if (variantAnswer == MessageBoxResult.None || variantAnswer == MessageBoxResult.Cancel)
-                    {
-                        return false;
-                    }
-
-                    qwen3Variant = variantAnswer switch
-                    {
-                        MessageBoxResult.Custom1 => Qwen3TtsCppDownloadService.WindowsVariantCpu,
-                        MessageBoxResult.Custom3 => Qwen3TtsCppDownloadService.WindowsVariantCuda,
-                        _ => Qwen3TtsCppDownloadService.WindowsVariantVulkan,
-                    };
-
-                    if (qwen3Variant == Qwen3TtsCppDownloadService.WindowsVariantVulkan && !VulkanHelper.IsInstalled())
-                    {
-                        var vulkanAnswer = await MessageBox.Show(
-                            Window,
-                            "Vulkan runtime may be required",
-                            $"The Vulkan version requires the Vulkan runtime (vulkan-1.dll) which usually ships with current GPU drivers, but was not detected on this system.{Environment.NewLine}{Environment.NewLine}You can install it from:{Environment.NewLine}https://vulkan.lunarg.com/sdk/home{Environment.NewLine}{Environment.NewLine}Continue with Vulkan download anyway?",
-                            MessageBoxButtons.YesNoCancel,
-                            MessageBoxIcon.Question);
-
-                        if (vulkanAnswer == MessageBoxResult.No)
-                        {
-                            UiUtil.OpenUrl("https://vulkan.lunarg.com/sdk/home");
-                            return false;
-                        }
-
-                        if (vulkanAnswer != MessageBoxResult.Yes)
-                        {
-                            return false;
-                        }
-                    }
-                }
-                else
-                {
-                    var answer = await MessageBox.Show(
-                        Window,
-                        "Download Qwen3 TTS?",
-                        $"{Environment.NewLine}\"Text to speech\" requires Qwen3 TTS.{Environment.NewLine}{Environment.NewLine}Download and use Qwen3 TTS?",
-                        MessageBoxButtons.YesNoCancel,
-                        MessageBoxIcon.Question);
-
-                    if (answer != MessageBoxResult.Yes)
-                    {
-                        return false;
-                    }
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window, vm => vm.StartDownloadQwen3TtsCpp(qwen3Variant));
-                if (!dlResult.OkPressed)
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-            }
-
-            var qwen3ModelKey = Qwen3TtsCpp.ResolveModelKey(SelectedModel);
-            if (!Qwen3TtsCpp.IsModelsInstalled(qwen3ModelKey))
-            {
-                var sizeText = GetModelDownloadSizeText(engine, SelectedModel);
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download Qwen3 TTS models?",
-                    $"{Environment.NewLine}\"Qwen3 TTS\" ({qwen3ModelKey}) requires models ({sizeText}).{Environment.NewLine}{Environment.NewLine}Download models?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadQwen3TtsModels(qwen3ModelKey));
-                return dlResult.OkPressed && Qwen3TtsCpp.IsModelsInstalled(qwen3ModelKey);
-            }
-
-            return true;
-        }
-
-        if (engine is Qwen3TtsCrispAsr)
-        {
-            // Runtime first: the same crispasr.exe that Speech-to-text / Chatterbox use.
-            if (!await TtsVoiceInstaller.EnsureCrispAsrForQwen3(Window, _windowService, forceRedownload: false))
-            {
-                return false;
-            }
-
-            var crispAsrModelKey = Qwen3TtsCrispAsr.ResolveModelKey(SelectedModel);
-            if (!Qwen3TtsCrispAsr.AreModelsInstalled(crispAsrModelKey))
-            {
-                var sizeText = GetModelDownloadSizeText(engine, SelectedModel);
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download Qwen3 TTS (CrispASR) models?",
-                    $"{Environment.NewLine}\"Qwen3 TTS (CrispASR)\" ({crispAsrModelKey}) requires models ({sizeText}).{Environment.NewLine}{Environment.NewLine}Download models?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadQwen3TtsCrispAsrModels(crispAsrModelKey));
-                if (!dlResult.OkPressed || !Qwen3TtsCrispAsr.AreModelsInstalled(crispAsrModelKey))
-                {
-                    return false;
-                }
-
-                // The download dialog also pulls voices.zip when none are present, so
-                // refresh the voice list to surface them in the combo.
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-                return true;
-            }
-
-            return true;
-        }
-
-        if (engine is VibeVoiceCrispAsr)
-        {
-            if (!await TtsVoiceInstaller.EnsureCrispAsrForVibeVoice(Window, _windowService, forceRedownload: false))
-            {
-                return false;
-            }
-
-            var vibeModelKey = VibeVoiceCrispAsr.ResolveModelKey(SelectedModel);
-            if (!VibeVoiceCrispAsr.AreModelsInstalled(vibeModelKey))
-            {
-                // Model key already includes the size in its label (e.g. "Q8_0 (~2.8 GB)") so
-                // we don't append a separate size — avoids duplication in the prompt.
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download VibeVoice (CrispASR) model?",
-                    $"{Environment.NewLine}\"VibeVoice (CrispASR)\" ({vibeModelKey}) requires a model.{Environment.NewLine}{Environment.NewLine}Download model?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadVibeVoiceCrispAsrModels(vibeModelKey));
-                if (!dlResult.OkPressed || !VibeVoiceCrispAsr.AreModelsInstalled(vibeModelKey))
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-                return true;
-            }
-
-            return true;
-        }
-
-        if (engine is IndexTtsCrispAsr)
-        {
-            if (!await TtsVoiceInstaller.EnsureCrispAsrForIndexTts(Window, _windowService, forceRedownload: false))
-            {
-                return false;
-            }
-
-            var indexModelKey = IndexTtsCrispAsr.ResolveModelKey(SelectedModel);
-            if (!IndexTtsCrispAsr.AreModelsInstalled(indexModelKey))
-            {
-                // Model key already includes the size in its label (e.g. "Q8_0 (~870 MB)")
-                // so we don't append a separate size — avoids duplication in the prompt.
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download IndexTTS (CrispASR) models?",
-                    $"{Environment.NewLine}\"IndexTTS (CrispASR)\" ({indexModelKey}) requires models.{Environment.NewLine}{Environment.NewLine}Download models?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadIndexTtsCrispAsrModels(indexModelKey));
-                if (!dlResult.OkPressed || !IndexTtsCrispAsr.AreModelsInstalled(indexModelKey))
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-                return true;
-            }
-
-            return true;
-        }
-
-        if (engine is ZonosTtsCrispAsr)
-        {
-            if (!await TtsVoiceInstaller.EnsureCrispAsrForZonos(Window, _windowService, forceRedownload: false))
-            {
-                return false;
-            }
-
-            if (!ZonosTtsCrispAsr.AreModelsInstalled())
-            {
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download Zonos TTS (CrispASR) models?",
-                    $"{Environment.NewLine}\"Zonos TTS (CrispASR)\" requires the Zonos transformer + DAC codec (~1.8 GB).{Environment.NewLine}{Environment.NewLine}Download models?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadZonosTtsCrispAsrModels());
-                if (!dlResult.OkPressed || !ZonosTtsCrispAsr.AreModelsInstalled())
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-                return true;
-            }
-
-            return true;
-        }
-
-        if (engine is CosyVoice3CrispAsr)
-        {
-            if (!await TtsVoiceInstaller.EnsureCrispAsrForCosyVoice3(Window, _windowService, forceRedownload: false))
-            {
-                return false;
-            }
-
-            var cosyModelKey = CosyVoice3CrispAsr.ResolveModelKey(SelectedModel);
-            if (!CosyVoice3CrispAsr.AreModelsInstalled(cosyModelKey))
-            {
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download CosyVoice3 (CrispASR) models?",
-                    $"{Environment.NewLine}\"CosyVoice3 (CrispASR)\" ({cosyModelKey}) requires LLM + flow + hift + s3tok + campplus + voice-bank GGUFs (all sized into the total above).{Environment.NewLine}{Environment.NewLine}Download models?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadCosyVoice3CrispAsrModels(cosyModelKey));
-                if (!dlResult.OkPressed || !CosyVoice3CrispAsr.AreModelsInstalled(cosyModelKey))
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-                return true;
-            }
-
-            return true;
-        }
-
-        if (engine is F5TtsCrispAsr)
-        {
-            if (!await TtsVoiceInstaller.EnsureCrispAsrForF5Tts(Window, _windowService, forceRedownload: false))
-            {
-                return false;
-            }
-
-            var f5ModelKey = F5TtsCrispAsr.ResolveModelKey(SelectedModel);
-            if (!F5TtsCrispAsr.AreModelsInstalled(f5ModelKey))
-            {
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download F5-TTS (CrispASR) model?",
-                    $"{Environment.NewLine}\"F5-TTS (CrispASR)\" ({f5ModelKey}) requires a model.{Environment.NewLine}{Environment.NewLine}Download model?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadF5TtsCrispAsrModels(f5ModelKey));
-                if (!dlResult.OkPressed || !F5TtsCrispAsr.AreModelsInstalled(f5ModelKey))
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-                return true;
-            }
-
-            return true;
-        }
-
-        if (engine is VoxCPM2CrispAsr)
-        {
-            if (!await TtsVoiceInstaller.EnsureCrispAsrForVoxCPM2(Window, _windowService, forceRedownload: false))
-            {
-                return false;
-            }
-
-            var voxModelKey = VoxCPM2CrispAsr.ResolveModelKey(SelectedModel);
-            if (!VoxCPM2CrispAsr.AreModelsInstalled(voxModelKey))
-            {
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download VoxCPM2 (CrispASR) model?",
-                    $"{Environment.NewLine}\"VoxCPM2 (CrispASR)\" ({voxModelKey}) requires a model.{Environment.NewLine}{Environment.NewLine}Download model?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadVoxCPM2CrispAsrModels(voxModelKey));
-                if (!dlResult.OkPressed || !VoxCPM2CrispAsr.AreModelsInstalled(voxModelKey))
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-                return true;
-            }
-
-            return true;
-        }
-
-        if (engine is KokoroTtsCpp)
-        {
-            if (!await engine.IsInstalled(SelectedRegion))
-            {
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download Kokoro TTS?",
-                    $"{Environment.NewLine}\"Text to speech\" requires Kokoro TTS.{Environment.NewLine}{Environment.NewLine}Download and use Kokoro TTS?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window, vm => vm.StartDownloadKokoroTtsCpp());
-                if (!dlResult.OkPressed)
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-            }
-
-            if (!KokoroTtsCpp.AreModelsInstalled())
-            {
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download Kokoro TTS models?",
-                    $"{Environment.NewLine}\"Kokoro TTS\" requires models (~380 MB).{Environment.NewLine}{Environment.NewLine}Download models?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadKokoroTtsModels());
-                return dlResult.OkPressed && KokoroTtsCpp.AreModelsInstalled();
-            }
-
-            return true;
-        }
-
-        if (engine is ChatterboxTtsCpp)
-        {
-            if (!await TtsVoiceInstaller.EnsureCrispAsrForChatterbox(Window, _windowService, forceRedownload: false))
-            {
-                return false;
-            }
-
-            var chatterboxModelKey = ChatterboxTtsCpp.ResolveModelKey(SelectedModel);
-            if (!ChatterboxTtsCpp.AreModelsInstalled(chatterboxModelKey))
-            {
-                var sizeText = GetModelDownloadSizeText(engine, SelectedModel);
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download Chatterbox TTS models?",
-                    $"{Environment.NewLine}\"Chatterbox TTS\" ({chatterboxModelKey}) requires models ({sizeText}).{Environment.NewLine}{Environment.NewLine}Download models?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadChatterboxModels(chatterboxModelKey));
-                return dlResult.OkPressed && ChatterboxTtsCpp.AreModelsInstalled(chatterboxModelKey);
-            }
-
-            return true;
-        }
-
-        if (engine is OmniVoiceTtsCpp)
-        {
-            if (!await engine.IsInstalled(SelectedRegion))
-            {
-                var omniVariant = OmniVoiceDownloadService.WindowsVariantVulkan;
-                if (Configuration.IsRunningOnWindows)
-                {
-                    var variantAnswer = await MessageBox.Show(
-                        Window,
-                        "Download OmniVoice TTS?",
-                        $"{Environment.NewLine}\"Text to speech\" requires OmniVoice TTS.{Environment.NewLine}{Environment.NewLine}Select a build to download:",
-                        MessageBoxButtons.Cancel,
-                        MessageBoxIcon.Question,
-                        "CPU",
-                        "Vulkan",
-                        "CUDA");
-
-                    if (variantAnswer == MessageBoxResult.None || variantAnswer == MessageBoxResult.Cancel)
-                    {
-                        return false;
-                    }
-
-                    omniVariant = variantAnswer switch
-                    {
-                        MessageBoxResult.Custom1 => OmniVoiceDownloadService.WindowsVariantCpu,
-                        MessageBoxResult.Custom3 => OmniVoiceDownloadService.WindowsVariantCuda,
-                        _ => OmniVoiceDownloadService.WindowsVariantVulkan,
-                    };
-
-                    if (omniVariant == OmniVoiceDownloadService.WindowsVariantVulkan && !VulkanHelper.IsInstalled())
-                    {
-                        var vulkanAnswer = await MessageBox.Show(
-                            Window,
-                            "Vulkan runtime may be required",
-                            $"The Vulkan version requires the Vulkan runtime (vulkan-1.dll) which usually ships with current GPU drivers, but was not detected on this system.{Environment.NewLine}{Environment.NewLine}You can install it from:{Environment.NewLine}https://vulkan.lunarg.com/sdk/home{Environment.NewLine}{Environment.NewLine}Continue with Vulkan download anyway?",
-                            MessageBoxButtons.YesNoCancel,
-                            MessageBoxIcon.Question);
-
-                        if (vulkanAnswer == MessageBoxResult.No)
-                        {
-                            UiUtil.OpenUrl("https://vulkan.lunarg.com/sdk/home");
-                            return false;
-                        }
-
-                        if (vulkanAnswer != MessageBoxResult.Yes)
-                        {
-                            return false;
-                        }
-                    }
-                }
-                else
-                {
-                    var answer = await MessageBox.Show(
-                        Window,
-                        "Download OmniVoice TTS?",
-                        $"{Environment.NewLine}\"Text to speech\" requires OmniVoice TTS.{Environment.NewLine}{Environment.NewLine}Download and use OmniVoice TTS?",
-                        MessageBoxButtons.YesNoCancel,
-                        MessageBoxIcon.Question);
-
-                    if (answer != MessageBoxResult.Yes)
-                    {
-                        return false;
-                    }
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window, vm => vm.StartDownloadOmniVoice(omniVariant));
-                if (!dlResult.OkPressed)
-                {
-                    return false;
-                }
-
-                await Dispatcher.UIThread.InvokeAsync(async () =>
-                {
-                    await RefreshVoices(engine);
-                });
-            }
-
-            if (!OmniVoiceTtsCpp.IsModelsInstalled())
-            {
-                var answer = await MessageBox.Show(
-                    Window,
-                    "Download OmniVoice TTS models?",
-                    $"{Environment.NewLine}\"OmniVoice TTS\" requires models (~1.4 GB).{Environment.NewLine}{Environment.NewLine}Download models?",
-                    MessageBoxButtons.YesNoCancel,
-                    MessageBoxIcon.Question);
-
-                if (answer != MessageBoxResult.Yes)
-                {
-                    return false;
-                }
-
-                var dlResult = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadOmniVoiceModels());
-                return dlResult.OkPressed && OmniVoiceTtsCpp.IsModelsInstalled();
-            }
-
-            return true;
-        }
-
-        if (await engine.IsInstalled(SelectedRegion) || Window == null)
-        {
-            return true;
-        }
-
-        if (engine is Piper)
-        {
-            var answer = await MessageBox.Show(
-                Window,
-                string.Format(Se.Language.General.DownloadX, "Piper"),
-                Se.Language.Video.TextToSpeech.DownloadPiperPrompt,
-                MessageBoxButtons.YesNoCancel,
-                MessageBoxIcon.Question);
-
-            if (answer != MessageBoxResult.Yes)
-            {
-                return false;
-            }
-
-            var result = await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window, vm => vm.StartDownloadPiper());
-            return await engine.IsInstalled(SelectedRegion);
-        }
-
-        if (engine is AllTalk)
-        {
-            var answer = await MessageBox.Show(
-                Window,
-                Se.Language.General.Error,
-                $"\"AllTalk\" text to speech requires a running local AllTalk web server.{Environment.NewLine}{Environment.NewLine}Read more?",
-                MessageBoxButtons.YesNoCancel,
-                MessageBoxIcon.Question);
-
-            if (answer != MessageBoxResult.Yes)
-            {
-                return false;
-            }
-
-            await Window.Launcher.LaunchUriAsync(new Uri("https://github.com/erew123/alltalk_tts"));
-
-            return await engine.IsInstalled(SelectedRegion);
-        }
-
-        if (engine is EdgeTts)
-        {
-            var answer = await MessageBox.Show(
-                Window,
-                Se.Language.General.Error,
-                $"\"EdgeTts\" text to speech requires the edge-tts CLI tool.{Environment.NewLine}{Environment.NewLine}Install with: pipx install edge-tts{Environment.NewLine}(or pip install edge-tts){Environment.NewLine}{Environment.NewLine}Read more?",
-                MessageBoxButtons.YesNoCancel,
-                MessageBoxIcon.Question);
-
-            if (answer != MessageBoxResult.Yes)
-            {
-                return false;
-            }
-
-            await Window.Launcher.LaunchUriAsync(new Uri("https://github.com/rany2/edge-tts"));
-            return await engine.IsInstalled(SelectedRegion);
-        }
-
-        if (engine.HasKeyFile)
-        {
-            if (string.IsNullOrEmpty(KeyFile) || !File.Exists(KeyFile))
-            {
-                await MessageBox.Show(
-                Window,
-                Se.Language.General.Error,
-                $"\"{engine.Name}\" requires a key file",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-
-                return false;
-            }
-
-            return true;
-        }
-
-        if (engine.HasApiKey)
-        {
-            if (string.IsNullOrEmpty(ApiKey))
-            {
-                await MessageBox.Show(
-                Window,
-                Se.Language.General.Error,
-                $"\"{engine.Name}\" requires an API key",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
-
-                return false;
-            }
-
-            return true;
-        }
-
-        return false;
+        return await TtsEngineInstaller.EnsureEngineInstalled(engine, Window, _windowService, SelectedRegion, SelectedModel, ApiKey, KeyFile, () => RefreshVoices(engine));
     }
 
     private async Task MergeAndAddToVideo(TtsStepResult[] fixSpeedResult)
@@ -2368,33 +1904,25 @@ public partial class TextToSpeechViewModel : ObservableObject
         var mergedAudioFileName = await MergeAudioParagraphs(fixSpeedResult, _cancellationToken);
         if (string.IsNullOrEmpty(mergedAudioFileName))
         {
-            DoneOrCancelText = Se.Language.General.Done;
-            IsGenerating = false;
-            IsNotGenerating = true;
-            ProgressOpacity = 0;
+            ResetGeneratingUiState();
             return;
         }
 
         var result = await _folderHelper.PickFolderAsync(Window!, Se.Language.General.SelectedAFolderToSaveTo);
         if (string.IsNullOrEmpty(result))
         {
-            DoneOrCancelText = Se.Language.General.Done;
-            IsGenerating = false;
-            IsNotGenerating = true;
-            ProgressOpacity = 0;
+            ResetGeneratingUiState();
             return;
         }
         var outputFolder = result;
         var audioFileName = Path.Combine(outputFolder, GetBestFileName(outputFolder, ".wav"));
 
         File.Move(mergedAudioFileName, audioFileName);
+        Se.WriteToolsLog($"TTS merge done: wrote \"{audioFileName}\"");
 
         await HandleAddToVideo(audioFileName, outputFolder, _cancellationToken);
 
-        DoneOrCancelText = Se.Language.General.Done;
-        IsGenerating = false;
-        IsNotGenerating = true;
-        ProgressOpacity = 0;
+        ResetGeneratingUiState();
     }
 
     private async Task HandleAddToVideo(string mergedAudioFileName, string outputFolder, CancellationToken cancellationToken)
@@ -2432,6 +1960,14 @@ public partial class TextToSpeechViewModel : ObservableObject
         ProgressText = Se.Language.Video.TextToSpeech.AddingAudioToVideoFileDotDotDot;
         var outputFileName = Path.Combine(outputFolder, Path.GetFileNameWithoutExtension(audioFileName) + videoExt);
 
+        // Never let the output collide with the source video: picking the video's own folder as
+        // the output folder can make the paths identical, and ffmpeg runs with -y - depending on
+        // the build that either aborts or *truncates the user's source video* before reading it.
+        if (string.Equals(Path.GetFullPath(outputFileName), Path.GetFullPath(_videoFileName), StringComparison.OrdinalIgnoreCase))
+        {
+            outputFileName = Path.Combine(outputFolder, Path.GetFileNameWithoutExtension(audioFileName) + "_tts" + videoExt);
+        }
+
         var useCustomAudioEncoding = !string.IsNullOrEmpty(Se.Settings.Video.TextToSpeech.CustomAudioEncoding);
         var audioEncoding = Se.Settings.Video.TextToSpeech.CustomAudioEncoding;
         if (string.IsNullOrWhiteSpace(audioEncoding) || !useCustomAudioEncoding)
@@ -2451,6 +1987,28 @@ public partial class TextToSpeechViewModel : ObservableObject
         await addAudioProcess.StartAndWaitAsync(cancellationToken);
 
         ProgressText = string.Empty;
+
+        // ffmpeg failures (bad custom encoding string, codec/container mismatch, ...) used to go
+        // unnoticed here, and the caller then showed "Video file generated" for a file that does
+        // not exist. Verify the output and report instead.
+        if (!File.Exists(outputFileName) || new FileInfo(outputFileName).Length == 0)
+        {
+            SeLogger.Error($"TextToSpeech: adding audio to video failed - no output produced (encoding=\"{audioEncoding}\", ducking={Se.Settings.Video.TextToSpeech.AudioDuckingEnabled})");
+            Se.WriteToolsLog($"TTS add-to-video failed: ffmpeg produced no output for \"{outputFileName}\" (encoding=\"{audioEncoding}\", ducking={Se.Settings.Video.TextToSpeech.AudioDuckingEnabled})", true);
+            if (Window != null)
+            {
+                await MessageBox.Show(
+                    Window,
+                    Se.Language.General.Error,
+                    "Adding the audio track to the video failed - the audio file was still saved." + Environment.NewLine + Environment.NewLine +
+                    "See error-log.txt in the Subtitle Edit data folder for details.",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            return null;
+        }
+
         return outputFileName;
     }
 
@@ -2458,9 +2016,10 @@ public partial class TextToSpeechViewModel : ObservableObject
     {
         try
         {
-            var engine = SelectedEngine;
-            var voice = SelectedVoice;
-            if (engine == null || voice == null || cancellationToken.IsCancellationRequested)
+            // No engine/voice needed here - each step result carries its own audio file. An
+            // engine/voice null-guard used to silently abort the merge for imported sessions
+            // whose selected engine had no loadable voice list ("OK does nothing", #12093).
+            if (cancellationToken.IsCancellationRequested)
             {
                 return null;
             }
@@ -2472,34 +2031,68 @@ public partial class TextToSpeechViewModel : ObservableObject
                 forceStereo = true;
             }
 
-            var silenceFileName = await GenerateSilenceWaveFile(cancellationToken);
+            var silenceFileName = await GenerateSilenceWaveFile(previousStepResult, cancellationToken);
 
-            var outputFileName = string.Empty;
             var inputFileName = silenceFileName;
             ProgressValue = 0;
             for (var index = 0; index < previousStepResult.Length; index++)
             {
-                ProgressText = $"Merging audio: segment {index + 1} of {_subtitle.Paragraphs.Count}";
+                ProgressText = $"Merging audio: segment {index + 1} of {previousStepResult.Length}";
 
                 var item = previousStepResult[index];
-                outputFileName = Path.Combine(_waveFolder, $"silence{index}.wav");
+
+                // Upstream steps can drop a segment's audio (failed generation kept by the user,
+                // deleted files in an imported session). Leave silence for it instead of feeding
+                // ffmpeg a nonexistent input.
+                if (string.IsNullOrEmpty(item.CurrentFileName) || !File.Exists(item.CurrentFileName))
+                {
+                    Se.WriteToolsLog($"TTS merge: segment {index + 1} has no audio file - leaving silence", true);
+                    continue;
+                }
+
+                var outputFileName = Path.Combine(_waveFolder, $"silence{index}.wav");
                 if (File.Exists(outputFileName))
                 {
                     outputFileName = Path.Combine(_waveFolder, $"silence_{Guid.NewGuid()}.wav");
                 }
 
                 var mergeProcess = FfmpegGenerator.MergeAudioTracks(inputFileName, item.CurrentFileName, outputFileName, (float)item.Paragraph.StartTime.TotalSeconds, forceStereo);
-                var fileNameToDelete = inputFileName;
-                inputFileName = outputFileName;
                 await mergeProcess.StartAndWaitAsync(cancellationToken);
 
-                ProgressValue = (double)(index + 1) / previousStepResult.Length * 100.0;
+                // A failed merge used to go unnoticed: the loop advanced to the (missing) output
+                // and deleted the last good intermediate, so every later merge failed too and the
+                // wreck only surfaced far downstream. Stop with an error instead.
+                if (!File.Exists(outputFileName) || new FileInfo(outputFileName).Length == 0)
+                {
+                    SeLogger.Error($"TextToSpeech: merging segment {index + 1} produced no output (input=\"{item.CurrentFileName}\")");
+                    Se.WriteToolsLog($"TTS merge: segment {index + 1} failed - ffmpeg produced no output for \"{item.CurrentFileName}\"", true);
+                    await Dispatcher.UIThread.InvokeAsync(async () =>
+                    {
+                        if (Window != null)
+                        {
+                            await MessageBox.Show(
+                                Window,
+                                Se.Language.General.Error,
+                                $"Merging audio failed at segment {index + 1}." + Environment.NewLine + Environment.NewLine +
+                                "See error-log.txt in the Subtitle Edit data folder for details.",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Error);
+                        }
+                    });
+                    return null;
+                }
 
-                DeleteFileNoError(fileNameToDelete);
+                DeleteFileNoError(inputFileName);
+                inputFileName = outputFileName;
+
+                ProgressValue = (double)(index + 1) / previousStepResult.Length * 100.0;
             }
             ProgressValue = 100;
 
-            return outputFileName;
+            // The chain head is the fully merged track (or the bare silence track if every
+            // segment was skipped - still a valid, if empty, result the user gets told about
+            // via the forced tools-log entries above).
+            return inputFileName;
         }
         catch (OperationCanceledException)
         {
@@ -2520,7 +2113,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
     }
 
-    private async Task<string> GenerateSilenceWaveFile(CancellationToken cancellationToken)
+    private async Task<string> GenerateSilenceWaveFile(TtsStepResult[] stepResults, CancellationToken cancellationToken)
     {
         ProgressText = Se.Language.Video.TextToSpeech.PreparingMergeDotDotDot;
         ProgressValue = 0;
@@ -2540,6 +2133,15 @@ public partial class TextToSpeechViewModel : ObservableObject
         else if (_subtitle.Paragraphs.Count > 0)
         {
             durationInSeconds = (float)_subtitle.Paragraphs.Max(p => p.EndTime.TotalSeconds);
+        }
+
+        // An imported session can outlast the subtitle currently open in the main window (or
+        // there may be no video at all) - the silence base track must cover every segment being
+        // merged, or the tail would be dropped.
+        if (stepResults.Length > 0)
+        {
+            var maxEndSeconds = (float)stepResults.Max(r => r.Paragraph.EndTime.TotalSeconds);
+            durationInSeconds = Math.Max(durationInSeconds, maxEndSeconds);
         }
 
         var silenceProcess = FfmpegGenerator.GenerateEmptyAudio(silenceFileName, durationInSeconds);
@@ -2589,6 +2191,10 @@ public partial class TextToSpeechViewModel : ObservableObject
             // empty, every paragraph falls back to the globally selected engine/voice.
             var castContext = await BuildCastContextAsync();
 
+            // Distinct failure reasons reported by the engines, so the dialogs below can say *why*
+            // segments failed (e.g. the ElevenLabs 429 text) instead of a bare count (#12093).
+            var errorMessages = new List<string>();
+
             for (var index = 0; index < _subtitle.Paragraphs.Count; index++)
             {
                 ProgressText = $"Generating speech: segment {index + 1} of {_subtitle.Paragraphs.Count}";
@@ -2615,6 +2221,10 @@ public partial class TextToSpeechViewModel : ObservableObject
                     resolution.Instruction,
                     () => resolution.Engine.Speak(resolution.Text, _waveFolder, resolution.Voice,
                         language, region, model, cancellationToken));
+                if (speakResult.Error && !string.IsNullOrEmpty(speakResult.ErrorMessage) && !errorMessages.Contains(speakResult.ErrorMessage))
+                {
+                    errorMessages.Add(speakResult.ErrorMessage);
+                }
                 resultList.Add(new TtsStepResult
                 {
                     Text = resolution.Text,
@@ -2640,10 +2250,15 @@ public partial class TextToSpeechViewModel : ObservableObject
             ProgressValue = 100;
 
             var failedCount = resultList.Count(r => string.IsNullOrEmpty(r.CurrentFileName));
+            // First engine-reported failure reason, e.g. the ElevenLabs 429 text. The generic
+            // rate/pitch hint only applies when no engine said anything more specific.
+            var firstError = errorMessages.Count > 0
+                ? errorMessages[0]
+                : "Check the engine settings (rate/pitch/volume must be a signed integer, e.g. \"+10\") and try again.";
             if (failedCount == resultList.Count && resultList.Count > 0)
             {
-                var msg = $"Text-to-speech failed for all {failedCount} segments. " +
-                          "Check the engine settings (rate/pitch/volume must be a signed integer, e.g. \"+10\") and try again.";
+                var msg = $"Text-to-speech failed for all {failedCount} segments." +
+                          Environment.NewLine + Environment.NewLine + firstError;
                 SeLogger.Error(msg);
                 await Dispatcher.UIThread.InvokeAsync(async () =>
                 {
@@ -2657,7 +2272,40 @@ public partial class TextToSpeechViewModel : ObservableObject
 
             if (failedCount > 0)
             {
+                // Failed segments were silent before (log only), so users ended up with audio
+                // missing lines and no idea why (#12093) - tell them and let them stop the run.
                 SeLogger.Error($"TextToSpeech: {failedCount} of {resultList.Count} segments failed to generate; continuing with the rest.");
+                Se.WriteToolsLog($"TTS generation: {failedCount} of {resultList.Count} segments failed - see error-log.txt for the engine errors", true);
+
+                var proceed = await Dispatcher.UIThread.InvokeAsync(async () =>
+                {
+                    if (Window == null)
+                    {
+                        return true;
+                    }
+
+                    var detail = errorMessages.Count > 0
+                        ? Environment.NewLine + Environment.NewLine + errorMessages[0]
+                        : string.Empty;
+                    var answer = await MessageBox.Show(
+                        Window,
+                        Se.Language.General.Warning,
+                        $"{failedCount} of {resultList.Count} segments failed to generate (see error-log.txt in the Subtitle Edit data folder).{detail}" +
+                        Environment.NewLine + Environment.NewLine +
+                        "Continue with the remaining segments? The failed lines will be missing from the audio.",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning);
+                    return answer == MessageBoxResult.Yes;
+                });
+
+                if (!proceed)
+                {
+                    return null;
+                }
+            }
+            else
+            {
+                Se.WriteToolsLog($"TTS generation done: all {resultList.Count} segments generated");
             }
 
             return resultList.ToArray();
@@ -2789,26 +2437,38 @@ public partial class TextToSpeechViewModel : ObservableObject
         // many TTS engines otherwise insert weird pauses on \r\n.
         var text = Utilities.UnbreakLine(rawText);
 
+        // Fallbacks must carry the panel's instruction, not "": TtsInstructionSwap swaps the
+        // engine's saved instruction to whatever is passed here for the duration of the Speak
+        // call, so an empty fallback silently wiped the user's typed voice-design instruction
+        // for every line without an actor mapping - i.e. for every line of a normal subtitle.
+        var globalInstruction = Instruction ?? string.Empty;
+
         if (string.IsNullOrEmpty(actor) || !ctx.ByActor.TryGetValue(actor, out var mapping))
         {
-            return new ResolvedVoice(defaultEngine, defaultVoice, null, text, string.Empty);
+            return new ResolvedVoice(defaultEngine, defaultVoice, null, text, globalInstruction);
         }
 
         if (!ctx.EnginesByName.TryGetValue(mapping.EngineName, out var mappedEngine)
             || !ctx.VoicesByEngine.TryGetValue(mapping.EngineName, out var voices))
         {
-            return new ResolvedVoice(defaultEngine, defaultVoice, null, text, string.Empty);
+            return new ResolvedVoice(defaultEngine, defaultVoice, null, text, globalInstruction);
         }
 
         var mappedVoice = voices.FirstOrDefault(v => string.Equals(v.Name, mapping.VoiceName, StringComparison.OrdinalIgnoreCase));
         if (mappedVoice == null)
         {
-            return new ResolvedVoice(defaultEngine, defaultVoice, null, text, string.Empty);
+            return new ResolvedVoice(defaultEngine, defaultVoice, null, text, globalInstruction);
         }
 
         // Per-row model overrides the global one; empty string means "use the global model".
         var modelOverride = string.IsNullOrWhiteSpace(mapping.Model) ? null : mapping.Model;
-        return new ResolvedVoice(mappedEngine, mappedVoice, modelOverride, text, mapping.Instruction ?? string.Empty);
+        // A mapped row with no instruction of its own, on the globally selected engine, follows
+        // the panel instruction - otherwise mapping an actor to the same engine/voice made that
+        // actor's lines drop the voice design every unmapped line gets.
+        var instruction = string.IsNullOrWhiteSpace(mapping.Instruction) && ReferenceEquals(mappedEngine, defaultEngine)
+            ? globalInstruction
+            : mapping.Instruction ?? string.Empty;
+        return new ResolvedVoice(mappedEngine, mappedVoice, modelOverride, text, instruction);
     }
 
     private async Task<TtsStepResult[]?> FixSpeed(TtsStepResult[] previousStepResult, CancellationToken cancellationToken)
@@ -2823,6 +2483,16 @@ public partial class TextToSpeechViewModel : ObservableObject
         var doVad = Se.Settings.Video.TextToSpeech.VadSilenceCompressionEnabled;
         var vadMaxSilence = Se.Settings.Video.TextToSpeech.VadMaxSilenceSeconds;
         var doHighQualityStretch = Se.Settings.Video.TextToSpeech.HighQualityTimeStretchEnabled;
+
+        // Generous per-ffmpeg-call bound: each call processes a single subtitle's audio (seconds
+        // long), so minutes means ffmpeg is wedged - kill it and surface an error instead of
+        // waiting forever with the window disabled (#12093).
+        var segmentOperationTimeout = TimeSpan.FromMinutes(5);
+
+        var skippedNoAudioCount = 0;
+        var skippedNoDurationCount = 0;
+        var stretchedCount = 0;
+        var failedCount = 0;
 
         try
         {
@@ -2839,132 +2509,228 @@ public partial class TextToSpeechViewModel : ObservableObject
 
                 if (string.IsNullOrEmpty(item.CurrentFileName) || !File.Exists(item.CurrentFileName))
                 {
+                    skippedNoAudioCount++;
                     SeLogger.Error($"TextToSpeech: skipping segment {index + 1} in FixSpeed - upstream produced no audio file");
                     continue;
                 }
 
-                // Step 1: Trim silence from start and end
-                var outputFileName1 = Path.Combine(Path.GetDirectoryName(item.CurrentFileName)!, Guid.NewGuid() + ".wav");
-                var trimProcess = FfmpegGenerator.TrimSilenceStartAndEnd(item.CurrentFileName, outputFileName1);
-                await trimProcess.StartAndWaitAsync(cancellationToken);
-
-                var currentFile = outputFileName1;
-
-                // Step 2: VAD-based internal silence compression
-                // Compress pauses between words/phrases before touching tempo.
-                // This preserves phoneme quality by only removing redundant silence.
-                if (doVad)
+                // A single bad segment (corrupt audio, wedged/failed ffmpeg call) must not kill the
+                // whole run: keep its audio at original speed, log it, and continue with the rest -
+                // same policy as the generation step. Cancellation still aborts the run.
+                try
                 {
-                    var vadOutput = Path.Combine(Path.GetDirectoryName(item.CurrentFileName)!, $"vad_{Guid.NewGuid()}.wav");
-                    var vadProcess = FfmpegGenerator.CompressInternalSilence(currentFile, vadOutput, vadMaxSilence);
-                    await vadProcess.StartAndWaitAsync(cancellationToken);
+                    // Step 1: Trim silence from start and end
+                    var outputFileName1 = Path.Combine(Path.GetDirectoryName(item.CurrentFileName)!, Guid.NewGuid() + ".wav");
+                    var trimProcess = FfmpegGenerator.TrimSilenceStartAndEnd(item.CurrentFileName, outputFileName1);
+                    await trimProcess.StartAndWaitAsync(cancellationToken, segmentOperationTimeout);
 
-                    if (File.Exists(vadOutput) && new FileInfo(vadOutput).Length > 0)
+                    var currentFile = outputFileName1;
+
+                    // Step 2: VAD-based internal silence compression
+                    // Compress pauses between words/phrases before touching tempo.
+                    // This preserves phoneme quality by only removing redundant silence.
+                    if (doVad)
                     {
-                        currentFile = vadOutput;
-                    }
-                }
+                        var vadOutput = Path.Combine(Path.GetDirectoryName(item.CurrentFileName)!, $"vad_{Guid.NewGuid()}.wav");
+                        var vadProcess = FfmpegGenerator.CompressInternalSilence(currentFile, vadOutput, vadMaxSilence);
+                        await vadProcess.StartAndWaitAsync(cancellationToken, segmentOperationTimeout);
 
-                var addDuration = 0d;
-                if (next != null && p.EndTime.TotalMilliseconds < next.Paragraph.StartTime.TotalMilliseconds)
-                {
-                    var diff = next.Paragraph.StartTime.TotalMilliseconds - p.EndTime.TotalMilliseconds;
-                    addDuration = Math.Min(1000, diff);
-                    if (addDuration < 0)
+                        if (File.Exists(vadOutput) && new FileInfo(vadOutput).Length > 0)
+                        {
+                            currentFile = vadOutput;
+                        }
+                    }
+
+                    var addDuration = 0d;
+                    if (next != null && p.EndTime.TotalMilliseconds < next.Paragraph.StartTime.TotalMilliseconds)
                     {
-                        addDuration = 0;
+                        var diff = next.Paragraph.StartTime.TotalMilliseconds - p.EndTime.TotalMilliseconds;
+                        addDuration = Math.Min(1000, diff);
+                        if (addDuration < 0)
+                        {
+                            addDuration = 0;
+                        }
                     }
-                }
 
-                var mediaInfo = FfmpegMediaInfo.Parse(currentFile);
-                if (mediaInfo.Duration == null)
-                {
-                    continue;
-                }
+                    var mediaInfo = FfmpegMediaInfo.Parse(currentFile);
+                    if (mediaInfo.Duration == null)
+                    {
+                        // The trim/VAD output is missing or unreadable (ffmpeg problem). Keep the
+                        // engine's original audio at original speed - same policy as the other
+                        // failure paths - instead of silently dropping the line from the output.
+                        skippedNoDurationCount++;
+                        Se.WriteToolsLog($"TTS FixSpeed: segment {index + 1} - could not read duration of \"{currentFile}\" (trim output missing or unreadable; ffmpeg problem?) - keeping original audio", true);
+                        resultList.Add(new TtsStepResult
+                        {
+                            Paragraph = p,
+                            Text = item.Text,
+                            CurrentFileName = item.CurrentFileName,
+                            SpeedFactor = 1.0f,
+                            Voice = item.Voice,
+                            EngineName = item.EngineName,
+                            Model = item.Model,
+                            Instruction = item.Instruction,
+                        });
+                        continue;
+                    }
 
-                // If audio already fits after silence removal/compression, no time-stretching needed
-                if (mediaInfo.Duration.TotalMilliseconds <= p.DurationTotalMilliseconds + addDuration)
-                {
+                    // If audio already fits after silence removal/compression, no time-stretching needed
+                    if (mediaInfo.Duration.TotalMilliseconds <= p.DurationTotalMilliseconds + addDuration)
+                    {
+                        resultList.Add(new TtsStepResult
+                        {
+                            Paragraph = p,
+                            Text = item.Text,
+                            CurrentFileName = currentFile,
+                            SpeedFactor = 1.0f,
+                            Voice = item.Voice,
+                            EngineName = item.EngineName,
+                            Model = item.Model,
+                            Instruction = item.Instruction,
+                        });
+                        continue;
+                    }
+
+                    var divisor = (decimal)(p.DurationTotalMilliseconds + addDuration);
+                    if (divisor <= 0)
+                    {
+                        resultList.Add(new TtsStepResult
+                        {
+                            Paragraph = p,
+                            Text = item.Text,
+                            CurrentFileName = item.CurrentFileName,
+                            SpeedFactor = 1.0f,
+                            Voice = item.Voice,
+                            EngineName = item.EngineName,
+                            Model = item.Model,
+                            Instruction = item.Instruction,
+                        });
+
+                        SeLogger.Error($"TextToSpeech: Duration is zero (skipping): {item.CurrentFileName}, {p}");
+                        continue;
+                    }
+
+                    // Step 3: Time-stretching (only for audio that still exceeds subtitle duration)
+                    var ext = ".wav";
+                    var factor = (decimal)mediaInfo.Duration.TotalMilliseconds / divisor;
+                    var outputFileName2 = Path.Combine(_waveFolder, $"{index}_{Guid.NewGuid()}{ext}");
+                    var overrideFileName = string.Empty;
+                    if (!string.IsNullOrEmpty(overrideFileName) && File.Exists(Path.Combine(_waveFolder, overrideFileName)))
+                    {
+                        outputFileName2 = Path.Combine(_waveFolder, $"{Path.GetFileNameWithoutExtension(overrideFileName)}_{Guid.NewGuid()}{ext}");
+                    }
+
                     resultList.Add(new TtsStepResult
                     {
                         Paragraph = p,
                         Text = item.Text,
-                        CurrentFileName = currentFile,
-                        SpeedFactor = 1.0f,
+                        CurrentFileName = outputFileName2,
+                        SpeedFactor = (float)factor,
                         Voice = item.Voice,
                         EngineName = item.EngineName,
                         Model = item.Model,
                         Instruction = item.Instruction,
                     });
-                    continue;
-                }
 
-                var divisor = (decimal)(p.DurationTotalMilliseconds + addDuration);
-                if (divisor <= 0)
-                {
-                    resultList.Add(new TtsStepResult
+                    // Use rubberband (WSOLA) for high-quality pitch-preserving stretch, or atempo as fallback
+                    Process speedProcess;
+                    if (doHighQualityStretch)
                     {
-                        Paragraph = p,
-                        Text = item.Text,
-                        CurrentFileName = item.CurrentFileName,
-                        SpeedFactor = 1.0f,
-                        Voice = item.Voice,
-                        EngineName = item.EngineName,
-                        Model = item.Model,
-                        Instruction = item.Instruction,
-                    });
+                        speedProcess = FfmpegGenerator.ChangeSpeedHighQuality(currentFile, outputFileName2, (float)factor);
+                    }
+                    else
+                    {
+                        speedProcess = FfmpegGenerator.ChangeSpeed(currentFile, outputFileName2, (float)factor);
+                    }
+                    await speedProcess.StartAndWaitAsync(cancellationToken, segmentOperationTimeout);
 
-                    SeLogger.Error($"TextToSpeech: Duration is zero (skipping): {item.CurrentFileName}, {p}");
-                    continue;
+                    // Fallback: if rubberband failed (not available in FFmpeg build), retry with atempo
+                    if (doHighQualityStretch && (!File.Exists(outputFileName2) || new FileInfo(outputFileName2).Length == 0))
+                    {
+                        var fallbackProcess = FfmpegGenerator.ChangeSpeed(currentFile, outputFileName2, (float)factor);
+                        await fallbackProcess.StartAndWaitAsync(cancellationToken, segmentOperationTimeout);
+                    }
+
+                    if (!File.Exists(outputFileName2) || new FileInfo(outputFileName2).Length == 0)
+                    {
+                        // Speed change produced nothing - fall back to the un-stretched audio so the
+                        // segment is not lost (it may overlap the next line slightly).
+                        failedCount++;
+                        resultList[resultList.Count - 1].CurrentFileName = currentFile;
+                        resultList[resultList.Count - 1].SpeedFactor = 1.0f;
+                        Se.WriteToolsLog($"TTS FixSpeed: segment {index + 1} speed change (factor {factor:0.###}) produced no output - keeping original speed", true);
+                    }
+                    else
+                    {
+                        stretchedCount++;
+                    }
                 }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Keep the segment at original speed and continue with the rest.
+                    failedCount++;
+                    SeLogger.Error(ex, $"TextToSpeech: FixSpeed failed for segment {index + 1} - keeping original audio");
+                    Se.WriteToolsLog($"TTS FixSpeed: segment {index + 1} failed ({ex.Message}) - keeping original audio", true);
 
-                // Step 3: Time-stretching (only for audio that still exceeds subtitle duration)
-                var ext = ".wav";
-                var factor = (decimal)mediaInfo.Duration.TotalMilliseconds / divisor;
-                var outputFileName2 = Path.Combine(_waveFolder, $"{index}_{Guid.NewGuid()}{ext}");
-                var overrideFileName = string.Empty;
-                if (!string.IsNullOrEmpty(overrideFileName) && File.Exists(Path.Combine(_waveFolder, overrideFileName)))
-                {
-                    outputFileName2 = Path.Combine(_waveFolder, $"{Path.GetFileNameWithoutExtension(overrideFileName)}_{Guid.NewGuid()}{ext}");
-                }
-
-                resultList.Add(new TtsStepResult
-                {
-                    Paragraph = p,
-                    Text = item.Text,
-                    CurrentFileName = outputFileName2,
-                    SpeedFactor = (float)factor,
-                    Voice = item.Voice,
-                    EngineName = item.EngineName,
-                    Model = item.Model,
-                    Instruction = item.Instruction,
-                });
-
-                // Use rubberband (WSOLA) for high-quality pitch-preserving stretch, or atempo as fallback
-                Process speedProcess;
-                if (doHighQualityStretch)
-                {
-                    speedProcess = FfmpegGenerator.ChangeSpeedHighQuality(currentFile, outputFileName2, (float)factor);
-                }
-                else
-                {
-                    speedProcess = FfmpegGenerator.ChangeSpeed(currentFile, outputFileName2, (float)factor);
-                }
-                await speedProcess.StartAndWaitAsync(cancellationToken);
-
-                // Fallback: if rubberband failed (not available in FFmpeg build), retry with atempo
-                if (doHighQualityStretch && (!File.Exists(outputFileName2) || new FileInfo(outputFileName2).Length == 0))
-                {
-                    var fallbackProcess = FfmpegGenerator.ChangeSpeed(currentFile, outputFileName2, (float)factor);
-                    await fallbackProcess.StartAndWaitAsync(cancellationToken);
+                    // The stretch path adds its result entry before running ffmpeg, so this
+                    // segment may already be in the list - point that entry back at the original
+                    // audio instead of adding a duplicate.
+                    if (resultList.Count > 0 && ReferenceEquals(resultList[resultList.Count - 1].Paragraph, p))
+                    {
+                        resultList[resultList.Count - 1].CurrentFileName = item.CurrentFileName;
+                        resultList[resultList.Count - 1].SpeedFactor = 1.0f;
+                    }
+                    else
+                    {
+                        resultList.Add(new TtsStepResult
+                        {
+                            Paragraph = p,
+                            Text = item.Text,
+                            CurrentFileName = item.CurrentFileName,
+                            SpeedFactor = 1.0f,
+                            Voice = item.Voice,
+                            EngineName = item.EngineName,
+                            Model = item.Model,
+                            Instruction = item.Instruction,
+                        });
+                    }
                 }
             }
             ProgressValue = 100;
+
+            Se.WriteToolsLog(
+                $"TTS FixSpeed done: {resultList.Count} of {previousStepResult.Length} segments" +
+                $", stretched={stretchedCount}" +
+                $", skippedNoAudio={skippedNoAudioCount}" +
+                $", skippedNoDuration={skippedNoDurationCount}" +
+                $", failed={failedCount}",
+                force: skippedNoAudioCount + skippedNoDurationCount + failedCount > 0);
 
             return resultList.ToArray();
         }
         catch (OperationCanceledException)
         {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Unexpected failure outside the per-segment guard (e.g. ffmpeg missing entirely).
+            // Report it instead of leaving the window disabled on the last progress text (#12093).
+            SeLogger.Error(ex, "TextToSpeech: FixSpeed failed");
+            Se.WriteToolsLog("TTS FixSpeed failed: " + ex, true);
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                if (Window != null)
+                {
+                    await MessageBox.Show(
+                        Window,
+                        Se.Language.General.Error,
+                        "Adjusting audio speed failed: " + ex.Message + Environment.NewLine + Environment.NewLine +
+                        "See error-log.txt in the Subtitle Edit data folder for details.",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            });
             return null;
         }
     }
@@ -2983,6 +2749,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         try
         {
             var resultList = new List<TtsStepResult>();
+            var failedCount = 0;
             ProgressValue = 0;
 
             for (var index = 0; index < previousStepResult.Length; index++)
@@ -2996,7 +2763,19 @@ public partial class TextToSpeechViewModel : ObservableObject
                     continue;
                 }
 
-                var processedFile = await TtsPostProcessor.ApplyPostProcessing(item.CurrentFileName, Path.GetDirectoryName(item.CurrentFileName)!, cancellationToken);
+                var processedFile = item.CurrentFileName;
+                try
+                {
+                    processedFile = await TtsPostProcessor.ApplyPostProcessing(item.CurrentFileName, Path.GetDirectoryName(item.CurrentFileName)!, cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Keep the unprocessed audio and continue with the rest - one bad segment
+                    // must not abort the whole run (#12093).
+                    failedCount++;
+                    SeLogger.Error(ex, $"TextToSpeech: post-processing failed for segment {index + 1} - keeping unprocessed audio");
+                    Se.WriteToolsLog($"TTS post-processing: segment {index + 1} failed ({ex.Message}) - keeping unprocessed audio", true);
+                }
 
                 resultList.Add(new TtsStepResult
                 {
@@ -3019,10 +2798,34 @@ public partial class TextToSpeechViewModel : ObservableObject
             }
 
             ProgressValue = 100;
+
+            Se.WriteToolsLog(
+                $"TTS post-processing done: {resultList.Count} of {previousStepResult.Length} segments, failed={failedCount}",
+                force: failedCount > 0);
+
             return resultList.ToArray();
         }
         catch (OperationCanceledException)
         {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            SeLogger.Error(ex, "TextToSpeech: post-processing failed");
+            Se.WriteToolsLog("TTS post-processing failed: " + ex, true);
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                if (Window != null)
+                {
+                    await MessageBox.Show(
+                        Window,
+                        Se.Language.General.Error,
+                        "Audio post-processing failed: " + ex.Message + Environment.NewLine + Environment.NewLine +
+                        "See error-log.txt in the Subtitle Edit data folder for details.",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            });
             return null;
         }
     }
@@ -3065,6 +2868,82 @@ public partial class TextToSpeechViewModel : ObservableObject
         return null;
     }
 
+    // The compact cloud-engine descriptions ("pay/fast/good") read like debug output - expand
+    // them into words; free-form descriptions (the CrispASR engines) are shown as-is. The
+    // source strings are hardcoded English in the engines, so this map matches that.
+    // Middle-truncates a file name so the tail (and thus the extension) stays visible.
+    private static string CapFileName(string fileName, int maxLength)
+    {
+        if (fileName.Length <= maxLength)
+        {
+            return fileName;
+        }
+
+        const int keepEnd = 12;
+        return string.Concat(fileName.AsSpan(0, maxLength - keepEnd - 1), "…", fileName.AsSpan(fileName.Length - keepEnd));
+    }
+
+    private static string PrettifyEngineDescription(string? description)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            return string.Empty;
+        }
+
+        var parts = description.Split('/');
+        if (parts.Length < 2 || parts.Any(x => x.Contains(' ')))
+        {
+            return description;
+        }
+
+        var words = parts.Select(x => x.Trim().ToLowerInvariant() switch
+        {
+            "free" => "Free",
+            "pay" => "Paid",
+            "fast" => "Fast",
+            "slow" => "Slow",
+            "good" => "good quality",
+            "ok" => "ok quality",
+            "multilingual" => "multilingual",
+            _ => x.Trim(),
+        });
+        return string.Join(" \u00b7 ", words);
+    }
+
+    // Elapsed/remaining for the progress row. Driven by ProgressValue changes (always raised on
+    // the UI thread by the pipeline); the estimate is a simple rate projection and only shows
+    // once enough progress exists for it not to jump around.
+    private readonly Stopwatch _generateStopwatch = new();
+
+    partial void OnProgressValueChanged(double value)
+    {
+        if (!IsGenerating || value <= 0)
+        {
+            return;
+        }
+
+        ProgressPercentText = $"{Math.Clamp((int)Math.Round(value), 0, 100)}%";
+
+        var elapsed = _generateStopwatch.Elapsed;
+        if (elapsed.TotalSeconds < 3)
+        {
+            return;
+        }
+
+        if (value >= 3 && value <= 100)
+        {
+            var remaining = TimeSpan.FromSeconds(elapsed.TotalSeconds * (100 - value) / value);
+            ProgressEtaText = string.Format(Se.Language.Video.TextToSpeech.XElapsedYLeft, FormatProgressDuration(elapsed), FormatProgressDuration(remaining));
+        }
+        else
+        {
+            ProgressEtaText = string.Format(Se.Language.Video.TextToSpeech.XElapsed, FormatProgressDuration(elapsed));
+        }
+    }
+
+    private static string FormatProgressDuration(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}" : $"{t.Minutes}:{t.Seconds:00}";
+
     internal void SelectedEngineChanged(object? sender, SelectionChangedEventArgs e)
     {
         var engine = SelectedEngine;
@@ -3075,15 +2954,54 @@ public partial class TextToSpeechViewModel : ObservableObject
 
         Dispatcher.UIThread.PostSafe(async () =>
         {
+            // Captured before any SelectedModel assignment below: OnSelectedModelChanged
+            // persists the Qwen3 (CrispASR) model on every change, so the generic
+            // "SelectedModel = Models.FirstOrDefault()" default overwrote the saved model
+            // with "1.7B VoiceDesign" right before the engine block tried to restore it -
+            // the user's model choice never survived a window open or engine re-switch.
+            var savedQwen3CrispAsrModel = Se.Settings.Video.TextToSpeech.Qwen3TtsCrispAsrModel;
+
             IsEngineSettingsVisible = false;
             IsModelDownloadVisible = false;
-            var voices = await engine.GetVoices(SelectedLanguage?.Code ?? string.Empty);
+
+            // Engine capability flags first, and never skipped: when the voice load below fails
+            // or returns nothing (missing API key, no network), the user must still get the new
+            // engine's own fields (API key, region, model, ...) to fix the cause. The old flow
+            // returned early on an empty voice list, leaving every panel flag - and the voice
+            // list itself - describing the *previous* engine, so Generate could then hand the
+            // wrong engine's Voice object to Speak.
+            HasLanguageParameter = engine.HasLanguageParameter;
+            HasApiKey = engine.HasApiKey;
+            HasRegion = engine.HasRegion;
+            HasModel = engine.HasModel;
+            HasKeyFile = engine.HasKeyFile;
+            IsEdgeTtsEngine = engine is EdgeTts;
+            EngineDescription = PrettifyEngineDescription(engine.Description);
+            HasEngineDescription = !string.IsNullOrEmpty(EngineDescription);
+
+            Voice[] voices;
+            try
+            {
+                voices = await engine.GetVoices(SelectedLanguage?.Code ?? string.Empty);
+            }
+            catch (Exception ex)
+            {
+                // PostSafe used to swallow this, skipping the whole engine switch. Show an empty
+                // voice list for the new engine instead of the previous engine's voices.
+                SeLogger.Error(ex, $"Loading voices for {engine.Name} failed");
+                voices = [];
+            }
+
             Voices.Clear();
             foreach (var vo in voices)
             {
                 Voices.Add(vo);
             }
             VoiceCount = Voices.Count;
+            // The label binds VoiceCountInfo; only VoiceCount was ever written, so the voice
+            // count next to the combo stayed permanently blank.
+            VoiceCountInfo = string.Format(Se.Language.Video.TextToSpeech.XVoices, Voices.Count);
+            IsVoiceCountVisible = Voices.Count > 0;
 
             var lastVoice = Voices.FirstOrDefault(v => v.Name == Se.Settings.Video.TextToSpeech.Voice);
             if (lastVoice == null)
@@ -3092,20 +3010,13 @@ public partial class TextToSpeechViewModel : ObservableObject
                                                        p.Name.Contains("English", StringComparison.OrdinalIgnoreCase));
             }
             SelectedVoice = lastVoice ?? Voices.FirstOrDefault();
-            if (SelectedVoice == null)
-            {
-                return;
-            }
 
-            HasLanguageParameter = engine.HasLanguageParameter;
-            HasApiKey = engine.HasApiKey;
-            HasRegion = engine.HasRegion;
-            HasModel = engine.HasModel;
-            HasKeyFile = engine.HasKeyFile;
-            IsEdgeTtsEngine = engine is EdgeTts;
+            // Unconditional (handles a null voice fine): gating this on a loaded voice left the
+            // previous engine's instruction box and voice-combo lock in place when the new
+            // engine's voice list failed to load or was empty.
             ApplyInstructionForEngine(engine);
 
-            if (HasLanguageParameter)
+            if (HasLanguageParameter && SelectedVoice != null)
             {
                 var languages = await engine.GetLanguages(SelectedVoice, SelectedModel);
                 Languages.Clear();
@@ -3119,6 +3030,13 @@ public partial class TextToSpeechViewModel : ObservableObject
                 SelectedLanguage = engine is OmniVoiceTtsCpp
                     ? Languages.FirstOrDefault(l => l.Code == "en") ?? Languages.FirstOrDefault()
                     : Languages.FirstOrDefault();
+            }
+            else if (SelectedVoice == null)
+            {
+                // No voices for the new engine - don't keep listing the previous engine's
+                // languages next to it.
+                Languages.Clear();
+                SelectedLanguage = null;
             }
 
             if (HasRegion)
@@ -3185,7 +3103,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             }
             else if (SelectedEngine is Qwen3TtsCrispAsr)
             {
-                SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.Qwen3TtsCrispAsrModel);
+                SelectedModel = Models.FirstOrDefault(p => p == savedQwen3CrispAsrModel);
                 if (string.IsNullOrEmpty(SelectedModel))
                 {
                     SelectedModel = Models.FirstOrDefault();
@@ -3298,6 +3216,15 @@ public partial class TextToSpeechViewModel : ObservableObject
         if (e.Key == Key.Escape)
         {
             e.Handled = true;
+            // Escape during a run cancels the run (like the Cancel button) instead of closing
+            // the window over a live pipeline - closing also fires StopAllCrispAsrServers,
+            // killing the engine server an in-flight Speak is talking to.
+            if (IsGenerating)
+            {
+                _cancellationTokenSource?.Cancel();
+                return;
+            }
+
             Window?.Close();
         }
         else if (UiUtil.IsHelp(e))
@@ -3309,6 +3236,18 @@ public partial class TextToSpeechViewModel : ObservableObject
 
     internal void OnClosing(WindowClosingEventArgs e)
     {
+        // Title-bar close during a run: cancel the pipeline so it unwinds instead of running
+        // headless against a closed window (progress writes, folder picker, message boxes) while
+        // StopAllCrispAsrServers below kills the engine server it is talking to.
+        try { _cancellationTokenSource?.Cancel(); } catch (ObjectDisposedException) { }
+
+        // An enabled System.Timers.Timer is rooted: without stopping it here, every open/close
+        // of this window leaked a view model whose Elapsed handler kept firing every 100 ms for
+        // the rest of the session (ReviewSpeechViewModel already does this on close).
+        _timer.Stop();
+        _timer.Elapsed -= OnTimerOnElapsed;
+        _timer.Dispose();
+
         lock (_playLock)
         {
             _mpvContext?.Dispose();
