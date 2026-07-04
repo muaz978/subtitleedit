@@ -104,27 +104,13 @@ public partial class DownloadSpeechToTextModelsViewModel : ObservableObject
         {
             _timer.Stop();
 
-            if (_downloadTask is { IsCompleted: true })
+            // IsCompletedSuccessfully, not the broader IsCompleted (also true for
+            // Faulted/Canceled), so a failed download falls through to the IsFaulted
+            // branch below instead of proceeding as if it had succeeded.
+            if (_downloadTask is { IsCompletedSuccessfully: true })
             {
                 CompleteDownload();
-
-                _downloadIndex++;
-                if (_downloadIndex < _downloadUrls.Count)
-                {
-                    var url = _downloadUrls[_downloadIndex];
-                    _downloadFileName = GetDownloadFileName(_downloadModel!, url);
-                    _downloadTask = _whisperDownloadService.DownloadFile(_downloadUrls[_downloadIndex], _downloadFileName, MakeDownloadProgress(), _cancellationTokenSource.Token);
-                    ProgressFileName = string.Format(Se.Language.General.FileNameX, Path.GetFileName(_downloadUrls[_downloadIndex]));
-                    ProgressValue = 0;
-                    _timer.Start();
-
-                    return;
-                }
-
-                _downloadTask = null;
-
-                OkPressed = true;
-                Close();
+                StartNextOrFinish();
 
                 return;
             }
@@ -136,18 +122,78 @@ public partial class DownloadSpeechToTextModelsViewModel : ObservableObject
                 {
                     ProgressText = "Download canceled";
                     Cancel();
+
+                    return;
                 }
-                else
+
+                // A 404 (FileNotFoundException) on an optional file isn't fatal: each model
+                // ships only one of vocabulary.txt / vocabulary.json, but the URL list asks for
+                // both, so one always 404s. Skip it and continue, like faster-whisper-xxl.exe
+                // does - only model.bin is required. (#12133 follow-up)
+                if (ex is FileNotFoundException && IsOptionalFile(_downloadUrls[_downloadIndex]))
                 {
-                    ProgressText = "Download failed";
-                    Error = ex?.Message ?? "Unknown error";
+                    DeletePartialDownload();
+                    StartNextOrFinish();
+
+                    return;
                 }
+
+                ProgressText = "Download failed";
+                Error = ex?.Message ?? "Unknown error";
 
                 return;
             }
 
             _timer.Start();
         }
+    }
+
+    // Files a model may or may not ship. A model provides exactly one vocabulary variant,
+    // but the URL list requests both, so a 404 on one of these is expected, not an error.
+    private static readonly string[] OptionalFileNames = { "vocabulary.txt", "vocabulary.json" };
+
+    private static bool IsOptionalFile(string url)
+    {
+        var fileName = Path.GetFileName(url);
+        return OptionalFileNames.Any(f => f.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void StartNextOrFinish()
+    {
+        _downloadIndex++;
+        if (_downloadIndex < _downloadUrls.Count)
+        {
+            var url = _downloadUrls[_downloadIndex];
+            _downloadFileName = GetDownloadFileName(_downloadModel!, url);
+            _downloadTask = _whisperDownloadService.DownloadFile(url, _downloadFileName, MakeDownloadProgress(), _cancellationTokenSource.Token);
+            ProgressFileName = string.Format(Se.Language.General.FileNameX, Path.GetFileName(url));
+            ProgressValue = 0;
+            _timer.Start();
+
+            return;
+        }
+
+        _downloadTask = null;
+
+        OkPressed = true;
+        Close();
+    }
+
+    private void DeletePartialDownload()
+    {
+        if (!string.IsNullOrEmpty(_downloadFileName) && File.Exists(_downloadFileName))
+        {
+            try
+            {
+                File.Delete(_downloadFileName);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        _downloadFileName = string.Empty;
     }
 
     private void CompleteDownload()
@@ -254,7 +300,7 @@ public partial class DownloadSpeechToTextModelsViewModel : ObservableObject
             string? sourcePath;
             if (engine.CustomModelIsFolder)
             {
-                var folders = await Window.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+                var folders = await NativePickers.OpenFolderPickerAsync(Window, new FolderPickerOpenOptions
                 {
                     Title = Se.Language.Video.AudioToText.SelectModel,
                     AllowMultiple = false,
@@ -263,7 +309,7 @@ public partial class DownloadSpeechToTextModelsViewModel : ObservableObject
             }
             else
             {
-                var files = await Window.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                var files = await NativePickers.OpenFilePickerAsync(Window, new FilePickerOpenOptions
                 {
                     Title = Se.Language.Video.AudioToText.SelectModel,
                     AllowMultiple = false,

@@ -64,7 +64,10 @@ public partial class DownloadLibMpvViewModel : ObservableObject
                 return;
             }
 
-            if (_downloadTask is { IsCompleted: true })
+            // IsCompletedSuccessfully, not the broader IsCompleted (also true for
+            // Faulted/Canceled), so a failed download falls through to the IsFaulted
+            // branch below instead of proceeding as if it had succeeded.
+            if (_downloadTask is { IsCompletedSuccessfully: true })
             {
                 _timer.Stop();
                 _done = true;
@@ -218,6 +221,9 @@ public partial class DownloadLibMpvViewModel : ObservableObject
 
     internal void OnKeyDown(KeyEventArgs e)
     {
-        CommandCancel();
+        if (e.Key == Key.Escape)
+        {
+            CommandCancel();
+        }
     }
 }

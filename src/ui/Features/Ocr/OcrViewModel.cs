@@ -2452,8 +2452,18 @@ public partial class OcrViewModel : ObservableObject
 
         _ = Task.Run(() =>
         {
-            ocrEngine.OcrBatch(batchImages, language, ocrProgress, cancellationToken);
-            IsOcrRunning = false;
+            try
+            {
+                ocrEngine.OcrBatch(batchImages, language, ocrProgress, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                Se.LogError(exception, "Error running Google Lens OCR");
+            }
+            finally
+            {
+                IsOcrRunning = false;
+            }
         });
     }
 
@@ -2535,8 +2545,18 @@ public partial class OcrViewModel : ObservableObject
 
         _ = Task.Run(async () =>
         {
-            await ocrEngine.OcrBatch(batchImages, language, ocrProgress, cancellationToken);
-            IsOcrRunning = false;
+            try
+            {
+                await ocrEngine.OcrBatch(batchImages, language, ocrProgress, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                Se.LogError(exception, "Error running Google Lens OCR");
+            }
+            finally
+            {
+                IsOcrRunning = false;
+            }
         });
     }
 
@@ -4443,7 +4463,11 @@ public partial class OcrViewModel : ObservableObject
 
     public void DictionaryChanged()
     {
-        IsDictionaryLoaded = Dictionaries.IndexOf(SelectedDictionary ?? Dictionaries.First()) > 0;
+        // Must stay safe when Dictionaries is empty: this runs from the combo's SelectionChanged, which
+        // fires mid-repopulate when LoadDictionaries clears the list (SelectedDictionary is null then).
+        // Calling Dictionaries.First() there threw and aborted LoadDictionaries before it re-added any
+        // items, leaving the Dictionary combo permanently empty after a download.
+        IsDictionaryLoaded = SelectedDictionary != null && Dictionaries.IndexOf(SelectedDictionary) > 0;
     }
 
     internal void OnLoaded()

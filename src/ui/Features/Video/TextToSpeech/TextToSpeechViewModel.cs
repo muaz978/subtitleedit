@@ -989,6 +989,10 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             IndexTtsCrispAsr.StopServer();
         }
+        if (keepAlive is not CosyVoice3CrispAsr)
+        {
+            CosyVoice3CrispAsr.StopServer();
+        }
         if (keepAlive is not ChatterboxTtsCpp)
         {
             ChatterboxTtsCpp.StopServer();
@@ -1676,7 +1680,10 @@ public partial class TextToSpeechViewModel : ObservableObject
                 Languages.ToArray(),
                 SelectedLanguage,
                 videoFileNameForReview,
-                Path.GetDirectoryName(fileName)!,
+                // Scratch folder for regenerate intermediates - NOT the imported JSON's folder:
+                // using that folder filled the user's own export folder with GUID-named temp
+                // wavs on every regenerate (#12093). Same location the fresh Generate flow uses.
+                Path.GetTempPath(),
                 peaksForReview);
             // Forward the imported cast so a subsequent Export round-trips the mappings instead
             // of writing ActorVoiceMappings = [] back to SubtitleEditTts.json.
@@ -1693,6 +1700,18 @@ public partial class TextToSpeechViewModel : ObservableObject
         // no merged wav, no dialog, nothing (#12093).
         if (result.OkPressed)
         {
+            // Enter the same visible "generating" state as a fresh Generate run - progress bar,
+            // status text and a working Cancel button. Without this the merge ran with the
+            // window looking completely idle, giving no sign anything was happening (#12093).
+            ProgressValue = 0;
+            ProgressText = string.Empty;
+            ProgressPercentText = string.Empty;
+            ProgressEtaText = string.Empty;
+            IsGenerating = true;
+            IsNotGenerating = false;
+            ProgressOpacity = 1.0;
+            DoneOrCancelText = Se.Language.General.Cancel;
+
             try
             {
                 await MergeAndAddToVideo(result.StepResults);
@@ -1908,16 +1927,19 @@ public partial class TextToSpeechViewModel : ObservableObject
             return;
         }
 
-        var result = await _folderHelper.PickFolderAsync(Window!, Se.Language.General.SelectedAFolderToSaveTo);
-        if (string.IsNullOrEmpty(result))
+        // Save dialog with the subtitle's name as the default, instead of a folder picker plus
+        // a silently chosen name. The old exists-check fallback chain (video name -> subtitle
+        // name -> GUID) gave repeated exports to the same folder a different name every run,
+        // ending in a bare GUID (#12093). The native dialog owns the overwrite confirmation.
+        var audioFileName = await _fileHelper.PickSaveFile(Window!, ".wav", GetSuggestedMergedAudioFileName(), Se.Language.General.SaveFileAsTitle);
+        if (string.IsNullOrEmpty(audioFileName))
         {
             ResetGeneratingUiState();
             return;
         }
-        var outputFolder = result;
-        var audioFileName = Path.Combine(outputFolder, GetBestFileName(outputFolder, ".wav"));
+        var outputFolder = Path.GetDirectoryName(audioFileName)!;
 
-        File.Move(mergedAudioFileName, audioFileName);
+        File.Move(mergedAudioFileName, audioFileName, true);
         Se.WriteToolsLog($"TTS merge done: wrote \"{audioFileName}\"");
 
         await HandleAddToVideo(audioFileName, outputFolder, _cancellationToken);
@@ -2149,28 +2171,27 @@ public partial class TextToSpeechViewModel : ObservableObject
         return silenceFileName;
     }
 
-    private string GetBestFileName(string folder, string extension)
+    /// <summary>
+    /// Default name offered in the merged-wav save dialog: the subtitle's own name (what the
+    /// user asked for in #12093), the video's name when the subtitle is unsaved, and a generic
+    /// name as the last resort. Returns a full path when the source's folder is known, so the
+    /// dialog also starts in that folder.
+    /// </summary>
+    private string GetSuggestedMergedAudioFileName()
     {
-        var returnFileName = string.Empty;
-        if (!string.IsNullOrEmpty(_videoFileName))
+        // A new, never-saved subtitle has the literal FileName "Untitled" (no path/extension).
+        var subtitleFileName = _subtitle.FileName;
+        var sourceFileName = !string.IsNullOrEmpty(subtitleFileName) && subtitleFileName != "Untitled"
+            ? subtitleFileName
+            : _videoFileName;
+        if (string.IsNullOrEmpty(sourceFileName))
         {
-            returnFileName = Path.GetFileNameWithoutExtension(_videoFileName) + extension;
-        }
-        if (!string.IsNullOrEmpty(returnFileName) && !File.Exists(Path.Combine(folder, returnFileName)))
-        {
-            return returnFileName;
-        }
-
-        if (!string.IsNullOrEmpty(_subtitle.FileName))
-        {
-            returnFileName = Path.GetFileNameWithoutExtension(_subtitle.FileName) + extension;
-        }
-        if (!string.IsNullOrEmpty(returnFileName) && !File.Exists(Path.Combine(folder, returnFileName)))
-        {
-            return returnFileName;
+            return "SubtitleEditTts.wav";
         }
 
-        return Guid.NewGuid() + extension;
+        var folder = Path.GetDirectoryName(sourceFileName);
+        var name = Path.GetFileNameWithoutExtension(sourceFileName) + ".wav";
+        return string.IsNullOrEmpty(folder) ? name : Path.Combine(folder, name);
     }
 
     private async Task<TtsStepResult[]?> GenerateSpeech(CancellationToken cancellationToken)
