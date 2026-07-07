@@ -512,6 +512,7 @@ public class LanguageGeneral
     public string SetOutCueToClosestShotChangeLeftGreenZone { get; set; }
     public string SetOutCueToClosestShotChangeRightGreenZone { get; set; }
     public string SetStart { get; set; }
+    public string SetStartAndGoToNext { get; set; }
     public string SetStartAndKeepDuration { get; set; }
     public string SetStartAndOffsetTheRest { get; set; }
     public string SetUpLikeSubtitleEdit4 { get; set; }
@@ -667,6 +668,7 @@ public class LanguageGeneral
     public string VideoFile { get; set; }
     public string VideoFileGeneratedX { get; set; }
     public string VideoFiles { get; set; }
+    public string VideoAndAudioFiles { get; set; }
     public string VideoInformation { get; set; }
     public string VideoOffset { get; set; }
     public string VideoOneFrameBack { get; set; }
@@ -729,6 +731,10 @@ public class LanguageGeneral
     public string OpenAiCompatibleSttLanguage { get; set; }
     public string OpenAiCompatibleSttTemperature { get; set; }
     public string OpenAiCompatibleSttPrompt { get; set; }
+    public string DashScopeSttRegion { get; set; }
+    public string DashScopeSttEnableWords { get; set; }
+    public string DashScopeSttRegionKeyHint { get; set; }
+    public string OnlineSttApiKeyMissing { get; set; }
     public string OpenAiCompatibleSttAutoTranscribeOnAudioSelection { get; set; }
     public string OpenAiCompatibleSttStream { get; set; }
     public string OpenAiCompatibleSttStreamHint { get; set; }
@@ -1260,6 +1266,7 @@ public class LanguageGeneral
         SetOutCueToClosestShotChangeLeftGreenZone = "Set out-cue to closest shot change (snap to left green zone)";
         SetOutCueToClosestShotChangeRightGreenZone = "Set out-cue to closest shot change (snap to right green zone)";
         SetStart = "Set start";
+        SetStartAndGoToNext = "Set start and go to next";
         SetStartAndKeepDuration = "Set start and keep duration";
         SetStartAndOffsetTheRest = "Set start and offset the rest";
         SetUpLikeSubtitleEdit4 = "Set up like Subtitle Edit 4 (theme, shortcuts, replace rules)";
@@ -1415,6 +1422,7 @@ public class LanguageGeneral
         VideoFile = "Video file";
         VideoFileGeneratedX = "Video file generated: \"{0}\"";
         VideoFiles = "Video files";
+        VideoAndAudioFiles = "Video and audio files";
         VideoInformation = "Video info";
         VideoOffset = "Video offset";
         VideoOneFrameBack = "Video, one frame back";
@@ -1477,6 +1485,10 @@ public class LanguageGeneral
         OpenAiCompatibleSttLanguage = "Language Hint";
         OpenAiCompatibleSttTemperature = "Temperature";
         OpenAiCompatibleSttPrompt = "Prompt";
+        DashScopeSttRegion = "Region";
+        DashScopeSttEnableWords = "Word-level timestamps";
+        DashScopeSttRegionKeyHint = "Note: Alibaba Cloud Model Studio API keys are region-specific - make sure the selected region matches the region where the API key was created (China vs. International).";
+        OnlineSttApiKeyMissing = "An API key is required. Please enter your API key and try again.";
         OpenAiCompatibleSttAutoTranscribeOnAudioSelection = "Auto-transcribe new waveform selection via speech-to-text";
         OpenAiCompatibleSttStream = "Stream response";
         OpenAiCompatibleSttStreamHint = "Send 'stream=true' to receive live text deltas (SSE). Disable for servers that reject the 'stream' parameter (e.g. Groq).";

@@ -11,11 +11,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.Settings;
+using Nikse.SubtitleEdit.Features.Video.SpeechToText.Engines;
 using Nikse.SubtitleEdit.Logic.Config;
 
 namespace Nikse.SubtitleEdit.Features.Video.SpeechToText.OpenAiCompatible;
 
-public class OpenAiSttService
+public class OpenAiSttService : ISttTranscriber
 {
     private static HttpClient? _sharedHttpClient;
     private static readonly Lock SharedHttpClientLock = new();
@@ -93,8 +94,27 @@ public class OpenAiSttService
         {
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(_settings.TimeoutSeconds));
         }
-        cancellationToken = timeoutCts.Token;
 
+        try
+        {
+            return await TranscribeCoreAsync(audioStream, fileName, language, progress, segmentProgress, timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Our own timeout fired, not a user cancel — surface it as an error
+            // so the caller doesn't mistake it for cancellation.
+            throw new TimeoutException($"STT request timed out after {_settings.TimeoutSeconds} seconds.");
+        }
+    }
+
+    private async Task<OpenAiCompatibleSttResponse> TranscribeCoreAsync(
+        Stream audioStream,
+        string fileName,
+        string? language,
+        IProgress<string>? progress,
+        IProgress<OpenAiCompatibleSegment>? segmentProgress,
+        CancellationToken cancellationToken)
+    {
         using var content = new MultipartFormDataContent();
 
         // Content-Type, upload filename extension, and bytes must all agree —

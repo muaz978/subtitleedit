@@ -99,10 +99,6 @@ public class InitWaveform
                 WaveformHeightPercentage = settings.SpectrogramCombinedWaveformHeight,
             };
 
-            // The waveform is a focusable custom control with no text content, so without an
-            // accessible name screen readers announce it as a bare generic Avalonia control (#12087).
-            AutomationProperties.SetName(vm.AudioVisualizer, Se.Language.General.Waveform);
-
             vm.AudioVisualizer.OnNewSelectionInsert += vm.AudioVisualizerOnNewSelectionInsert;
             vm.AudioVisualizer.OnVideoPositionChanged += vm.AudioVisualizerOnVideoPositionChanged;
             vm.AudioVisualizer.OnToggleSelection += vm.AudioVisualizerOnToggleSelection;
@@ -115,10 +111,23 @@ public class InitWaveform
             vm.AudioVisualizer.OnSetStartAndOffsetTheRest += vm.AudioVisualizerSetStartAndOffsetTheRest;
             vm.AudioVisualizer.OnGenerateWaveformRequested += vm.AudioVisualizerOnGenerateWaveformRequested;
 
-            // Create a Flyout for the DataGrid
-            var flyout = new MenuFlyout();
             vm.AudioVisualizer.FlyoutMenuOpening += vm.AudioVisualizerFlyoutMenuOpening;
+        }
+        else
+        {
+            vm.AudioVisualizer.RemoveControlFromParent();
+        }
 
+        // The waveform is a focusable custom control with no text content, so without an
+        // accessible name screen readers announce it as a bare generic Avalonia control (#12087).
+        AutomationProperties.SetName(vm.AudioVisualizer, Se.Language.General.Waveform);
+
+        MakeWaveformContextMenu();
+
+        void MakeWaveformContextMenu()
+        {
+            // Rebuild the menu whenever the layout is rebuilt so a language change refreshes its text.
+            var flyout = new MenuFlyout();
             var insertSelectionMenuItem = new MenuItem
             {
                 Header = Se.Language.General.InsertNewSelection,
@@ -309,10 +318,6 @@ public class InitWaveform
             flyout.Items.Add(showWaveformAndSpectrogramMenuItem);
 
             vm.AudioVisualizer.MenuFlyout = flyout;
-        }
-        else
-        {
-            vm.AudioVisualizer.RemoveControlFromParent();
         }
 
         Grid.SetRow(vm.AudioVisualizer, 0);
@@ -658,6 +663,61 @@ public class InitWaveform
         Attached.SetIcon(toggleButtonCenter, IconNames.AlignHorizontalCenter);
         toggleButtonCenter.IsCheckedChanged += (s, e) => vm.WaveformCenterCheckedChanged();
 
+        var settingVideoSeek = GetToolbarSettingFor(SeWaveformToolbarItemType.VideoSeek);
+        var buttonSeekBack = new NonSpaceButton
+        {
+            FontSize = settingVideoSeek.FontSize,
+            VerticalAlignment = VerticalAlignment.Center,
+            Command = vm.WaveformVideoSeekBackCommand,
+            FontWeight = FontWeight.Bold,
+            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.SeekBackHint, shortcuts),
+        };
+        Attached.SetIcon(buttonSeekBack, IconNames.ChevronDoubleLeft);
+        AutomationProperties.SetName(buttonSeekBack, string.Format(languageHints.SeekBackHint, string.Empty).TrimEnd());
+
+        var comboBoxSeekSeconds = new ComboBox
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            FontSize = 12,
+            MaxHeight = 22,
+            MinHeight = 22,
+            // The Fluent ComboBox theme forces MinWidth ~64; clear it so the box shrinks to the
+            // widest item ("0.25") instead of leaving a wide gap before the drop-down arrow.
+            MinWidth = 0,
+            Padding = new Thickness(4, 2, 0, 2),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.SeekAmountHint, shortcuts),
+            [AutomationProperties.NameProperty] = string.Format(languageHints.SeekAmountHint, string.Empty).TrimEnd(),
+        };
+        comboBoxSeekSeconds.Bind(ItemsControl.ItemsSourceProperty, new Binding(nameof(vm.VideoSeekAmounts)));
+        comboBoxSeekSeconds.Bind(SelectingItemsControl.SelectedItemProperty, new Binding(nameof(vm.SelectedVideoSeekAmount)) { Mode = BindingMode.TwoWay });
+
+        var buttonSeekForward = new NonSpaceButton
+        {
+            FontSize = settingVideoSeek.FontSize,
+            VerticalAlignment = VerticalAlignment.Center,
+            Command = vm.WaveformVideoSeekForwardCommand,
+            FontWeight = FontWeight.Bold,
+            [ToolTip.TipProperty] = UiUtil.MakeToolTip(languageHints.SeekForwardHint, shortcuts),
+        };
+        Attached.SetIcon(buttonSeekForward, IconNames.ChevronDoubleRight);
+        AutomationProperties.SetName(buttonSeekForward, string.Format(languageHints.SeekForwardHint, string.Empty).TrimEnd());
+
+        var panelVideoSeek = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(settingVideoSeek.LeftMargin, 0, settingVideoSeek.RightMargin, 0),
+            Children =
+            {
+                buttonSeekBack,
+                comboBoxSeekSeconds,
+                buttonSeekForward,
+            },
+        };
+
         var settingMore = GetToolbarSettingFor(SeWaveformToolbarItemType.More);
         var buttonMore = new NonSpaceButton
         {
@@ -675,6 +735,14 @@ public class InitWaveform
             Command = vm.ResetWaveformZoomAndSpeedCommand,
         };
         flyoutMore.Items.Add(menuItemResetZoom);
+        var menuItemConfigureToolbar = new MenuItem
+        {
+            Header = languageHints.ConfigureToolbarItems,
+            Command = vm.ConfigureWaveformToolbarItemsCommand,
+        };
+        flyoutMore.Items.Add(menuItemConfigureToolbar);
+
+        // Keep "Hide toolbar" last - it's the destructive/exit action of this menu.
         var menuItemHideControls = new MenuItem
         {
             Header = string.Format(languageHints.HideWaveformToolbar, string.Empty),
@@ -721,6 +789,7 @@ public class InitWaveform
             panelSpeed,
             toggleButtonAutoSelectOnPlay,
             toggleButtonCenter,
+            panelVideoSeek,
             buttonMore
         );
         foreach (var sortedButton in sortableButtons)
@@ -765,6 +834,7 @@ public class InitWaveform
         StackPanel panelSpeed,
         ToggleButton toggleButtonAutoSelectOnPlay,
         ToggleButton toggleButtonCenter,
+        StackPanel panelVideoSeek,
         Button buttonMore)
     {
         var toolbarButtonForSort = new List<SortedControl>();
@@ -824,6 +894,9 @@ public class InitWaveform
                     break;
                 case SeWaveformToolbarItemType.Center:
                     toolbarButtonForSort.Add(new SortedControl { Sort = item.SortOrder, Control = toggleButtonCenter });
+                    break;
+                case SeWaveformToolbarItemType.VideoSeek:
+                    toolbarButtonForSort.Add(new SortedControl { Sort = item.SortOrder, Control = panelVideoSeek });
                     break;
                 case SeWaveformToolbarItemType.More:
                     toolbarButtonForSort.Add(new SortedControl { Sort = item.SortOrder, Control = buttonMore });

@@ -1,6 +1,40 @@
 
 Subtitle Edit Changelog
 
+v5.1.0-beta11 (4th of July 2026)
+
+* Fix settings not saving when the UI language had a duplicate/empty translation (e.g. Portuguese Brazil) - the Options dialog no longer aborts on a repeated translated string, and a failed save now logs and shows an error instead of silently doing nothing - thx rosilucia-hub
+* Fix ASSA "Set position" and "Image color picker" showing a blank video background when the "HH:MM:SS:FF" time code format was enabled - thx bichitoxxx
+* Restore the WebVTT "X-TIMESTAMP-MAP" setting (Options -> Settings -> Subtitle Formats) to optionally ignore the header offset that shifts all time codes on load - thx anakinsleftleg
+* Fix Ctrl+End / Ctrl+Home on the subtitle grid not scrolling the last/first line fully into view - thx KaDeeKe
+* Open video file dialog: add a "Video and audio files" filter as the default so audio files (e.g. mp3) can be picked without switching the filter
+* Waveform: add a customizable "<<  seek  >>" panel to the toolbar - thx BlazDT
+* Waveform: add "Configure toolbar items..." to the More menu
+* Open a .mkv without subtitles as a video file - thx KaDeeKe
+* Text to speech: apply Review window text edits back to the subtitle - thx cvrle77
+* Text to speech: fix empty language list in the Review window - thx cvrle77
+* Update Portuguese (Brazil) translation - thx rosilucia-hub
+* Update Korean translation - thx 12si27
+* Update Italian translation - thx bovirus
+
+-----------------------------------------------------------------------------------------------------
+
+v5.1.0-beta10 (4th of July 2026)
+
+* Fix online speech-to-text (OpenRouter / Alibaba Qwen3-ASR) settings layout - the engine's settings rows no longer overlap/jumble together
+* OpenRouter speech-to-text: split the transcript into multiple timed sentences instead of one long line, and run post-processing using the engine's language hint
+
+-----------------------------------------------------------------------------------------------------
+
+v5.1.0-beta9 (4th of July 2026)
+
+* Add OpenRouter and Alibaba Qwen3-ASR online speech-to-text engines to Audio to text - OpenRouter reaches Whisper/GPT-4o-transcribe/Groq/Chirp with one key; Alibaba Qwen3-ASR (DashScope) uploads the audio and transcribes asynchronously with sentence timestamps
+* Google Lens Sharp: fix scrambled word order on multi-line subtitles - the text chunks Google returns interleaved between the two lines are now re-ordered top-to-bottom/left-to-right using their bounding boxes - thx fraternl
+* OCR: fix the Dictionary combo box becoming empty after downloading/re-downloading a spell check dictionary
+* Remove redundant "Repeat previous line"/"Repeat next line" shortcuts - use "Play previous (and loop)"/"Play next (and loop)" instead (they also handle multiple selections and no selection) - thx abc16361
+
+-----------------------------------------------------------------------------------------------------
+
 v5.1.0-beta8 (3rd of July 2026)
 
 * Fix "Fix common OCR errors" doing nothing when no Hunspell dictionary is installed for the language - the OCR replace list (e.g. spa_OCRFixReplaceList.xml) is now applied on its own again - thx perkesfurmah-collab

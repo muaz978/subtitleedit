@@ -259,6 +259,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.WaveformSetStartAndOffsetTheRestCommand),  Se.Language.General.SetStartAndOffsetTheRest },
         { nameof(MainViewModel.WaveformSetEndAndOffsetTheRestCommand),  Se.Language.General.SetEndAndOffsetTheRest },
         { nameof(MainViewModel.WaveformSetStartCommand),  Se.Language.General.SetStart },
+        { nameof(MainViewModel.WaveformSetStartAndGoToNextCommand),  Se.Language.General.SetStartAndGoToNext },
         { nameof(MainViewModel.WaveformSetStartAndKeepDurationCommand),  Se.Language.General.SetStartAndKeepDuration },
         { nameof(MainViewModel.WaveformSetEndCommand),  Se.Language.General.SetEnd },
         { nameof(MainViewModel.WaveformSetEndAndGoToNextCommand),  Se.Language.General.SetEndAndGoToNext },
@@ -389,8 +390,6 @@ public static class ShortcutsMain
         { nameof(MainViewModel.SurroundWith1Command), string.Format(Se.Language.Options.Shortcuts.SurroundWithXY,  Se.Settings.Surround1Left, Se.Settings.Surround1Right) },
         { nameof(MainViewModel.SurroundWith2Command), string.Format(Se.Language.Options.Shortcuts.SurroundWithXY,  Se.Settings.Surround2Left, Se.Settings.Surround2Right) },
         { nameof(MainViewModel.SurroundWith3Command), string.Format(Se.Language.Options.Shortcuts.SurroundWithXY,  Se.Settings.Surround3Left, Se.Settings.Surround3Right) },
-        { nameof(MainViewModel.RepeatPreviousLineCommand), Se.Language.Options.Shortcuts.RepeatPreviousLine },
-        { nameof(MainViewModel.RepeatNextLineCommand), Se.Language.Options.Shortcuts.RepeatNextLine },
         { nameof(MainViewModel.InsertLineBeforeCommand), Se.Language.General.InsertBefore },
         { nameof(MainViewModel.InsertLineAfterCommand), Se.Language.General.InsertAfter },
         { nameof(MainViewModel.WaveformInsertNewSelectionCommand), Se.Language.Options.Shortcuts.WaveformInsertNewSelection },
@@ -638,6 +637,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.WaveformSetStartAndOffsetTheRestCommand, nameof(vm.WaveformSetStartAndOffsetTheRestCommand), ShortcutCategory.Waveform);
         AddShortcut(shortcuts, vm.WaveformSetEndAndOffsetTheRestCommand, nameof(vm.WaveformSetEndAndOffsetTheRestCommand), ShortcutCategory.Waveform);
         AddShortcut(shortcuts, vm.WaveformSetStartCommand, nameof(vm.WaveformSetStartCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.WaveformSetStartAndGoToNextCommand, nameof(vm.WaveformSetStartAndGoToNextCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.WaveformSetStartAndKeepDurationCommand, nameof(vm.WaveformSetStartAndKeepDurationCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.WaveformSetEndCommand, nameof(vm.WaveformSetEndCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.WaveformSetEndAndGoToNextCommand, nameof(vm.WaveformSetEndAndGoToNextCommand), ShortcutCategory.General);
@@ -762,8 +762,6 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.SurroundWith1Command, nameof(vm.SurroundWith1Command), ShortcutCategory.SubtitleGridAndTextBox);
         AddShortcut(shortcuts, vm.SurroundWith2Command, nameof(vm.SurroundWith2Command), ShortcutCategory.SubtitleGridAndTextBox);
         AddShortcut(shortcuts, vm.SurroundWith3Command, nameof(vm.SurroundWith3Command), ShortcutCategory.SubtitleGridAndTextBox);
-        AddShortcut(shortcuts, vm.RepeatPreviousLineCommand, nameof(vm.RepeatPreviousLineCommand), ShortcutCategory.General);
-        AddShortcut(shortcuts, vm.RepeatNextLineCommand, nameof(vm.RepeatNextLineCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.InsertLineBeforeCommand, nameof(vm.InsertLineBeforeCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.InsertLineAfterCommand, nameof(vm.InsertLineAfterCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.WaveformInsertNewSelectionCommand, nameof(vm.WaveformInsertNewSelectionCommand), ShortcutCategory.Waveform);

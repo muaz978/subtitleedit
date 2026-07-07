@@ -24,7 +24,7 @@
 		<PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
 		<PackageReference Include="Avalonia.Controls.DataGrid" Version="12.0.1" />
 		<PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
-		<PackageReference Include="Avalonia.Markup.Declarative" Version="12.0.4" />
+		<PackageReference Include="Avalonia.Markup.Declarative" Version="12.0.5" />
 		<PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
 		<PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
 		<!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
@@ -215,6 +215,8 @@
 		<AvaloniaResource Include="Assets\SpeechToText\WhisperOpenAI.txt">
 			<CopyToOutputDirectory></CopyToOutputDirectory>
 		</AvaloniaResource>
+		<AvaloniaResource Include="Assets\SpeechToText\OpenRouter.txt" />
+		<AvaloniaResource Include="Assets\SpeechToText\AlibabaQwen3Asr.txt" />
 		<Content Include="SE.ico" />
 		<None Remove="Assets\Ocr.zip" />
 		<AvaloniaResource Include="Assets\Ocr.zip" />

@@ -67,6 +67,7 @@ using Nikse.SubtitleEdit.Features.Ocr;
 using Nikse.SubtitleEdit.Features.Options.Language;
 using Nikse.SubtitleEdit.Features.Options.Plugins;
 using Nikse.SubtitleEdit.Features.Options.Settings;
+using Nikse.SubtitleEdit.Features.Options.Settings.WaveformToolbarItems;
 using Nikse.SubtitleEdit.Features.Options.Shortcuts;
 using Nikse.SubtitleEdit.Features.Options.WordLists;
 using Nikse.SubtitleEdit.Features.Shared;
@@ -145,6 +146,7 @@ using Nikse.SubtitleEdit.Features.Video.ShotChanges;
 using Nikse.SubtitleEdit.Features.Video.SpeechToText;
 using Nikse.SubtitleEdit.Features.Video.SpeechToText.OpenAiCompatible;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ReviewSpeech;
 using Nikse.SubtitleEdit.Features.Video.TransparentSubtitles;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
@@ -258,6 +260,8 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _isTextBoxSplitAtCursorAndVideoPositionVisible;
     [ObservableProperty] private ObservableCollection<string> _speeds;
     [ObservableProperty] private string _selectedSpeed;
+    [ObservableProperty] private ObservableCollection<string> _videoSeekAmounts;
+    [ObservableProperty] private string _selectedVideoSeekAmount;
     [ObservableProperty] private bool _showWaveformDisplayModeSeparator;
     [ObservableProperty] private bool _showWaveformOnlyWaveform;
     [ObservableProperty] private bool _showWaveformOnlySpectrogram;
@@ -608,6 +612,11 @@ public partial class MainViewModel :
             "3.0x"
         });
         SelectedSpeed = "1.0x";
+
+        VideoSeekAmounts = new ObservableCollection<string>();
+        SelectedVideoSeekAmount = string.Empty;
+        RefreshVideoSeekAmounts();
+
         VideoOffsetText = string.Empty;
         SetVideoOffsetText = Se.Language.Main.Menu.SetVideoOffset;
         WaveformGeneratingText = string.Empty;
@@ -1010,7 +1019,7 @@ public partial class MainViewModel :
         // Select synchronously rather than via SelectAndScrollToSubtitle (which posts the selection
         // to the dispatcher): the grid's SelectionChanged handler calls ResetPlaySelection, so a
         // deferred selection would null _playSelectionItem *after* we set it and break stop/loop.
-        // Mirror RepeatNextLine — change selection first, then assign _playSelectionItem.
+        // Change selection first, then assign _playSelectionItem.
         SubtitleGrid.SelectedItem = next;
         SubtitleGrid.ScrollIntoView(next, null);
         vp.Position = next.StartTime.TotalSeconds;
@@ -6667,7 +6676,7 @@ public partial class MainViewModel :
             return;
         }
 
-        await ShowDialogAsync<TextToSpeechWindow, TextToSpeechViewModel>(vm =>
+        var result = await ShowDialogAsync<TextToSpeechWindow, TextToSpeechViewModel>(vm =>
         {
             // Pass SelectedSubtitleFormat explicitly so the TTS window's cast detection uses the
             // user's *current* selection (the editor normalises subtitles to ASSA internally, so
@@ -6675,7 +6684,109 @@ public partial class MainViewModel :
             vm.Initialize(GetUpdateSubtitle(), SelectedSubtitleFormat,
                 _videoFileName ?? string.Empty, AudioVisualizer?.WavePeaks, Path.GetTempPath());
         });
+
+        await OfferToApplyTtsReviewTextChanges(result.ReviewTextChanges);
     }
+
+    /// <summary>
+    /// After the TTS window closes: if the user edited line texts in its review step, offer to
+    /// apply those edits to the subtitle so the text stays in sync with the generated audio and
+    /// doesn't have to be redone by hand (#12093). Lines are matched by the time codes they had
+    /// when the review opened - the TTS pipeline may renumber (empty-line removal keeps times) so
+    /// numbers/indices can't be used. A line merged before generation spans several original
+    /// lines, so its segment matches no single line's start+end; those edits can't be split back
+    /// and are reported rather than applied. Edits that match no line at all (e.g. an imported
+    /// session for a different subtitle) are ignored silently.
+    /// </summary>
+    private async Task OfferToApplyTtsReviewTextChanges(List<ReviewTextChange> changes)
+    {
+        if (changes.Count == 0 || Window == null)
+        {
+            return;
+        }
+
+        const double toleranceMs = 0.5;
+        var matches = new List<(SubtitleLineViewModel Line, string NewText)>();
+        var mergedCount = 0;
+        foreach (var change in changes)
+        {
+            // Exact 1:1 match - same start and end as a current line.
+            var line = Subtitles.FirstOrDefault(s =>
+                Math.Abs(s.StartTime.TotalMilliseconds - change.StartMs) < toleranceMs &&
+                Math.Abs(s.EndTime.TotalMilliseconds - change.EndMs) < toleranceMs);
+            if (line != null)
+            {
+                if (line.Text != change.NewText)
+                {
+                    matches.Add((line, change.NewText));
+                }
+
+                continue;
+            }
+
+            // No 1:1 line, but the segment starts on a real line and ends past it: this line was
+            // merged with following line(s) before generation. The edited text covers the whole
+            // merged sentence and can't be safely split back, so flag it instead of applying.
+            var mergedInto = Subtitles.FirstOrDefault(s =>
+                Math.Abs(s.StartTime.TotalMilliseconds - change.StartMs) < toleranceMs &&
+                s.EndTime.TotalMilliseconds < change.EndMs - toleranceMs);
+            if (mergedInto != null)
+            {
+                mergedCount++;
+            }
+        }
+
+        if (matches.Count == 0 && mergedCount == 0)
+        {
+            return;
+        }
+
+        var lang = Se.Language.Video.TextToSpeech;
+
+        // Only merged edits and nothing directly applicable: just tell the user why they weren't
+        // applied - there's nothing to confirm.
+        if (matches.Count == 0)
+        {
+            await MessageBox.Show(
+                Window,
+                lang.UpdateSubtitleTitle,
+                FormatCount(mergedCount, lang.ReviewMergedLinesNotUpdatedSingular, lang.ReviewMergedLinesNotUpdatedPlural),
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        var message = FormatCount(matches.Count, lang.UpdateSubtitleFromReviewSingular, lang.UpdateSubtitleFromReviewPlural);
+        if (mergedCount > 0)
+        {
+            message += Environment.NewLine + Environment.NewLine +
+                       FormatCount(mergedCount, lang.ReviewMergedLinesNotUpdatedSingular, lang.ReviewMergedLinesNotUpdatedPlural);
+        }
+
+        var answer = await MessageBox.Show(
+            Window,
+            lang.UpdateSubtitleTitle,
+            message,
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+
+        if (answer != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        foreach (var (line, newText) in matches)
+        {
+            line.Text = newText;
+        }
+
+        _updateAudioVisualizer = true;
+        ShowStatus(FormatCount(matches.Count, lang.SubtitleUpdatedFromReviewSingular, lang.SubtitleUpdatedFromReviewPlural));
+    }
+
+    // Picks the singular or plural resource string for a count, formatting the plural with {0}.
+    private static string FormatCount(int count, string singular, string plural)
+        => count == 1 ? singular : string.Format(plural, count);
 
     [RelayCommand]
     private async Task ShowVideoTransparentSubtitles()
@@ -8322,6 +8433,10 @@ public partial class MainViewModel :
 
         LockTimeCodes = Se.Settings.General.LockTimeCodes;
         IsWaveformToolbarVisible = Se.Settings.Waveform.ShowToolbar;
+
+        // Frame mode may have just been toggled - refresh the waveform seek combo (frames vs
+        // seconds) before SetLayout below rebuilds the toolbar and re-binds the combo.
+        RefreshVideoSeekAmounts();
 
         if (AudioVisualizer != null)
         {
@@ -11099,55 +11214,6 @@ public partial class MainViewModel :
         _shortcutManager.ClearKeys();
     }
 
-    [RelayCommand]
-    private void RepeatPreviousLine()
-    {
-        var selectedItems = SubtitleGrid.SelectedItems.Cast<SubtitleLineViewModel>().OrderBy(p => p.StartTime).ToList();
-        var vp = GetVideoPlayerControl();
-        if (Window == null || selectedItems.Count == 0 || vp == null)
-        {
-            return;
-        }
-
-        vp.VideoPlayer.Pause();
-        var currentIndex = Subtitles.IndexOf(selectedItems.First());
-        if (currentIndex <= 0)
-        {
-            return;
-        }
-
-        var p = Subtitles[currentIndex - 1];
-        SubtitleGrid.SelectedItem = p;
-        vp.Position = p.StartTime.TotalSeconds;
-        PinPlayheadTo(p.StartTime.TotalSeconds);
-        _playSelectionItem = new PlaySelectionItem(new List<SubtitleLineViewModel> { p }, p.EndTime, true);
-        vp.VideoPlayer.Play();
-    }
-
-    [RelayCommand]
-    private void RepeatNextLine()
-    {
-        var selectedItems = SubtitleGrid.SelectedItems.Cast<SubtitleLineViewModel>().OrderBy(p => p.StartTime).ToList();
-        var vp = GetVideoPlayerControl();
-        if (Window == null || selectedItems.Count == 0 || vp == null)
-        {
-            return;
-        }
-
-        vp.VideoPlayer.Pause();
-        var currentIndex = Subtitles.IndexOf(selectedItems.First());
-        if (currentIndex >= Subtitles.Count - 1)
-        {
-            return;
-        }
-
-        var p = Subtitles[currentIndex + 1];
-        SubtitleGrid.SelectedItem = p;
-        vp.Position = p.StartTime.TotalSeconds;
-        PinPlayheadTo(p.StartTime.TotalSeconds);
-        _playSelectionItem = new PlaySelectionItem(new List<SubtitleLineViewModel> { p }, p.EndTime, true);
-        vp.VideoPlayer.Play();
-    }
 
     [RelayCommand]
     private void GoToNextLine()
@@ -12548,6 +12614,52 @@ public partial class MainViewModel :
     }
 
     [RelayCommand]
+    private void WaveformSetStartAndGoToNext()
+    {
+        // SE4 parity: stamp the current video position as the selected line's start time and
+        // immediately advance to the next line, for rapid lyric/LRC synchronisation (#12165).
+        // Mirrors WaveformSetStart (start only, ASSA multi-select aware) plus the go-to-next
+        // from WaveformSetEndAndGoToNext.
+        var s = SelectedSubtitle;
+        var vp = GetVideoPlayerControl();
+        if (s == null || vp == null || LockTimeCodes)
+        {
+            return;
+        }
+
+        var idx = Subtitles.IndexOf(s);
+        if (idx < 0)
+        {
+            return;
+        }
+
+        var videoPositionSeconds = vp.Position;
+        var gap = Se.Settings.General.MinimumBetweenLines.GetMilliseconds() / 1000.0;
+        if (videoPositionSeconds >= s.EndTime.TotalSeconds - gap)
+        {
+            return;
+        }
+
+        var isAssa = SelectedSubtitleFormat is AdvancedSubStationAlpha;
+        if (isAssa)
+        {
+            var selectedItems = SubtitleGrid.SelectedItems.Cast<SubtitleLineViewModel>().ToList();
+            foreach (var item in selectedItems)
+            {
+                item.SetStartTimeOnly(TimeSpan.FromSeconds(videoPositionSeconds));
+            }
+        }
+        else
+        {
+            s.SetStartTimeOnly(TimeSpan.FromSeconds(videoPositionSeconds));
+        }
+
+        SelectAndScrollToRow(idx + 1);
+
+        _updateAudioVisualizer = true;
+    }
+
+    [RelayCommand]
     private void WaveformSetStartAndKeepDuration()
     {
         var s = SelectedSubtitle;
@@ -12803,6 +12915,36 @@ public partial class MainViewModel :
     {
         IsWaveformToolbarVisible = false;
         Se.Settings.Waveform.ShowToolbar = false;
+    }
+
+    [RelayCommand]
+    private async Task ConfigureWaveformToolbarItems()
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        // Edit a copy so Cancel leaves the saved layout untouched; the dialog is the same one
+        // reached from Options -> Settings -> Waveform.
+        var current = Se.Settings.Waveform.ToolbarItems
+            .Select(i => new SeWaveformToolbarItem(i))
+            .ToList();
+
+        var result = await _windowService.ShowDialogAsync<WaveformToolbarItemsWindow, WaveformToolbarItemsViewModel>(
+            Window, vm => vm.Initialize(current));
+
+        if (!result.OkPressed)
+        {
+            return;
+        }
+
+        Se.Settings.Waveform.ToolbarItems = result.ResultToolbarItems;
+        Se.SaveSettings();
+
+        // Rebuild the layout so the waveform toolbar reflects the new item set/order (the toolbar
+        // is built once in InitWaveform.MakeWaveform, with no incremental update path).
+        SetLayout(Se.Settings.General.LayoutNumber);
     }
 
 
@@ -13207,6 +13349,85 @@ public partial class MainViewModel :
     private void VideoOneSecondForward()
     {
         MoveVideoPositionMs(1000);
+    }
+
+    // Waveform toolbar "seek video" buttons (<< / >>): step the video by the amount picked in
+    // the adjacent combo box (seconds or frames). User-selectable and remembered across sessions.
+    [RelayCommand]
+    private void WaveformVideoSeekBack()
+    {
+        MoveVideoPositionMs(-GetVideoSeekMs());
+    }
+
+    [RelayCommand]
+    private void WaveformVideoSeekForward()
+    {
+        MoveVideoPositionMs(GetVideoSeekMs());
+    }
+
+    // Rebuilds the "seek video" combo options for the current time/frame mode. In frame mode the
+    // amounts are whole frames ("1f", "10f", ...); otherwise decimal seconds. The last pick per
+    // mode is remembered in settings; fall back to a sensible default if it's not in the list.
+    // Called from the constructor and from ApplySettings so toggling frame mode refreshes the list.
+    private void RefreshVideoSeekAmounts()
+    {
+        // In frame mode the list mixes a few frame steps ("1f"..) with second steps ("1s"..);
+        // "f" = frames, "s" = seconds. Time mode lists plain decimal seconds.
+        var useFrameMode = Se.Settings.General.UseFrameMode;
+        var amounts = useFrameMode
+            ? new[] { "1f", "5f", "10f", "1s", "5s", "10s" }
+            : new[] { "0.1s", "0.25s", "0.5s", "1s", "2s", "3s", "5s", "10s" };
+        var saved = Se.Settings.Waveform.VideoSeekAmount;
+        var preferred = !string.IsNullOrEmpty(saved) && amounts.Contains(saved)
+            ? saved
+            : (useFrameMode ? "5f" : "2s");
+
+        // Skip a no-op rebuild so switching an unrelated setting doesn't reset the user's pick.
+        if (VideoSeekAmounts.SequenceEqual(amounts) && SelectedVideoSeekAmount == preferred)
+        {
+            return;
+        }
+
+        VideoSeekAmounts = new ObservableCollection<string>(amounts);
+        SelectedVideoSeekAmount = preferred;
+    }
+
+    private int GetVideoSeekMs()
+    {
+        var amount = SelectedVideoSeekAmount;
+        if (string.IsNullOrEmpty(amount))
+        {
+            return 2000;
+        }
+
+        // A trailing "f" means the amount is in frames - convert via the current frame rate.
+        if (amount.EndsWith("f", StringComparison.OrdinalIgnoreCase))
+        {
+            if (int.TryParse(amount.TrimEnd('f', 'F'), NumberStyles.Integer, CultureInfo.InvariantCulture, out var frames) && frames > 0)
+            {
+                return SubtitleFormat.FramesToMilliseconds(frames);
+            }
+
+            return 2000;
+        }
+
+        // "s" suffix (or no suffix) means seconds.
+        if (double.TryParse(amount.TrimEnd('s', 'S'), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var seconds) && seconds > 0)
+        {
+            return (int)Math.Round(seconds * 1000, MidpointRounding.AwayFromZero);
+        }
+
+        return 2000;
+    }
+
+    partial void OnSelectedVideoSeekAmountChanged(string value)
+    {
+        // Remember the raw pick so the combo restores it next session (when the mode's list still
+        // contains it). ComboBox clears the selection to null briefly while rebinding - ignore that.
+        if (!string.IsNullOrEmpty(value))
+        {
+            Se.Settings.Waveform.VideoSeekAmount = value;
+        }
     }
 
     [RelayCommand]
@@ -14607,8 +14828,13 @@ public partial class MainViewModel :
 
             if (FileUtil.IsMatroskaFileFast(fileName) && FileUtil.IsMatroskaFile(fileName))
             {
-                await ImportSubtitleFromMatroskaFile(fileName, videoFileName);
-                return;
+                if (await ImportSubtitleFromMatroskaFile(fileName, videoFileName))
+                {
+                    return;
+                }
+
+                // No subtitle tracks in the container - fall through to the "open as video file"
+                // prompt below (a subtitle-less .mkv is still a video), matching the .mp4 path (#12171).
             }
 
             if (ext == ".sup" && FileUtil.IsBluRaySup(fileName))
@@ -15540,32 +15766,20 @@ public partial class MainViewModel :
         }
     }
 
-    private async Task ImportSubtitleFromMatroskaFile(string fileName, string? videoFileName)
+    /// <summary>
+    /// Extracts a subtitle track from a Matroska (.mkv) file. Returns false when the container has
+    /// no subtitle tracks so the caller can fall through to the "open as video file" prompt - the
+    /// same path .mp4 files take. It used to dead-end here on a "does not seem to contain any
+    /// subtitles" error, so a subtitle-less .mkv could never be opened as a video (#12171).
+    /// </summary>
+    private async Task<bool> ImportSubtitleFromMatroskaFile(string fileName, string? videoFileName)
     {
         var matroska = new MatroskaFile(fileName);
         var subtitleList = matroska.GetTracks(true);
         if (subtitleList.Count == 0)
         {
             matroska.Dispose();
-            Dispatcher.UIThread.Post(async void () =>
-            {
-                try
-                {
-                    var answer = await MessageBox.Show(
-                        Window!,
-                        "No subtitle found",
-                        "The Matroska file does not seem to contain any subtitles.",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                }
-                catch (Exception e)
-                {
-                    Se.LogError(e);
-                }
-            });
-
-            matroska.Dispose();
-            return;
+            return false;
         }
 
         if (subtitleList.Count > 1)
@@ -15664,6 +15878,10 @@ public partial class MainViewModel :
                 matroska.Dispose();
             }
         }
+
+        // A track was found and handled (the track dialog / extract runs on the UI thread via the
+        // Dispatcher posts above); tell the caller not to fall through to the video-open prompt.
+        return true;
     }
 
     private async Task<bool> LoadMatroskaSubtitle(
@@ -16827,7 +17045,7 @@ public partial class MainViewModel :
             try
             {
                 if (!await PromptSaveChanges(Se.Language.General.SaveChangesMessage,
-                        async () => { await SaveSubtitle(); return true; }))
+                        () => SaveSubtitle()))
                 {
                     // Stay cancelled - window won't close
                     return;
@@ -19287,13 +19505,21 @@ public partial class MainViewModel :
                     HandleShiftArrowSelection(Subtitles.Count); // clamps to Count - 1
                     return;
                 }
-                else if (keyEventArgs.Key == Key.Home && keyEventArgs.KeyModifiers == KeyModifiers.None && Subtitles.Count > 0)
+                // Handle Ctrl+Home/End the same as plain Home/End: Ctrl is the habitual
+                // "go to top/bottom" chord, and routing it through SelectAndScrollToRow reuses the
+                // reliable scroll (EnsureRowFullyVisibleInSubtitleGrid) instead of falling through to
+                // Avalonia's default DataGrid navigation, which leaves the last row partially visible (#12173).
+                else if (keyEventArgs.Key == Key.Home &&
+                         (keyEventArgs.KeyModifiers == KeyModifiers.None || keyEventArgs.KeyModifiers == KeyModifiers.Control) &&
+                         Subtitles.Count > 0)
                 {
                     keyEventArgs.Handled = true;
                     SelectAndScrollToRow(0);
                     return;
                 }
-                else if (keyEventArgs.Key == Key.End && keyEventArgs.KeyModifiers == KeyModifiers.None && Subtitles.Count > 0)
+                else if (keyEventArgs.Key == Key.End &&
+                         (keyEventArgs.KeyModifiers == KeyModifiers.None || keyEventArgs.KeyModifiers == KeyModifiers.Control) &&
+                         Subtitles.Count > 0)
                 {
                     keyEventArgs.Handled = true;
                     SelectAndScrollToRow(Subtitles.Count - 1);
@@ -21483,7 +21709,7 @@ public partial class MainViewModel :
         e.Cancel = true;
 
         if (!await PromptSaveChanges(Se.Language.General.SaveChangesMessage,
-                async () => { await SaveSubtitle(); return true; }))
+                () => SaveSubtitle()))
         {
             return;
         }

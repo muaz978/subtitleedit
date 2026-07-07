@@ -17,7 +17,7 @@ public class Se
 {
     internal const int CurrentMacOsFontMigrationVersion = 1;
 
-    public static string Version { get; set; } = "v5.1.0-beta8";
+    public static string Version { get; set; } = "v5.1.0-beta11";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -239,15 +239,26 @@ public class Se
             Directory.CreateDirectory(directory);
         }
 
-        // Atomic write: serialize directly to a temp file (UTF-8, no string round-trip)
-        // and replace, so a process kill mid-write can't leave a truncated settings file.
-        var tempFileName = settingsFileName + ".tmp";
-        using (var stream = System.IO.File.Create(tempFileName))
+        try
         {
-            JsonSerializer.Serialize(stream, Settings, SeJsonContext.Default.Se);
-        }
+            // Atomic write: serialize directly to a temp file (UTF-8, no string round-trip)
+            // and replace, so a process kill mid-write can't leave a truncated settings file.
+            var tempFileName = settingsFileName + ".tmp";
+            using (var stream = System.IO.File.Create(tempFileName))
+            {
+                JsonSerializer.Serialize(stream, Settings, SeJsonContext.Default.Se);
+            }
 
-        System.IO.File.Move(tempFileName, settingsFileName, overwrite: true);
+            System.IO.File.Move(tempFileName, settingsFileName, overwrite: true);
+        }
+        catch (Exception exception)
+        {
+            // Log with context (e.g. no write access to the data folder) and rethrow so callers
+            // that can show UI - like the settings dialog - can tell the user the save failed
+            // instead of it disappearing silently (#12180).
+            Se.LogError(exception, $"Failed to save settings to '{settingsFileName}'");
+            throw;
+        }
 
         UpdateLibSeSettings();
     }
@@ -426,6 +437,10 @@ public class Se
             Settings.Waveform = new();
         }
 
+        // Add toolbar items introduced after an older settings file was written (e.g. VideoSeek),
+        // so the waveform toolbar's per-type lookup never misses and new items are customizable.
+        Settings.Waveform.EnsureAllToolbarItems();
+
         if (Settings.BeautifyTimeCodes == null)
         {
             Settings.BeautifyTimeCodes = new();
@@ -532,6 +547,20 @@ public class Se
         Configuration.Settings.Tools.OpenAiCompatibleSttAutoTranscribeOnAudioSelection = Settings.Tools.OpenAiCompatibleSttAutoTranscribeOnAudioSelection;
         Configuration.Settings.Tools.OpenAiCompatibleSttStream = Settings.Tools.OpenAiCompatibleSttStream;
 
+        Configuration.Settings.Tools.OpenRouterSttApiKey = Settings.Tools.OpenRouterSttApiKey;
+        Configuration.Settings.Tools.OpenRouterSttModel = Settings.Tools.OpenRouterSttModel;
+        Configuration.Settings.Tools.OpenRouterSttLanguage = Settings.Tools.OpenRouterSttLanguage;
+        Configuration.Settings.Tools.OpenRouterSttTemperature = Settings.Tools.OpenRouterSttTemperature;
+        Configuration.Settings.Tools.OpenRouterSttPrompt = Settings.Tools.OpenRouterSttPrompt;
+        Configuration.Settings.Tools.OpenRouterSttTimeoutSeconds = Settings.Tools.OpenRouterSttTimeoutSeconds;
+
+        Configuration.Settings.Tools.DashScopeSttApiKey = Settings.Tools.DashScopeSttApiKey;
+        Configuration.Settings.Tools.DashScopeSttModel = Settings.Tools.DashScopeSttModel;
+        Configuration.Settings.Tools.DashScopeSttLanguage = Settings.Tools.DashScopeSttLanguage;
+        Configuration.Settings.Tools.DashScopeSttRegion = Settings.Tools.DashScopeSttRegion;
+        Configuration.Settings.Tools.DashScopeSttEnableWords = Settings.Tools.DashScopeSttEnableWords;
+        Configuration.Settings.Tools.DashScopeSttTimeoutSeconds = Settings.Tools.DashScopeSttTimeoutSeconds;
+
         Configuration.Settings.Tools.AutoTranslateLastName = Settings.AutoTranslate.AutoTranslateLastName;
 
         // BeautifyTimeCodes profile: skip apply on a fresh install so libse's built-in
@@ -562,6 +591,8 @@ public class Se
 
         var dc = Settings.File.DCinemaSmpte;
         var ss = Configuration.Settings.SubtitleSettings;
+        ss.WebVttUseXTimestampMap = Settings.Formats.WebVttUseXTimestampMap;
+        ss.WebVttUseMultipleXTimestampMap = Settings.Formats.WebVttUseMultipleXTimestampMap;
         ss.DCinemaAutoGenerateSubtitleId = dc.DCinemaAutoGenerateSubtitleId;
         ss.DCinemaFontSize = dc.DCinemaFontSize;
         ss.DCinemaBottomMargin = dc.DCinemaBottomMargin;
