@@ -96,6 +96,37 @@ public class CrispAsrCohere : CrispAsrEngineBase
                 ],
             },
 
+            // Arabic specialist variant (cohere-transcribe-arabic-07-2026): tuned for
+            // Arabic dialects and Arabic/English code switching, notably more accurate
+            // on Arabic than the general model above. Same GGUF publisher and format.
+            new WhisperModel
+            {
+                Name = "cohere-transcribe-arabic-q4_k.gguf",
+                Size = "1.51 GB",
+                Urls =
+                [
+                    "https://huggingface.co/cstr/cohere-transcribe-arabic-07-2026-GGUF/resolve/main/cohere-transcribe-arabic-q4_k.gguf",
+                ],
+            },
+            new WhisperModel
+            {
+                Name = "cohere-transcribe-arabic-q8_0.gguf",
+                Size = "2.42 GB",
+                Urls =
+                [
+                    "https://huggingface.co/cstr/cohere-transcribe-arabic-07-2026-GGUF/resolve/main/cohere-transcribe-arabic-q8_0.gguf",
+                ],
+            },
+            new WhisperModel
+            {
+                Name = "cohere-transcribe-arabic-f16.gguf",
+                Size = "4.14 GB",
+                Urls =
+                [
+                    "https://huggingface.co/cstr/cohere-transcribe-arabic-07-2026-GGUF/resolve/main/cohere-transcribe-arabic-f16.gguf",
+                ],
+            },
+
        };
 
     public override string Extension => string.Empty;

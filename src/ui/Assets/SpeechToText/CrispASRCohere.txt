@@ -4,3 +4,7 @@
 Type: Conformer + Transformer
 Focus: 🎯 Lowest WER (accuracy), especially English
 
+Models
+- cohere-transcribe (general, 14 languages)
+- cohere-transcribe-arabic (Arabic specialist: tuned for Arabic dialects and
+  Arabic/English code switching, more accurate on Arabic than the general model)
