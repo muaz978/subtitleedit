@@ -25,7 +25,7 @@ public class VlcReloader : IVlcReloader
     private int _retryCount = 3;
     private string? _mpvPreviewStyleHeader;
 
-    public async Task RefreshVlc(LibVlcDynamicPlayer vlc, Subtitle subtitle, Subtitle? subtitleSecondary, SubtitleFormat uiFormat)
+    public async Task RefreshVlc(LibVlcDynamicPlayer vlc, Subtitle subtitle, Subtitle? subtitleSecondary, SubtitleFormat uiFormat, bool subtitleIsOwned = false)
     {
         if (subtitle.Paragraphs.Count == 0 && subtitleSecondary == null)
         {
@@ -35,7 +35,10 @@ public class VlcReloader : IVlcReloader
         try
         {
             var uiFormatType = uiFormat.GetType();
-            subtitle = new Subtitle(subtitle, false);
+            if (!subtitleIsOwned)
+            {
+                subtitle = new Subtitle(subtitle, false);
+            }
 
             if (SmpteMode)
             {
@@ -55,7 +58,6 @@ public class VlcReloader : IVlcReloader
             else if (uiFormatType == typeof(WebVTT) || uiFormatType == typeof(WebVTTFileWithLineNumber))
             {
                 var defaultStyle = GetMpvPreviewStyle(Se.Settings.Video);
-                defaultStyle.BorderStyle = "3";
                 subtitle = new Subtitle(subtitle);
                 subtitle = WebVttToAssa.Convert(subtitle, defaultStyle, VideoWidth, VideoHeight);
                 SecondarySubtitleMerger.AddSecondarySubtitle(subtitle, subtitleSecondary, SmpteMode);

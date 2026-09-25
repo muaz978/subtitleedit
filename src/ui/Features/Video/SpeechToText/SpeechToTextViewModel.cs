@@ -73,6 +73,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     [ObservableProperty] private bool _isTranslateVisible;
     [ObservableProperty] private bool _isBackendSelectionVisible;
     [ObservableProperty] private bool _isModelSelectionVisible;
+    [ObservableProperty] private bool _isModelDownloadVisible;
     [ObservableProperty] private bool _isLanguageSelectionVisible;
     [ObservableProperty] private bool _isWhisperCppSelected;
     [ObservableProperty] private ObservableCollection<ISpeechToTextEngine> _whisperCppBackends;
@@ -156,6 +157,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     private bool _unknownArgument;
     private bool _cudaOutOfMemory;
     private bool _cudaComputeTypeNotSupported;
+    private bool _torchWithoutCuda;
     private bool _incompleteModel;
     private string? _missingSharedLibrary;
 
@@ -337,6 +339,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         IsTranslateVisible = IsTranslateAvailable(GetEffectiveSelectedEngine());
         IsBackendSelectionVisible = false;
         IsModelSelectionVisible = true;
+        IsModelDownloadVisible = true;
         IsWhisperCppSelected = false;
         IsCrispAsrSelected = false;
         Parameters = string.Empty;
@@ -541,6 +544,36 @@ public partial class SpeechToTextViewModel : ObservableObject
     private static bool IsTranslateAvailable(ISpeechToTextEngine engine)
     {
         return engine is not Qwen3AsrCppEngine and not ICrispAsrEngine and not IOnlineSttEngine;
+    }
+
+    private void UpdateTranslateVisibility()
+    {
+        IsTranslateVisible = IsTranslateAvailable(GetEffectiveSelectedEngine()) &&
+                             SelectedModel?.Model is not { TranscribeOnly: true };
+        if (!IsTranslateVisible)
+        {
+            DoTranslateToEnglish = false;
+        }
+    }
+
+    partial void OnSelectedModelChanged(SpeechToTextModelDisplay? value)
+    {
+        UpdateTranslateVisibility();
+    }
+
+    private static void RepairAlignmentHeads(string modelFolder, WhisperModel model)
+    {
+        try
+        {
+            if (FasterWhisperAlignmentHeads.Repair(modelFolder, model.DecoderLayers, model.DecoderAttentionHeads))
+            {
+                Se.WriteToolsLog($"Repaired alignment_heads in \"{Path.Combine(modelFolder, "config.json")}\" for {model.DecoderLayers} decoder layers");
+            }
+        }
+        catch (Exception e)
+        {
+            SeLogger.Error(e, $"Unable to repair alignment_heads for speech-to-text model \"{model.Name}\"");
+        }
     }
 
     private void UpdateBackendSelectionUi()
@@ -890,6 +923,11 @@ public partial class SpeechToTextViewModel : ObservableObject
                     await ShowCudaComputeTypeNotSupported(engine);
                     hasError = true;
                 }
+                else if (_torchWithoutCuda)
+                {
+                    await ShowTorchWithoutCuda(engine);
+                    hasError = true;
+                }
 
                 if (!hasError && GetResultFromSrt(_audioFileName, _videoFileName!, out var resultTexts, _outputText, _filesToDelete))
                 {
@@ -982,7 +1020,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// was the crispasr v0.8.29 GPU packages, built with AVX-512 against a CI runner that had it
     /// (CrispASR #374) - every CPU without AVX-512 got this on the CUDA/Vulkan build while the CPU
     /// build ran fine, so naming the installed package is most of the answer. That build flaw is
-    /// fixed from v0.8.30 (SE now pins v0.8.34), but the message still earns its keep: a pre-AVX2 CPU
+    /// fixed from v0.8.30 (SE now pins v0.8.37), but the message still earns its keep: a pre-AVX2 CPU
     /// hits the same silent death on the AVX2 CPU package, and an install predating the pin bump
     /// keeps the broken GPU binary until the user downloads the engine again.
     /// </summary>
@@ -1127,6 +1165,62 @@ public partial class SpeechToTextViewModel : ObservableObject
             : parameters.Trim() + " " + computeTypeArgument;
         engine.CommandLineParameter = Parameters;
         SaveSettings();
+    }
+
+    /// <summary>
+    /// True for the line a CPU-only build prints when asked for "--device cuda". The WhisperX
+    /// standalone build SE downloads has a CPU-only torch: on Windows it dies loading the voice
+    /// activity model with the torch message (#15206); on macOS the CTranslate2 package has no
+    /// CUDA either and fails first, with its own message.
+    /// </summary>
+    internal static bool IsNoCudaBuildError(string line)
+    {
+        return line.Contains("Torch not compiled with CUDA enabled", StringComparison.OrdinalIgnoreCase) ||
+               line.Contains("CTranslate2 package was not compiled with CUDA support", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task ShowTorchWithoutCuda(ISpeechToTextEngine engine)
+    {
+        const string title = "CUDA not available";
+        var nl = Environment.NewLine;
+        var cause = engine is WhisperEngineWhisperX
+            ? $"This WhisperX build runs on the CPU only - it cannot use \"--device cuda\", so no text was transcribed.{nl}{nl}"
+            : $"This engine was built without CUDA support, so it cannot run on the GPU and no text was transcribed.{nl}{nl}";
+
+        var parameters = Parameters ?? string.Empty;
+        var cpuParameters = RemoveGpuParameters(parameters);
+        if (cpuParameters == parameters.Trim())
+        {
+            await MessageBox.Show(Window!, title, cause + "Remove any GPU settings from the parameters, or run on CPU.");
+            return;
+        }
+
+        var shownParameters = string.IsNullOrEmpty(cpuParameters) ? "(none)" : cpuParameters;
+        var answer = await MessageBox.Show(Window!, title,
+            cause + $"Remove the GPU settings from the parameters so it runs on the CPU?{nl}{nl}" +
+            $"New parameters: {shownParameters}",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+        if (answer != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        Parameters = cpuParameters;
+        engine.CommandLineParameter = Parameters;
+        SaveSettings();
+    }
+
+    /// <summary>
+    /// Removes the arguments that only work on a GPU: "--device" / "--device_index" with their
+    /// values, and the half-precision compute types, which CTranslate2 refuses on a CPU
+    /// ("--compute_type float16" was the other half of the #15206 command line).
+    /// </summary>
+    internal static string RemoveGpuParameters(string parameters)
+    {
+        var result = Regex.Replace(parameters, @"(^|\s)--device(_index)?(\s+|=)\S+", " ", RegexOptions.IgnoreCase);
+        result = Regex.Replace(result, @"(^|\s)--compute_type(\s+|=)(float16|bfloat16|int8_float16|int8_bfloat16)(?=\s|$)", " ", RegexOptions.IgnoreCase);
+        return Regex.Replace(result, @"\s{2,}", " ").Trim();
     }
 
     /// <summary>
@@ -1891,12 +1985,37 @@ public partial class SpeechToTextViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Sets a batch row's status from its transcription result. A row with no text must be
+    /// marked Error here, not left alone: the batch list is reused between runs, so a row
+    /// left untouched keeps the Converted of an earlier run and is counted as converted
+    /// in the closing summary (#15206).
+    /// </summary>
+    internal static void ApplyBatchItemResult(SpeechToTextJobItem item, Subtitle? transcribedSubtitle)
+    {
+        item.Status = transcribedSubtitle != null && transcribedSubtitle.Paragraphs.Count > 0
+            ? Se.Language.General.Converted
+            : Se.Language.General.Error;
+    }
+
+    /// <summary>
+    /// Clears every row's status before a new batch run, so statuses from an earlier run
+    /// (e.g. a CPU run before a failing CUDA run, #15206) do not look like results of this one.
+    /// </summary>
+    internal static void ResetBatchStatuses(IEnumerable<SpeechToTextJobItem> items)
+    {
+        foreach (var item in items)
+        {
+            item.Status = string.Empty;
+        }
+    }
+
     private void StartNext(Subtitle? transcribedSubtitle)
     {
         var currentItem = _jobItems[_batchIndex];
-        if (transcribedSubtitle != null && transcribedSubtitle.Paragraphs.Count > 0)
+        ApplyBatchItemResult(currentItem, transcribedSubtitle);
+        if (currentItem.Status == Se.Language.General.Converted)
         {
-            currentItem.Status = Se.Language.General.Converted;
             var languageCode = AddLanguageCodeToFileName ? GetFileNameLanguageCode(transcribedSubtitle) : null;
             var subtitleFileName = GetSubtitleFileName(currentItem.InputVideoFileName, languageCode, _batchOutputFolder);
             var format = new SubRip();
@@ -2873,22 +2992,46 @@ public partial class SpeechToTextViewModel : ObservableObject
         Se.WriteToolsLog($"{executable} {separateArguments}");
         LogToConsole($"Isolating speech with : {executable} {separateArguments}{Environment.NewLine}");
 
-        // Kept for the tools log only: the separator prints no progress worth showing, but when
-        // it fails its output is the only clue to why.
+        // The output is kept for the tools log - when the separator fails it is the only clue to
+        // why - and its per-chunk lines are the progress (#15176): on a machine without a GPU
+        // the separation takes minutes per minute of audio, so the bar has to move.
         var separateLog = new StringBuilder();
+        var progress = new SpeechIsolationProgress(SpeechIsolationProgress.GetChunkCountFromWaveFile(audioFileName));
+
+        // HasExited does not wait for the async stderr reader, so a last progress line can be
+        // posted after the separator is done - it must not put the bar back up once
+        // transcription has taken it over.
+        var separating = true;
         DataReceivedEventHandler logHandler = (_, args) =>
         {
-            if (!string.IsNullOrWhiteSpace(args.Data))
+            if (string.IsNullOrWhiteSpace(args.Data))
             {
-                lock (separateLog)
+                return;
+            }
+
+            lock (separateLog)
+            {
+                separateLog.AppendLine(args.Data);
+            }
+
+            if (progress.TryUpdate(args.Data) && progress.Percent is { } percent)
+            {
+                Dispatcher.UIThread.Post(() =>
                 {
-                    separateLog.AppendLine(args.Data);
-                }
+                    if (_abort || _windowClosing || !Volatile.Read(ref separating))
+                    {
+                        return;
+                    }
+
+                    ProgressValue = percent;
+                    ProgressText = $"{Se.Language.Video.AudioToText.IsolatingSpeech} {percent}%";
+                });
             }
         };
 
-        using (var separateProcess = StartEngineProcess(executable, separateArguments, logHandler))
+        try
         {
+            using var separateProcess = StartEngineProcess(executable, separateArguments, logHandler);
             if (!await WaitForExitOrAbortAsync(separateProcess))
             {
                 if (!_abort)
@@ -2901,6 +3044,10 @@ public partial class SpeechToTextViewModel : ObservableObject
 
                 return null;
             }
+        }
+        finally
+        {
+            Volatile.Write(ref separating, false);
         }
 
         var stemFileName = SpeechIsolationModel.GetSpeechStemFileName(audioFileName, outputFolder);
@@ -3511,6 +3658,11 @@ public partial class SpeechToTextViewModel : ObservableObject
     [RelayCommand]
     private async Task DownloadModel()
     {
+        if (GetEffectiveSelectedEngine().DownloadsOwnModels)
+        {
+            return;
+        }
+
         var vm = await _windowService.ShowDialogAsync<DownloadSpeechToTextModelsWindow, DownloadSpeechToTextModelsViewModel>(
             Window!, viewModel => { viewModel.SetModels(Models, GetEffectiveSelectedEngine(), SelectedModel); });
 
@@ -3693,6 +3845,7 @@ public partial class SpeechToTextViewModel : ObservableObject
             _unknownArgument = false;
             _cudaOutOfMemory = false;
             _cudaComputeTypeNotSupported = false;
+            _torchWithoutCuda = false;
             _incompleteModel = false;
             _missingSharedLibrary = null;
             _loadedFromStdOut = false;
@@ -3812,12 +3965,17 @@ public partial class SpeechToTextViewModel : ObservableObject
                 RefreshEngineCombo?.Invoke();
             }
 
-            if (!engine.IsModelInstalled(model.Model))
+            // Engines that download their own models (WhisperX) are never routed through SE's
+            // downloader: it would fill a folder the engine does not read and re-prompt on
+            // every run. Their IsModelInstalled only drives the model dot.
+            if (!engine.DownloadsOwnModels && !engine.IsModelInstalled(model.Model))
             {
                 var answer = await MessageBox.Show(
                     Window!,
                     $"Download {model}?",
-                    $"Download and use {model.Model.Name}?",
+                    (engine as CrispAsrEngine)?.SelectedBackend is CrispAsrSenseVoice senseVoice && senseVoice.IsModelOutdated(model.Model)
+                        ? $"An updated {model.Model.Name} is available (re-converted for Crisp ASR v0.8.36).\nDownload and use it?"
+                        : $"Download and use {model.Model.Name}?",
                     MessageBoxButtons.YesNoCancel,
                     MessageBoxIcon.Question);
 
@@ -3939,6 +4097,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         else
         {
             _jobItems = BatchItems;
+            ResetBatchStatuses(_jobItems);
         }
 
         _batchIndex = 0;
@@ -4065,7 +4224,10 @@ public partial class SpeechToTextViewModel : ObservableObject
         settings.WhisperChoice = engine.Choice;
         SaveSettings();
 
+        // SetProgressBarPct only moves the bar forward, so a value left by an earlier stage
+        // (speech isolation ends at 100%) would pin it there for the whole transcription.
         _showProgressPct = -1;
+        ProgressValue = 0;
         IsTranscribeEnabled = false;
         ProgressOpacity = 1;
         ProgressText = GetProgressText();
@@ -4555,6 +4717,18 @@ public partial class SpeechToTextViewModel : ObservableObject
             }
         }
 
+        var whisperModel = engine.Models.FirstOrDefault(p => p.Name == model);
+        if (whisperModel is { TranscribeOnly: true })
+        {
+            // It would ignore the task and write the source language anyway (#15223).
+            translate = false;
+        }
+
+        if (engine is WhisperEnginePurfviewFasterWhisperXxl purfviewEngine && whisperModel is { DecoderLayers: > 0 })
+        {
+            RepairAlignmentHeads(purfviewEngine.GetAndCreateWhisperModelFolder(whisperModel), whisperModel);
+        }
+
         var translateToEnglish = translate ? GetWhisperTranslateParameter(engine) : string.Empty;
         if (language.ToLowerInvariant() == "english" || language.ToLowerInvariant() == "en")
         {
@@ -4903,6 +5077,10 @@ public partial class SpeechToTextViewModel : ObservableObject
             // encode() and leaves no output at all, so without this the user just gets an empty
             // result (issue #13902).
             _cudaComputeTypeNotSupported = true;
+        }
+        else if (IsNoCudaBuildError(outLine.Data))
+        {
+            _torchWithoutCuda = true;
         }
         //if (outLine.Data.Contains("running on: CUDA", StringComparison.OrdinalIgnoreCase))
         //{
@@ -5289,6 +5467,10 @@ public partial class SpeechToTextViewModel : ObservableObject
             SelectedModel = null;
         }
 
+        // SE's downloader saves into a folder an engine that downloads its own models never
+        // reads (WhisperX: the Hugging Face hub cache), so offering it only wastes gigabytes.
+        IsModelDownloadVisible = IsModelSelectionVisible && !engine.DownloadsOwnModels;
+
         IsLanguageSelectionVisible = !isOnlineSttEngine;
         if (!IsLanguageSelectionVisible)
         {
@@ -5301,7 +5483,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         IsGoogleCloudSttVisible = engine is GoogleCloudSttEngine;
         IsAdvancedSettingsVisible = !isOnlineSttEngine;
 
-        IsTranslateVisible = IsTranslateAvailable(engine);
+        UpdateTranslateVisibility();
 
         Parameters = engine.CommandLineParameter;
 

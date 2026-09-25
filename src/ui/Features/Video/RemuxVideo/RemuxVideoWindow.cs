@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Nikse.SubtitleEdit.Controls;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
@@ -84,6 +85,24 @@ public class RemuxVideoWindow : Window
             vm,
             (vm.SelectAudioTrackCommand, nameof(vm.IsAudioSelectTrackVisible)));
 
+        // Mix all audio files into one track, each at its own volume (shown for two or more files)
+        var checkBoxMixAudio = UiUtil.MakeCheckBox(l.RemuxVideoMixAudio, vm, nameof(vm.MixAudio));
+        checkBoxMixAudio.Bind(CheckBox.IsEnabledProperty, notRemuxing);
+        var labelVolume = UiUtil.MakeLabel(l.RemuxVideoVolumePercent);
+        labelVolume.Bind(Label.IsEnabledProperty, new Binding(nameof(vm.IsVolumeEnabled)));
+        var numericVolume = UiUtil.MakeNumericUpDownInt(0, 200, 100, 130, vm, $"{nameof(vm.SelectedAudioFile)}.{nameof(RemuxFileItem.VolumePercent)}")
+            .WithAccessibleName(l.RemuxVideoVolumePercent);
+        numericVolume.Bind(NumericUpDown.IsEnabledProperty, new Binding(nameof(vm.IsVolumeEnabled)));
+        var panelMix = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children = { checkBoxMixAudio, labelVolume, numericVolume },
+        };
+        panelMix.Bind(StackPanel.IsVisibleProperty, new Binding(nameof(vm.IsMixAudioVisible)));
+        panelAudio.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        panelAudio.Add(panelMix, 3);
+
         // 3. Subtitle files
         var panelSubtitle = MakeFileListSection(
             IconNames.SubtitlesOutline,
@@ -128,6 +147,10 @@ public class RemuxVideoWindow : Window
         gridOutput.Add(textBoxOutput, 0, 2);
         gridOutput.Add(buttonBrowseOutput, 0, 3);
 
+        var checkBoxFastStart = UiUtil.MakeCheckBox(l.RemuxVideoFastStart, vm, nameof(vm.FastStart));
+        checkBoxFastStart.Bind(CheckBox.IsEnabledProperty, notRemuxing);
+        checkBoxFastStart.Bind(CheckBox.IsVisibleProperty, new Binding(nameof(vm.IsFastStartVisible)));
+
         var panelOutput = new StackPanel
         {
             Spacing = 4,
@@ -135,6 +158,7 @@ public class RemuxVideoWindow : Window
             {
                 MakeSectionHeader(IconNames.ContentSave, l.RemuxVideoOutputFile, vm, null),
                 gridOutput,
+                checkBoxFastStart,
             },
         };
 
@@ -148,6 +172,7 @@ public class RemuxVideoWindow : Window
         };
         progressBar.Bind(ProgressBar.ValueProperty, new Binding(nameof(vm.ProgressValue)));
         progressBar.Bind(ProgressBar.IsVisibleProperty, new Binding(nameof(vm.IsRemuxing)));
+        progressBar.Bind(ProgressBar.IsIndeterminateProperty, new Binding(nameof(vm.IsFinalizing)));
 
         var labelProgress = UiUtil.MakeLabel().WithBindText(vm, nameof(vm.ProgressText));
 
@@ -163,7 +188,7 @@ public class RemuxVideoWindow : Window
             .WithMarginRight(5);
         buttonOpenFolder.Bind(Button.IsVisibleProperty, new Binding(nameof(vm.IsCompleted)));
 
-        var buttonRemux = new SplitButton
+        var buttonRemux = new SeSplitButton
         {
             Content = l.RemuxVideoTitle,
             Command = vm.RemuxCommand,
@@ -294,6 +319,28 @@ public class RemuxVideoWindow : Window
                 textName.Bind(TextBlock.TextProperty, new Binding(nameof(RemuxFileItem.Name)));
                 ToolTip.SetTip(textName, new Binding(nameof(RemuxFileItem.FileName)));
 
+                // The folder after the name, trimmed from the front so the nearest folders stay
+                // readable - the same information the video box shows in its full path.
+                var textFolder = new TextBlock
+                {
+                    Opacity = 0.6,
+                    TextTrimming = TextTrimming.PrefixCharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    Margin = new Thickness(8, 0, 0, 0),
+                };
+                textFolder.Bind(TextBlock.TextProperty, new Binding(nameof(RemuxFileItem.Folder)));
+
+                var nameRow = new Grid
+                {
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition { Width = GridLength.Auto },
+                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                    },
+                };
+                nameRow.Add(textName, 0, 0);
+                nameRow.Add(textFolder, 0, 1);
+
                 var textDetails = new TextBlock { FontSize = UiUtil.ScaledFontSize(11), Opacity = 0.7, TextTrimming = TextTrimming.CharacterEllipsis };
                 textDetails.Bind(TextBlock.TextProperty, new Binding(nameof(RemuxFileItem.Details)));
 
@@ -301,14 +348,22 @@ public class RemuxVideoWindow : Window
                 {
                     Spacing = 1,
                     VerticalAlignment = VerticalAlignment.Center,
-                    Children = { textName, textDetails },
+                    Children = { nameRow, textDetails },
                 };
 
-                return new StackPanel
+                // A Grid, not a horizontal StackPanel: the text column must be width-bound for
+                // the folder's prefix trimming to happen at all.
+                var row = new Grid
                 {
-                    Orientation = Orientation.Horizontal,
-                    Children = { icon, textPanel },
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition { Width = GridLength.Auto },
+                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                    },
                 };
+                row.Add(icon, 0, 0);
+                row.Add(textPanel, 0, 1);
+                return row;
             }, true),
         };
         listBox.Bind(ListBox.ItemsSourceProperty, new Binding(itemsPropertyPath));

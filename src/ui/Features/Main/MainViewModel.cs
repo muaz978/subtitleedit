@@ -721,6 +721,7 @@ public partial class MainViewModel :
     private UiTickPump _positionTimer = new(TimeSpan.FromMilliseconds(50)); // posted ticks, not a DispatcherTimer - see UiTickPump
     private DispatcherTimer _slowTimer = new();
     private UiTickPump? _cursorTimer; // ~60 fps; drives only the waveform/video playhead cursor (a posted tick, not a DispatcherTimer - see UiTickPump)
+    private volatile bool _backgroundWorkRunning; // between StartBackgroundWork and StopBackgroundWork; the tick pumps also need a video
 
     // Playhead interpolation state. When mpv resumes after a paused seek its time-pos stalls
     // for ~one audio-buffer interval (~200 ms) and then resyncs forward, which makes the
@@ -742,6 +743,12 @@ public partial class MainViewModel :
     // "Center video position also while paused": paused centering/selection only reacts to
     // position *changes*, so they track the last seen play-head position between timer ticks.
     private double _pausedCenterLastSeconds = -1;
+
+    // Render-time playhead motion (AudioVisualizer.SetPlayheadMotion): the estimate and wall-clock
+    // stamp of the previous cursor tick, from which the tick measures the estimator's velocity.
+    private double _playheadTickPrevEstimate = -1;
+    private long _playheadTickPrevTimestamp;
+    private double _playheadPlaybackSpeed = 1.0;
     private double _pausedSelectLastSeconds = -1;
 
     // Scrub-seek throttle for waveform-driven position changes (wheel scrubbing in center mode,
@@ -1467,9 +1474,9 @@ public partial class MainViewModel :
                 // that the player is really playing (same reasoning as fullscreen, #13407).
                 RefreshSubtitlePreview();
 
-                if (savedAudioTrack != null && vp.VideoPlayer is LibMpvDynamicPlayer mpv)
+                if (savedAudioTrack != null && vp.VideoPlayer != null)
                 {
-                    mpv.SetAudioTrack(savedAudioTrack.Id);
+                    vp.VideoPlayer.SetAudioTrack(savedAudioTrack.Id);
                     var _ = Task.Run(LoadAudioTrackMenuItems);
                 }
             });
@@ -1488,6 +1495,7 @@ public partial class MainViewModel :
             double.TryParse(SelectedSpeed.Trim('x'), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var speed))
         {
             GetVideoPlayerControl()?.SetSpeed(speed);
+            _playheadPlaybackSpeed = speed;
         }
     }
 
@@ -1500,12 +1508,12 @@ public partial class MainViewModel :
     internal void ReapplySelectedAudioTrack(VideoPlayerControl? player)
     {
         var audioTrack = _audioTrack;
-        if (audioTrack == null || player?.VideoPlayer is not LibMpvDynamicPlayer mpv)
+        if (audioTrack == null || player?.VideoPlayer == null)
         {
             return;
         }
 
-        mpv.SetAudioTrack(audioTrack.Id);
+        player.VideoPlayer.SetAudioTrack(audioTrack.Id);
     }
 
     private void RefreshSubtitlePreview()
@@ -1960,6 +1968,27 @@ public partial class MainViewModel :
         {
             RemoveVideoOffset(result.Subtitle); // edited as file time codes, stored video-relative
             SetSubtitles(result.Subtitle);
+
+            // The dialog parses into its own subtitle; SetSubtitles copies only the lines, so a
+            // header edited or pasted in source view (LRC tags, ASSA [Script Info]) was lost (#15212).
+            // An empty one means "unchanged" unless the user deleted it in the source.
+            if (result.HeaderRemoved)
+            {
+                _subtitle.Header = string.Empty;
+            }
+            else if (!string.IsNullOrEmpty(result.Subtitle.Header))
+            {
+                _subtitle.Header = result.Subtitle.Header;
+            }
+
+            if (result.FooterRemoved)
+            {
+                _subtitle.Footer = string.Empty;
+            }
+            else if (!string.IsNullOrEmpty(result.Subtitle.Footer))
+            {
+                _subtitle.Footer = result.Subtitle.Footer;
+            }
             var idx = Math.Min(oldSelectedIndex, Subtitles.Count - 1);
             SelectAndScrollToRow(idx);
             _updateAudioVisualizer = true;
@@ -1974,55 +2003,98 @@ public partial class MainViewModel :
             return;
         }
 
-        var result = await ShowDialogAsync<AssaStylesWindow, AssaStylesViewModel>(vm =>
+        // GetUpdateSubtitle: the dialog needs paragraphs with Extra set to the grid rows'
+        // current styles - a stale _subtitle breaks usage counts and the re-apply of
+        // styles on OK (#13101).
+        var subtitle = GetUpdateSubtitleWithRowMap(out var rowByParagraphId);
+        _styleDialogRowByParagraphId = rowByParagraphId;
+        try
         {
-            // GetUpdateSubtitle: the dialog needs paragraphs with Extra set to the grid rows'
-            // current styles - a stale _subtitle breaks usage counts and the positional
-            // re-apply of styles on OK (#13101).
-            vm.Initialize(GetUpdateSubtitle(), SelectedSubtitleFormat, _subtitleFileName ?? string.Empty,
-                SelectedSubtitle?.Style ?? string.Empty, this);
-        });
-
-        if (result.OkPressed)
-        {
-            ApplyAssaStyles(result);
-            _subtitle.Footer = result.ResultSubtitle.Footer;
-
-            var styles = AdvancedSubStationAlpha.GetStylesFromHeader(_subtitle.Header);
-            foreach (var s in Subtitles)
+            var result = await ShowDialogAsync<AssaStylesWindow, AssaStylesViewModel>(vm =>
             {
-                if (!styles.Contains(s.Style))
-                {
-                    s.Style = styles.FirstOrDefault() ?? "Default";
-                }
-            }
+                vm.Initialize(subtitle, SelectedSubtitleFormat, _subtitleFileName ?? string.Empty,
+                    SelectedSubtitle?.Style ?? string.Empty, this);
+            });
 
-            RefreshSubtitlePreview();
+            if (result.OkPressed)
+            {
+                ApplyAssaStyles(result);
+                _subtitle.Footer = result.ResultSubtitle.Footer;
+            }
+        }
+        finally
+        {
+            _styleDialogRowByParagraphId = null;
         }
     }
 
     public void ApplyAssaStyles(AssaStylesViewModel result)
     {
-        _subtitle.Header = result.Header;
+        ApplyStylesFromDialog(result.Header, result.ResultSubtitle, _styleDialogRowByParagraphId);
+    }
+
+    /// <summary>
+    /// The grid rows the open ASSA/SSA styles dialog was built from, by the id of the paragraph
+    /// each row became. The dialog's Apply button hands its result back through
+    /// <see cref="IApplyAssaStyles"/>/<see cref="IApplySsaStyles"/> without a map, so the one made
+    /// when the dialog opened is kept here for it. Null while no styles dialog is open.
+    /// </summary>
+    private IReadOnlyDictionary<Guid, SubtitleLineViewModel>? _styleDialogRowByParagraphId;
+
+    /// <summary>
+    /// Writes the styles dialog's header and per-line style assignments back to the grid.
+    ///
+    /// Lines are matched to rows by paragraph id, never by position: the dialog's subtitle has
+    /// no entry for the display-only original rows, so with an original loaded, index i names a
+    /// different line in the two lists from the first such row on - every later row took a
+    /// neighbour's style after a plain font size change (#15126).
+    /// </summary>
+    private void ApplyStylesFromDialog(
+        string header,
+        Subtitle resultSubtitle,
+        IReadOnlyDictionary<Guid, SubtitleLineViewModel>? rowByParagraphId)
+    {
+        _subtitle.Header = header;
+
+        // Style names are matched on the header's spelling: the writer looks a line's style up
+        // by exact name, so a row must carry the name as the header has it. The SSA "*Name"
+        // convention and case differences are tolerated on the way in (the dialog counts usages
+        // that way too), but never invented on the way out - stripping the star here while the
+        // header kept it made every line "unknown" and sent the whole file to the first style.
         var styles = AdvancedSubStationAlpha.GetStylesFromHeader(_subtitle.Header);
         var first = styles.FirstOrDefault() ?? "Default";
-
-        for (var i = 0; i < Subtitles.Count; i++)
+        var styleByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var style in styles)
         {
-            var s = Subtitles[i];
+            styleByName.TryAdd(style.TrimStart('*'), style);
+        }
 
-            if (string.IsNullOrEmpty(s.Style) || !styles.Contains(s.Style))
-            {
-                s.Style = first;
-            }
+        string Resolve(string? name)
+        {
+            return !string.IsNullOrEmpty(name) && styleByName.TryGetValue(name.TrimStart('*'), out var known)
+                ? known
+                : first;
+        }
 
-            if (i < result.ResultSubtitle.Paragraphs.Count)
+        if (rowByParagraphId != null)
+        {
+            foreach (var p in resultSubtitle.Paragraphs)
             {
-                var extra = result.ResultSubtitle.Paragraphs[i].Extra;
-                if (!string.IsNullOrEmpty(extra))
+                if (p.Id is { } id && !string.IsNullOrEmpty(p.Extra) && rowByParagraphId.TryGetValue(id, out var row))
                 {
-                    s.Style = extra.TrimStart('*');
+                    row.Style = Resolve(p.Extra);
                 }
+            }
+        }
+
+        // A line whose style was deleted or renamed away in the dialog falls back to the first
+        // style in the file. Display-only original rows are not part of the working subtitle
+        // and carry no style to repair.
+        foreach (var row in Subtitles)
+        {
+            if (!row.IsReferenceOnly)
+            {
+                row.Style = Resolve(row.Style);
             }
         }
 
@@ -2037,28 +2109,26 @@ public partial class MainViewModel :
             return;
         }
 
-        var result = await ShowDialogAsync<SsaStylesWindow, SsaStylesViewModel>(vm =>
+        // See ShowAssaStyles (#13101, #15126).
+        var subtitle = GetUpdateSubtitleWithRowMap(out var rowByParagraphId);
+        _styleDialogRowByParagraphId = rowByParagraphId;
+        try
         {
-            // GetUpdateSubtitle: see ShowAssaStyles (#13101).
-            vm.Initialize(GetUpdateSubtitle(), SelectedSubtitleFormat, _subtitleFileName ?? string.Empty,
-                SelectedSubtitle?.Style ?? string.Empty, this);
-        });
-
-        if (result.OkPressed)
-        {
-            ApplySsaStyles(result);
-            _subtitle.Footer = result.ResultSubtitle.Footer;
-
-            var styles = AdvancedSubStationAlpha.GetStylesFromHeader(_subtitle.Header);
-            foreach (var s in Subtitles)
+            var result = await ShowDialogAsync<SsaStylesWindow, SsaStylesViewModel>(vm =>
             {
-                if (!styles.Contains(s.Style))
-                {
-                    s.Style = styles.FirstOrDefault() ?? "Default";
-                }
-            }
+                vm.Initialize(subtitle, SelectedSubtitleFormat, _subtitleFileName ?? string.Empty,
+                    SelectedSubtitle?.Style ?? string.Empty, this);
+            });
 
-            RefreshSubtitlePreview();
+            if (result.OkPressed)
+            {
+                ApplySsaStyles(result);
+                _subtitle.Footer = result.ResultSubtitle.Footer;
+            }
+        }
+        finally
+        {
+            _styleDialogRowByParagraphId = null;
         }
     }
 
@@ -2280,30 +2350,7 @@ public partial class MainViewModel :
 
     public void ApplySsaStyles(SsaStylesViewModel result)
     {
-        _subtitle.Header = result.Header;
-        var styles = AdvancedSubStationAlpha.GetStylesFromHeader(_subtitle.Header);
-        var first = styles.FirstOrDefault() ?? "Default";
-
-        for (var i = 0; i < Subtitles.Count; i++)
-        {
-            var s = Subtitles[i];
-
-            if (string.IsNullOrEmpty(s.Style) || !styles.Contains(s.Style))
-            {
-                s.Style = first;
-            }
-
-            if (i < result.ResultSubtitle.Paragraphs.Count)
-            {
-                var extra = result.ResultSubtitle.Paragraphs[i].Extra;
-                if (!string.IsNullOrEmpty(extra))
-                {
-                    s.Style = extra.TrimStart('*');
-                }
-            }
-        }
-
-        RefreshSubtitlePreview();
+        ApplyStylesFromDialog(result.Header, result.ResultSubtitle, _styleDialogRowByParagraphId);
     }
 
     [RelayCommand]
@@ -2952,8 +2999,8 @@ public partial class MainViewModel :
     {
         var selectedIndex = SelectedSubtitleIndex ?? 0;
 
-        var fileName =
-            await _fileHelper.PickOpenSubtitleFile(Window!, Se.Language.General.OpenOriginalSubtitleFileTitle);
+        var fileName = await _fileHelper.PickOpenSubtitleFile(Window!, Se.Language.General.OpenOriginalSubtitleFileTitle,
+            lastOpenedFilePath: GetOpenFileStartPath());
         if (string.IsNullOrEmpty(fileName))
         {
             _shortcutManager.ClearKeys();
@@ -4066,17 +4113,13 @@ public partial class MainViewModel :
         }
         else
         {
-            var result = await ShowDialogAsync<OpenSecondarySubtitleWindow, OpenSecondarySubtitleViewModel>(vm =>
-            {
-                vm.Initialize(subtitle, GetUpdateSubtitle(), SelectedSubtitleFormat, _mediaInfo, _videoFileName);
-            });
-
-            if (!result.OkPressed)
+            var styled = await ShowSecondarySubtitleDialog(subtitle, isEditingSettings: false);
+            if (styled == null)
             {
                 return;
             }
 
-            _subtitleSecondary = result.ResultSubtitle;
+            _subtitleSecondary = styled;
         }
 
         _subtitleSecondaryFileName = fileName;
@@ -4085,6 +4128,43 @@ public partial class MainViewModel :
         // Persist the file name on the recent-file entry now rather than at the next save or
         // close, so it survives a crash too (#15044).
         AddToRecentFiles(false);
+    }
+
+    /// <summary>
+    /// Re-opens the style dialog for the second subtitle already on the video player, without
+    /// the file picker (#15110). Always shows the dialog - also with "Do not show this dialog
+    /// again" on, since showing it is the whole point of the command.
+    /// </summary>
+    [RelayCommand]
+    private async Task EditSecondarySubtitleSettings()
+    {
+        if (Window == null || _subtitleSecondary == null)
+        {
+            return;
+        }
+
+        var styled = await ShowSecondarySubtitleDialog(SecondarySubtitleStyler.Unstyle(_subtitleSecondary), isEditingSettings: true);
+        if (styled == null)
+        {
+            return;
+        }
+
+        _subtitleSecondary = styled;
+        PushSecondarySubtitle();
+    }
+
+    /// <summary>
+    /// Shows the second subtitle style dialog for <paramref name="subtitle"/> and returns the
+    /// styled result, or null when it was cancelled.
+    /// </summary>
+    private async Task<Subtitle?> ShowSecondarySubtitleDialog(Subtitle subtitle, bool isEditingSettings)
+    {
+        var result = await ShowDialogAsync<OpenSecondarySubtitleWindow, OpenSecondarySubtitleViewModel>(vm =>
+        {
+            vm.Initialize(subtitle, GetUpdateSubtitle(), SelectedSubtitleFormat, _mediaInfo, _videoFileName, isEditingSettings);
+        });
+
+        return result.OkPressed ? result.ResultSubtitle : null;
     }
 
     /// <summary>
@@ -4128,14 +4208,14 @@ public partial class MainViewModel :
                 _mpvReloader.Reset();
                 // Through RunPreviewRefresh so a rejected push (player just recreated, mpv not
                 // playing yet) arms the dirty-flag retry instead of being lost (#13407).
-                _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat));
+                _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat, subtitleIsOwned: true));
             }
             else if (vp.VideoPlayer is LibVlcDynamicPlayer vlc)
             {
                 _vlcReloader.Reset();
                 _ = RunPreviewRefresh(async () =>
                 {
-                    await _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
+                    await _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat, subtitleIsOwned: true);
                     return true;
                 });
             }
@@ -4277,9 +4357,9 @@ public partial class MainViewModel :
 
         var vp = GetVideoPlayerControl();
 
-        if (vp != null && vp.VideoPlayer is LibMpvDynamicPlayer mpv)
+        if (vp?.VideoPlayer != null)
         {
-            var audioTracks = mpv.GetAudioTracks();
+            var audioTracks = vp.VideoPlayer.GetAudioTracks();
             var desiredTrack = audioTracks.FirstOrDefault(p => p.Id == recentFile.AudioTrack);
 
             // Only switch track and reload the waveform if different from current; PickAudioTrack
@@ -5524,7 +5604,7 @@ public partial class MainViewModel :
             return;
         }
 
-        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false);
+        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false, GetOpenFileStartPath());
         if (string.IsNullOrEmpty(fileName))
         {
             _shortcutManager.ClearKeys();
@@ -5590,7 +5670,7 @@ public partial class MainViewModel :
             return;
         }
 
-        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false);
+        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false, GetOpenFileStartPath());
         if (string.IsNullOrEmpty(fileName))
         {
             _shortcutManager.ClearKeys();
@@ -5690,7 +5770,7 @@ public partial class MainViewModel :
             return;
         }
 
-        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false);
+        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false, GetOpenFileStartPath());
         if (string.IsNullOrEmpty(fileName))
         {
             _shortcutManager.ClearKeys();
@@ -5762,7 +5842,7 @@ public partial class MainViewModel :
             return;
         }
 
-        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false);
+        var fileName = await _fileHelper.PickOpenSubtitleFile(Window, Se.Language.General.OpenSubtitleFileTitle, false, GetOpenFileStartPath());
         if (string.IsNullOrEmpty(fileName))
         {
             _shortcutManager.ClearKeys();
@@ -5819,7 +5899,7 @@ public partial class MainViewModel :
         }
 
         var fileName =
-            await _fileHelper.PickOpenSubtitleFile(Window!, Se.Language.General.OpenSubtitleFileTitle, false);
+            await _fileHelper.PickOpenSubtitleFile(Window!, Se.Language.General.OpenSubtitleFileTitle, false, GetOpenFileStartPath());
         if (string.IsNullOrEmpty(fileName))
         {
             return;
@@ -7100,7 +7180,7 @@ public partial class MainViewModel :
         }
 
         var fileName =
-            await _fileHelper.PickOpenSubtitleFile(Window!, Se.Language.General.OpenSubtitleFileTitle, false);
+            await _fileHelper.PickOpenSubtitleFile(Window!, Se.Language.General.OpenSubtitleFileTitle, false, GetOpenFileStartPath());
         if (string.IsNullOrEmpty(fileName))
         {
             return;
@@ -9174,7 +9254,7 @@ public partial class MainViewModel :
             return;
         }
 
-        if (vp.VideoPlayer is LibMpvDynamicPlayer mpv && parameter is AudioTrackInfo audioTrack)
+        if (vp.VideoPlayer != null && parameter is AudioTrackInfo audioTrack)
         {
             // No-op when the picked track is already active (e.g. re-picking it from the
             // Video -> Audio tracks menu) so the waveform isn't cleared and reloaded for nothing.
@@ -9183,7 +9263,7 @@ public partial class MainViewModel :
                 return;
             }
 
-            mpv.SetAudioTrack(audioTrack.Id);
+            vp.VideoPlayer.SetAudioTrack(audioTrack.Id);
             _audioTrack = audioTrack;
             var _ = Task.Run(LoadAudioTrackMenuItems);
             ShowStatus(string.Format(Se.Language.Main.AudioTrackIsNowX, _audioTrack));
@@ -12557,7 +12637,7 @@ public partial class MainViewModel :
             return;
         }
 
-        var result = await ShowDialogAsync<ChangeFrameRateWindow, ChangeFrameRateViewModel>(vm => { vm.Initialize(_videoFileName, _mediaInfo); });
+        var result = await ShowDialogAsync<ChangeFrameRateWindow, ChangeFrameRateViewModel>(vm => { vm.Initialize(_videoFileName, (double)(_mediaInfo?.FramesRate ?? 0), Se.Settings.General.CurrentFrameRate); });
         if (result.OkPressed)
         {
             ChangeFrameRateViewModel.ChangeFrameRate(Subtitles, result.SelectedFromFrameRate, result.SelectedToFrameRate);
@@ -13774,12 +13854,12 @@ public partial class MainViewModel :
             if (vp.VideoPlayer is LibMpvDynamicPlayer mpv)
             {
                 _mpvReloader.Reset();
-                _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
+                _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat, subtitleIsOwned: true);
             }
             else if (vp.VideoPlayer is LibVlcDynamicPlayer vlc)
             {
                 _vlcReloader.Reset();
-                _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
+                _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat, subtitleIsOwned: true);
             }
             else if (vp.VideoPlayer is FfmpegPlayer ffmpeg)
             {
@@ -14939,6 +15019,20 @@ public partial class MainViewModel :
         RunWithoutChangeDetection(() =>
         {
             WithoutReferenceOnlyRows(MergeLineAfterKeepBreaks);
+        });
+    }
+
+    [RelayCommand]
+    private void MergeWithLineAfterAndUnbreak()
+    {
+        if (IsCurrentRowReferenceOnly)
+        {
+            return;
+        }
+
+        RunWithoutChangeDetection(() =>
+        {
+            WithoutReferenceOnlyRows(() => MergeLineAfterWithBreakMode(MergeManager.BreakMode.Unbreak));
         });
     }
 
@@ -17320,6 +17414,7 @@ public partial class MainViewModel :
                 }
 
                 ShowStatus(string.Format(Se.Language.Main.ReplacedXWithYCountZ, result.SearchText, result.ReplaceText, replaceCount));
+                result.ReportReplaceAll(replaceCount);
                 return;
             }
             else // replace requested
@@ -17357,6 +17452,7 @@ public partial class MainViewModel :
                             nextStartLine = savedFoundLine;
                             nextStartIndex = savedFoundIndex + replaced.Value;
                             nextStartInOriginal = savedFoundInOriginal;
+                            result.ReportReplaced(1);
                         }
                     }
                 }
@@ -17545,12 +17641,12 @@ public partial class MainViewModel :
         if (vp.VideoPlayer is LibMpvDynamicPlayer mpv)
         {
             _mpvReloader.Reset();
-            _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat));
+            _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat, subtitleIsOwned: true));
         }
         else if (vp.VideoPlayer is LibVlcDynamicPlayer vlc)
         {
             _vlcReloader.Reset();
-            _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat);
+            _vlcReloader.RefreshVlc(vlc, GetVideoPreviewSubtitle(), _subtitleSecondary, SelectedSubtitleFormat, subtitleIsOwned: true);
         }
         else if (vp.VideoPlayer is FfmpegPlayer ffmpeg)
         {
@@ -20048,6 +20144,7 @@ public partial class MainViewModel :
         }
 
         vp.SetSpeed(1.0);
+        _playheadPlaybackSpeed = 1.0;
         SelectedSpeed = Speeds.FirstOrDefault(p => p == "1.0x") ?? Speeds[2];
         AudioVisualizer.ZoomFactor = 1.0;
         AudioVisualizer.VerticalZoomFactor = 1.0;
@@ -23611,6 +23708,24 @@ public partial class MainViewModel :
             var fileEncoding = textEncoding?.Encoding ?? LanguageAutoDetect.GetEncodingFromFile(fileName);
             Subtitle? subtitle = null;
 
+            // An audio file is never the subtitle file, even when a subtitle is found in it. Its
+            // lyrics tags (e.g., LYRICS, UNSYNCED LYRICS) are read first: parsing the raw bytes as
+            // text also "finds" LRC lines in an .opus/.flac comment block, minus the first line,
+            // which is glued to "LYRICS=" (#15213).
+            var isAudioFile = Utilities.AudioFileExtensions.Contains(ext.ToLowerInvariant());
+            if (isAudioFile && fileSize > 100)
+            {
+                var lyrics = GetLyricsFromAudioFile(fileName);
+                if (!string.IsNullOrEmpty(lyrics))
+                {
+                    var lyricsSubtitle = Subtitle.Parse(lyrics.SplitToLines(), ".lrc");
+                    if (lyricsSubtitle != null && lyricsSubtitle.Paragraphs.Count > 0)
+                    {
+                        subtitle = lyricsSubtitle;
+                    }
+                }
+            }
+
             // For .csv files, try the multi-column CSV importer first. It only succeeds when there is a
             // recognizable header (start/end/text/etc.), so single-text-column CSV formats fall through to Subtitle.Parse.
             if (string.Equals(ext, ".csv", StringComparison.OrdinalIgnoreCase))
@@ -23687,21 +23802,6 @@ public partial class MainViewModel :
                         f.LoadSubtitle(subtitle, null, fileName);
                         subtitle.OriginalFormat = f;
                         break; // format found, exit the loop
-                    }
-                }
-
-                // check for lyrics in their metadata tags (e.g., LYRICS, UNSYNCED LYRICS) in audio files: mp3, m4a, opus, flac
-                if (subtitle == null && fileSize > 100 && (ext == ".mp3" || ext == ".m4a" || ext == ".opus" || ext == ".flac"))
-                {
-                    var lyrics = GetLyricsFromAudioFile(fileName);
-                    if (!string.IsNullOrEmpty(lyrics))
-                    {
-                        var lyricsSubtitle = Subtitle.Parse(lyrics.SplitToLines(), ".lrc");
-                        if (lyricsSubtitle != null && lyricsSubtitle.Paragraphs.Count > 0)
-                        {
-                            subtitle = lyricsSubtitle;
-                            _converted = true;
-                        }
                     }
                 }
 
@@ -23880,6 +23980,17 @@ public partial class MainViewModel :
             _subtitleFileName = fileName;
             _subtitle = subtitle;
             _lastOpenSaveFormat = subtitle.OriginalFormat;
+
+            // Never save back over the audio file: ResetSubtitle() above cleared _converted, and
+            // the loaded format (LRC) matches the selected one, so Ctrl+S (or auto-save) wrote the
+            // LRC text over the .opus (#15213). Suggest a subtitle file next to it and route Save
+            // through "Save as".
+            if (isAudioFile)
+            {
+                _subtitleFileName = Path.ChangeExtension(fileName, SelectedSubtitleFormat.Extension);
+                _converted = true;
+            }
+
             SetSubtitles(_subtitle);
             _changeSubtitleHash = GetFastHash();
             ShowStatus(string.Format(Se.Language.General.SubtitleLoadedX, fileName));
@@ -23959,7 +24070,12 @@ public partial class MainViewModel :
             // Pass the index explicitly: SelectAndScrollToRow applies the selection via a
             // dispatcher post that may not have run yet, so reading SelectedSubtitleIndex
             // here could persist 0 and erase the remembered line.
-            AddToRecentFiles(true, selectedSubtitleIndex);
+            // Not for an audio file: the suggested subtitle file does not exist yet - like the
+            // other import paths, the entry is added on "Save as".
+            if (!isAudioFile)
+            {
+                AddToRecentFiles(true, selectedSubtitleIndex);
+            }
         }
         finally
         {
@@ -25978,14 +26094,14 @@ public partial class MainViewModel :
     /// <see cref="GetUpdateSubtitleOriginal"/>: that one owns <see cref="_subtitleOriginal"/>, the
     /// instance that gets saved, and re-stamps every row's reference id - far too much for
     /// something a timer calls whenever the preview is dirty.
+    /// The working variant is a throw-away too, not the live <see cref="GetUpdateSubtitle"/>
+    /// instance: the preview owns it, so the reloaders are told to skip their defensive deep
+    /// copy (one Paragraph + two TimeCodes per line on every refresh), and the hidden-layer
+    /// filter in <see cref="TryRefreshVideoPreview"/> no longer removes lines from the working
+    /// subtitle.
     /// </summary>
     private Subtitle GetVideoPreviewSubtitle()
     {
-        if (!ShowOriginalTextInPreview)
-        {
-            return GetUpdateSubtitle();
-        }
-
         var subtitle = new Subtitle
         {
             Header = _subtitle.Header,
@@ -25993,6 +26109,21 @@ public partial class MainViewModel :
             OriginalFormat = _subtitle.OriginalFormat,
             FileName = _subtitle.FileName,
         };
+        subtitle.Paragraphs.Capacity = Subtitles.Count;
+
+        if (!ShowOriginalTextInPreview)
+        {
+            foreach (var line in Subtitles)
+            {
+                // Same gate as GetUpdateSubtitle (#13449).
+                if (!line.IsReferenceOnly)
+                {
+                    subtitle.Paragraphs.Add(line.ToParagraph(SelectedSubtitleFormat));
+                }
+            }
+
+            return subtitle;
+        }
 
         foreach (var line in Subtitles)
         {
@@ -26250,6 +26381,16 @@ public partial class MainViewModel :
         var result = await SaveSubtitle();
         AddToRecentFiles(true);
         return result;
+    }
+
+    /// <summary>
+    /// File the open pickers for the loaded subtitle's companions (original, import, insert) start
+    /// next to: the current subtitle, else the video. Without it the OS picker opens in whatever
+    /// folder it was last used in, which may be another drive (#15272).
+    /// </summary>
+    private string? GetOpenFileStartPath()
+    {
+        return !string.IsNullOrEmpty(_subtitleFileName) ? _subtitleFileName : _videoFileName;
     }
 
     /// <summary>
@@ -26837,7 +26978,7 @@ public partial class MainViewModel :
 
             // The window can be gone again within that second (a test host, or a New window
             // closed at once); StopBackgroundWork has run then and the poll must stay off.
-            if (_positionTimer.IsRunning)
+            if (_backgroundWorkRunning)
             {
                 _undoRedoManager.StartChangeDetection();
             }
@@ -27000,17 +27141,17 @@ public partial class MainViewModel :
 
         IsVideoLoaded = true;
 
-        // Wait until mpv has actually parsed the file before reading the track list.
-        // GetAudioTracks() reads "track-list/count" which is 0 until the file is loaded,
-        // so racing past it produces a bare-hash peak filename ({hash}.wav) on the first
-        // open vs. a track-suffixed one ({hash}-N.wav) on later opens, causing the
-        // waveform to be regenerated on re-open.
+        // Wait until the player has actually parsed the file before reading the track list.
+        // GetAudioTracks() is empty until the file is loaded (mpv's "track-list/count" is 0,
+        // the ffmpeg player opens on a worker), so racing past it produces a bare-hash peak
+        // filename ({hash}.wav) on the first open vs. a track-suffixed one ({hash}-N.wav) on
+        // later opens, causing the waveform to be regenerated on re-open.
         await vp.WaitForPlayersReadyAsync();
 
         // Resolve _audioTrack before LoadWaveformAndSpectrogram so it sees the right FfIndex (and we don't race LoadAudioTrackMenuItems).
-        if (vp.VideoPlayer is LibMpvDynamicPlayer mpv)
+        if (vp.VideoPlayer != null)
         {
-            var tracks = mpv.GetAudioTracks();
+            var tracks = vp.VideoPlayer.GetAudioTracks();
             if (tracks.Count > 0)
             {
                 var chosen = desiredAudioTrackId >= 0
@@ -27026,12 +27167,12 @@ public partial class MainViewModel :
                     ?? tracks.FirstOrDefault(t => t.IsDefault)
                     ?? tracks[0];
 
-                // Switch mpv to the chosen track when it isn't already the selected one (e.g. a
-                // track restored from recent files) so playback, the track menu and the waveform
-                // picker all agree on the same track.
+                // Switch the player to the chosen track when it isn't already the selected one
+                // (e.g. a track restored from recent files) so playback, the track menu and the
+                // waveform picker all agree on the same track.
                 if (chosen.Id != -1 && !chosen.IsSelected)
                 {
-                    mpv.SetAudioTrack(chosen.Id);
+                    vp.VideoPlayer.SetAudioTrack(chosen.Id);
                 }
 
                 _audioTrack = chosen;
@@ -27534,9 +27675,9 @@ public partial class MainViewModel :
         try
         {
             var vp = GetVideoPlayerControl();
-            if (vp?.VideoPlayer is LibMpvDynamicPlayer mpv)
+            if (vp?.VideoPlayer != null)
             {
-                var audioTracks = mpv.GetAudioTracks();
+                var audioTracks = vp.VideoPlayer.GetAudioTracks();
                 if (audioTracks.Count == 0)
                 {
                     Dispatcher.UIThread.Post(() =>
@@ -27981,7 +28122,7 @@ public partial class MainViewModel :
 
         WaveformGeneratingText = Se.Language.Main.ExtractingShotChanges;
 
-        var threshold = Se.Settings.Waveform.ShotChangesSensitivity.ToString(CultureInfo.InvariantCulture);
+        var threshold = Math.Round(Se.Settings.Waveform.ShotChangesSensitivity, 2).ToString(CultureInfo.InvariantCulture);
         var argumentsFormat = Se.Settings.Video.ShowChangesFFmpegArguments;
         var arguments = string.Format(argumentsFormat, videoFileName, threshold);
 
@@ -28795,6 +28936,11 @@ public partial class MainViewModel :
 
     private void MergeLineAfterKeepBreaks()
     {
+        MergeLineAfterWithBreakMode(MergeManager.BreakMode.KeepBreaks);
+    }
+
+    private void MergeLineAfterWithBreakMode(MergeManager.BreakMode breakMode)
+    {
         // A display-only reference row can be the current row (it is selectable so its text can
         // be read), but it is not a line of the working subtitle: WithoutReferenceOnlyRows has
         // detached it, so IndexOf is -1 and "the line after" resolved to the first line of the
@@ -28816,7 +28962,7 @@ public partial class MainViewModel :
                 selectedItem,
                 next
             };
-            _mergeManager.MergeSelectedLines(Subtitles, list, breakMode: MergeManager.BreakMode.KeepBreaks, keepEndTime: MergeManager.ShouldKeepEndTime(SelectedSubtitleFormat));
+            _mergeManager.MergeSelectedLines(Subtitles, list, breakMode: breakMode, keepEndTime: MergeManager.ShouldKeepEndTime(SelectedSubtitleFormat));
             Renumber();
             SelectAndScrollToRow(selectedItem);
             _updateAudioVisualizer = true;
@@ -32415,6 +32561,23 @@ public partial class MainViewModel :
             var isPlaying = vp.IsPlaying;
             var est = UpdatePlayheadEstimate(vp, isPlaying);
 
+            // The estimator's velocity over this tick, for the waveform's render-time motion. 0
+            // when it did not advance (paused, pinned, frozen clock), and bounded to a little over
+            // the playback speed so a forward snap is not extended past where playback really is.
+            var tickTimestamp = Stopwatch.GetTimestamp();
+            var playheadVelocity = 0.0;
+            if (isPlaying && _playheadTickPrevEstimate >= 0 && est > _playheadTickPrevEstimate)
+            {
+                var tickSeconds = (tickTimestamp - _playheadTickPrevTimestamp) / (double)Stopwatch.Frequency;
+                if (tickSeconds > 0 && tickSeconds < 0.2)
+                {
+                    playheadVelocity = Math.Min((est - _playheadTickPrevEstimate) / tickSeconds, Math.Max(1.0, _playheadPlaybackSpeed) * 1.5);
+                }
+            }
+
+            _playheadTickPrevEstimate = est;
+            _playheadTickPrevTimestamp = tickTimestamp;
+
             var av = AudioVisualizer;
             if (av != null)
             {
@@ -32439,12 +32602,14 @@ public partial class MainViewModel :
                                          Se.Settings.Waveform.CenterVideoPositionAlsoWhenPaused &&
                                          !av.IsEditingWithPointer &&
                                          Math.Abs(est - _pausedCenterLastSeconds) > 0.001;
-                if (WaveformCenter && av.WavePeaks != null && (isPlaying || centerPausedChange))
+                var centered = WaveformCenter && av.WavePeaks != null && (isPlaying || centerPausedChange);
+                if (centered)
                 {
                     var halfSeconds = (av.EndPositionSeconds - av.StartPositionSeconds) / 2.0;
                     av.StartPositionSeconds = Math.Max(0, est - halfSeconds);
                 }
 
+                av.SetPlayheadMotion(tickTimestamp, playheadVelocity, centered && isPlaying);
                 _pausedCenterLastSeconds = est;
             }
         }, DispatcherPriority.Normal);
@@ -32488,9 +32653,27 @@ public partial class MainViewModel :
     /// </summary>
     internal void StartBackgroundWork()
     {
-        _positionTimer.Start();
-        _cursorTimer?.Start();
+        _backgroundWorkRunning = true;
+        UpdateVideoTickPumps();
         _slowTimer.Start();
+    }
+
+    // Both tick bodies are no-ops without an open video, yet their pumps woke the UI thread
+    // ~80 times a second for the whole session - so they only run while a video is loaded.
+    partial void OnIsVideoLoadedChanged(bool value) => UpdateVideoTickPumps();
+
+    private void UpdateVideoTickPumps()
+    {
+        if (_backgroundWorkRunning && IsVideoLoaded)
+        {
+            _positionTimer.Start();
+            _cursorTimer?.Start();
+        }
+        else
+        {
+            _positionTimer.Stop();
+            _cursorTimer?.Stop();
+        }
     }
 
     /// <summary>
@@ -32502,6 +32685,7 @@ public partial class MainViewModel :
     /// </summary>
     internal void StopBackgroundWork()
     {
+        _backgroundWorkRunning = false;
         _positionTimer.Stop();
         _cursorTimer?.Stop();
         _slowTimer.Stop();
@@ -32578,8 +32762,13 @@ public partial class MainViewModel :
         // allocation across 100/1000/5000-line subtitles.
         var hideLayers = _visibleLayers != null && Se.Settings.Assa.HideLayersFromVideoPreview;
 
-        if (vp.VideoPlayer is LibMpvDynamicPlayer mpv)
+        // The mpv lambda captures a branch-local copy: a pattern variable declared in a top-level
+        // `if` is method-scoped, so its closure was allocated on every call - ~60 a second from the
+        // cursor timer, almost all of them taking the early returns above. The `else if` pattern
+        // variables below are scoped to their branch, so they only allocate when that branch runs.
+        if (vp.VideoPlayer is LibMpvDynamicPlayer mpvPlayer)
         {
+            var mpv = mpvPlayer;
             var subtitle = GetVideoPreviewSubtitle();
             _mpvPreviewDirty = false; // clear only after subtitle snapshot is successfully obtained
             if (hideLayers)
@@ -32587,7 +32776,7 @@ public partial class MainViewModel :
                 subtitle.Paragraphs.RemoveAll(p => !_visibleLayers!.Contains(p.Layer));
             }
 
-            _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, subtitle, _subtitleSecondary, SelectedSubtitleFormat));
+            _ = RunPreviewRefresh(() => _mpvReloader.RefreshMpv(mpv, subtitle, _subtitleSecondary, SelectedSubtitleFormat, subtitleIsOwned: true));
         }
         else if (vp.VideoPlayer is LibVlcDynamicPlayer vlc)
         {
@@ -32600,7 +32789,7 @@ public partial class MainViewModel :
 
             _ = RunPreviewRefresh(async () =>
             {
-                await _vlcReloader.RefreshVlc(vlc, subtitle, _subtitleSecondary, SelectedSubtitleFormat);
+                await _vlcReloader.RefreshVlc(vlc, subtitle, _subtitleSecondary, SelectedSubtitleFormat, subtitleIsOwned: true);
                 return true;
             });
         }

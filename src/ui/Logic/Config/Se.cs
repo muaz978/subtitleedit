@@ -21,7 +21,7 @@ public class Se
     internal const int CurrentShortcutsMigrationVersion = 4;
     internal const int CurrentLayoutMigrationVersion = 2;
 
-    public static string Version { get; set; } = "v5.3.0-beta8";
+    public static string Version { get; set; } = "v5.3.0-beta12";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -1010,6 +1010,8 @@ public class Se
             Settings.BeautifyTimeCodes = new();
         }
 
+        Settings.BeautifyTimeCodes.CustomProfiles ??= new();
+
         if (Settings.Ocr == null)
         {
             Settings.Ocr = new();
@@ -1104,6 +1106,7 @@ public class Se
 
 
         Configuration.Settings.Tools.AutoTranslateDelaySeconds = (int)Math.Round(Settings.AutoTranslate.RequestDelaySeconds, MidpointRounding.AwayFromZero);
+        Configuration.Settings.Tools.AutoTranslateKeepMusicLines = Settings.AutoTranslate.KeepMusicLinesUntranslated;
         if (Settings.AutoTranslate.RequestMaxBytes > 0)
         {
             Configuration.Settings.Tools.AutoTranslateMaxBytes = (int)Math.Round(Settings.AutoTranslate.RequestMaxBytes, MidpointRounding.AwayFromZero);

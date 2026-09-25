@@ -511,6 +511,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.MergeWithLineAfterCommand), Se.Language.General.MergeWithLineAfterAndAutoBreak },
         { nameof(MainViewModel.MergeWithLineBeforeKeepBreaksCommand), Se.Language.General.MergeWithLineBeforeKeepBreaks },
         { nameof(MainViewModel.MergeWithLineAfterKeepBreaksCommand), Se.Language.General.MergeWithLineAfterKeepBreaks },
+        { nameof(MainViewModel.MergeWithLineAfterAndUnbreakCommand), Se.Language.General.MergeWithLineAfterAndUnbreak },
         { nameof(MainViewModel.MergeWithLineBeforeAsDialogCommand), Se.Language.Options.Shortcuts.MergeWithLineBeforeAsDialog },
         { nameof(MainViewModel.MergeWithLineAfterAsDialogCommand), Se.Language.Options.Shortcuts.MergeWithLineAfterAsDialog },
         { nameof(MainViewModel.ToggleDialogDashesCommand), Se.Language.Options.Shortcuts.ToggleDialogDashes },
@@ -703,6 +704,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.ZoomLayoutInCommand), Se.Language.Options.Shortcuts.LayoutZoomIn },
         { nameof(MainViewModel.ZoomLayoutOutCommand), Se.Language.Options.Shortcuts.LayoutZoomOut },
         { nameof(MainViewModel.OpenSecondarySubtitleCommand), Se.Language.Video.OpenSecondarySubtitleOnVideoPlayer },
+        { nameof(MainViewModel.EditSecondarySubtitleSettingsCommand), Se.Language.Video.EditSecondarySubtitleSettings },
         { nameof(MainViewModel.ToggleCurrentSubtitleWhilePlayingCommand), Se.Language.Video.ToggleCurrentSubtitleWhilePlaying },
         { nameof(MainViewModel.ToggleSubtitlesOnVideoPlayerCommand), Se.Language.Video.ToggleSubtitlesOnVideoPlayer },
         { nameof(MainViewModel.ToggleSmpteTimingCommand), Se.Language.Main.Menu.SmpteTiming },
@@ -989,6 +991,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.MergeSelectedLinesCommand, nameof(vm.MergeSelectedLinesCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MergeWithLineBeforeKeepBreaksCommand, nameof(vm.MergeWithLineBeforeKeepBreaksCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MergeWithLineAfterKeepBreaksCommand, nameof(vm.MergeWithLineAfterKeepBreaksCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.MergeWithLineAfterAndUnbreakCommand, nameof(vm.MergeWithLineAfterAndUnbreakCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MergeWithLineBeforeAsDialogCommand, nameof(vm.MergeWithLineBeforeAsDialogCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.MergeWithLineAfterAsDialogCommand, nameof(vm.MergeWithLineAfterAsDialogCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ToggleDialogDashesCommand, nameof(vm.ToggleDialogDashesCommand), ShortcutCategory.SubtitleGridAndTextBox);
@@ -1178,6 +1181,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.ZoomLayoutInCommand, nameof(vm.ZoomLayoutInCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ZoomLayoutOutCommand, nameof(vm.ZoomLayoutOutCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.OpenSecondarySubtitleCommand, nameof(vm.OpenSecondarySubtitleCommand), ShortcutCategory.General, ShortcutGroup.Video);
+        AddShortcut(shortcuts, vm.EditSecondarySubtitleSettingsCommand, nameof(vm.EditSecondarySubtitleSettingsCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.ToggleCurrentSubtitleWhilePlayingCommand, nameof(vm.ToggleCurrentSubtitleWhilePlayingCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.ToggleSubtitlesOnVideoPlayerCommand, nameof(vm.ToggleSubtitlesOnVideoPlayerCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.ToggleSmpteTimingCommand, nameof(vm.ToggleSmpteTimingCommand), ShortcutCategory.General, ShortcutGroup.Video);

@@ -342,7 +342,7 @@ namespace Nikse.SubtitleEdit.Logic.Media
             for (var attempt = 0; ; attempt++)
             {
                 // Use SaveFilePickerWithResultAsync instead of SaveFilePickerAsync
-                var result = await topLevel.StorageProvider.SaveFilePickerWithResultAsync(options);
+                var result = await NativePickers.SaveFilePickerWithResultAsync(topLevel, options);
 
                 if (result.File == null)
                 {
@@ -608,9 +608,12 @@ namespace Nikse.SubtitleEdit.Logic.Media
             };
             var fileTypes = new List<FilePickerFileType> { fileType };
 
+            // EBU STL is binary but saves through the same "Save as" path (SaveBinarySubtitle),
+            // so it belongs in the list like the text formats - it used to be reachable only by
+            // switching the toolbar format first.
             foreach (var format in SubtitleFormat.AllSubtitleFormats)
             {
-                if (format.IsTextBased && format.Name != currentFormat.Name)
+                if ((format.IsTextBased || format is Ebu) && format.Name != currentFormat.Name)
                 {
                     var patterns = new List<string>
                     {

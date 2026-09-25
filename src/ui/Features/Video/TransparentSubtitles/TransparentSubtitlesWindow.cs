@@ -49,7 +49,7 @@ public class TransparentSubtitlesWindow : Window
         var videoInfoView = MakeVideoInfoView(vm);
         var progressView = MakeProgressView(vm);
 
-        var buttonGenerate = new SplitButton
+        var buttonGenerate = new SeSplitButton
         {
             Content = Se.Language.General.Generate,
             Command = vm.GenerateCommand,
@@ -424,7 +424,7 @@ public class TransparentSubtitlesWindow : Window
         }.WithBindVisible(vm, nameof(vm.UseSourceResolution));
 
         var labelFrameRate = UiUtil.MakeLabel(Se.Language.General.FrameRate);
-        var comboBoxFrameRate = UiUtil.MakeComboBox(vm.FrameRates, vm, nameof(vm.SelectedFrameRate));
+        var comboBoxFrameRate = UiUtil.MakeComboBox(vm.FrameRates, vm, nameof(vm.SelectedFrameRate)).WithFrameRateDisplay();
 
         var labelVideoExtension = UiUtil.MakeLabel(Se.Language.General.VideoExtension);
         var comboBoxVideoExtensions = UiUtil.MakeComboBox(vm.VideoExtensions, vm, nameof(vm.SelectedVideoExtension));

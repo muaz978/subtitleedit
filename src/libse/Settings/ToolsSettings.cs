@@ -105,6 +105,7 @@ namespace Nikse.SubtitleEdit.Core.Settings
         public string BaiduApiKey { get; set; }
         public int AutoTranslateDelaySeconds { get; set; }
         public int AutoTranslateMaxBytes { get; set; }
+        public bool AutoTranslateKeepMusicLines { get; set; }
         public string GeminiProApiKey { get; set; }
         public string GeminiModel { get; set; }
         public string GeminiPrompt { get; set; }
@@ -164,7 +165,7 @@ namespace Nikse.SubtitleEdit.Core.Settings
             GroqModel = "openai/gpt-oss-120b"; // GroqTranslate.Models[0] in LibUiLogic
             DeepSeekUrl = "https://api.deepseek.com/chat/completions";
             DeepSeekPrompt = "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:";
-            DeepSeekModel = "deepseek-v4-flash"; // DeepSeekTranslate.Models[0] in LibUiLogic
+            DeepSeekModel = "deepseek-flash"; // DeepSeekTranslate.Models[0] in LibUiLogic
             NvidiaUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
             NvidiaPrompt = "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:";
             NvidiaModel = "meta/llama-4-maverick-17b-128e-instruct"; // NvidiaTranslate.Models[0] in LibUiLogic

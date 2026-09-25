@@ -3,6 +3,115 @@ Subtitle Edit Changelog
 
 -----------------------------------------------------------------------------------------------------
 
+v5.3.0-beta12 (25th of September 2026)
+
+* Add OpenAI-compatible text to speech engine (OpenAI, OpenRouter, custom server) - thx laszlolaszlo
+* Add Cut video transitions between segments and fade from/to black
+* Add Crisp ASR Parakeet ReazonSpeech and parakeet-ctc-1.1b-ja Japanese models - thx jodilife
+* Add Beautify time codes: save, load and delete custom profiles - thx TB54
+* Add Auto-translate option to keep lines in music symbols untranslated - thx fraternl
+* Add "Merge with line after and unbreak" shortcut - thx stppnw0lf
+* Add justify lines option for the second subtitle - thx muaz978/kadrimarzouki
+* Number boxes: accept both "." and "," as decimal separator
+* Improve performance of paragraph creation and video preview refresh
+* Fix Auto-translate sending ASSA drawings and line-global tags to the engine - thx MrGoraj
+* Fix Cut video picture running ahead of sound when a cut starts inside a held picture
+* Fix video preview box border style for WebVTT (one box per line) - thx GrampaWildWilly
+* Fix UI font not applied to checkbox/radio button labels and other controls - thx Surlime
+* Update Hungarian translation - thx Zityi
+* Update Italian translation - thx bovirus
+* Update Japanese translation - thx hisui3393
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta11 (24th of September 2026)
+
+* Add syntax highlighting in Source view for WebVTT, LRC and SCC, and basic coloring for every other text format
+* Remux: mix audio files into one track with per-file volume - thx ghostminhtoan
+* TTS review: show the waveform position, click it to go to a position - thx subof
+* Batch convert: prevent sleep while converting - thx verbal666
+* Remember "Merge continuation lines" max gap and max characters
+* SenseVoice: offer to re-download models from before the CMVN fix
+* Speech to text: explain a CUDA run on a CPU-only build - thx Marooo1122
+* Improve performance of OCR fix, fix casing and video preview ticks
+* Fix saving a subtitle opened from an audio file overwriting the audio - thx MG240
+* Fix LRC header replaced by the default header, and Source view losing an edited header/footer - thx MG240
+* Fix Source view: crash on OK when the format throws, silently taking lines that parse as another format, and a deleted header coming back
+* Fix Source view highlighting: a number-only SubRip text line styled as a cue number, unclosed XML comments
+* Fix speech to text with Purfview Faster Whisper XXL and the "anime.ja" model (and hide translate for it) - thx dustwanderer
+* Fix speech to text batch statuses not reset on each run - thx Marooo1122
+* Fix undocked full screen video player leaving full screen when Alt+F4 minimizes it - thx GrampaWildWilly
+* Fix native file pickers opening off screen / on another monitor - thx GrampaWildWilly
+* Fix Remux "finalizing" progress animation not stopping when ffmpeg exits - thx GrampaWildWilly
+* Update CrispASR to v0.8.36
+* Update llama.cpp to b11149
+* Update Japanese translation - thx hisui3393
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta10 (23rd of September 2026)
+
+* Add "Edit second subtitle settings..." to the Video menu (restyle the second subtitle without the file picker) - thx GrampaWildWilly
+* Add EBU STL to the "Save as" format list - thx Triathlon-rally
+* Add audio track picker for the FFmpeg video player - thx fraternl
+* Find/Replace: show the replace count in the window, add button icons and a search history dropdown - thx fraternl
+* Remux: show each audio/subtitle file's folder, and a "finalizing" phase while the mp4 index is moved to the front - thx GrampaWildWilly
+* Speech separation ("Remove original speech", "Isolate speech", speech-only waveform): show progress and time left - thx to285
+* Shot changes: allow sensitivity 0.05-0.95 in 0.01 steps like SE 4 - thx kadrimarzouki
+* seconv: --no-language-suffix keeps "forced" and stream labels, drops only the language code - thx Mafuyu0
+* Refresh auto-translate API model lists (DeepSeek, Anthropic, Gemini, OpenAI, Perplexity)
+* Improve idle performance: main window tick pumps only run while a video is loaded - thx ivandrofly
+* Fix waveform shaking/jerky cursor on Windows (16 ms tick pump ran at 31 ms with the default timer resolution) - thx mariajuferreira1958-creator
+* Fix keyboard focus staying in the main window when a non-modal window (e.g. Remux) opens - thx GrampaWildWilly
+* Fix Enter on a split button (Remux, Burn-in, Batch convert, ...) running the window's default button instead - thx GrampaWildWilly
+* Fix Alt+Space system menu opening partially off-screen or on the wrong monitor - thx GrampaWildWilly
+* Fix change frame rate "From" not preset with the current frame rate, and frame rate combo boxes using the OS decimal separator - thx fointypinger
+* Fix ASSA styles dialog losing every style for headers without an exact "ScriptType: v4.00+" and for "*"-prefixed style names - thx hisui3393
+* Fix VobSub position ignoring the image crop (seconv ASSA alignment auto-detect tagged every cue {\an7}/{\an8}) - thx gambar3
+* Fix WhisperX model dots always green, redundant download button, distil-large-v3.5/anime.ja model names, and the Lightning checkpoint message - thx GitGianluc
+* Update WhisperX standalone to build 103
+* Update Avalonia to 12.1.3
+* Update Czech translation - thx Matěj Fouma
+* Update Italian translation - thx bovirus
+* Update Chinese Traditional translation - thx love80312
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta9 (22nd of September 2026)
+
+* Add TranslatePsy-AfriSLM 4B (English <-> 19 African languages) to the llama.cpp auto-translate models
+* Add Romanian OCR fix replace list (cedilla ş/ţ to comma below ș/ț) - thx Gabriel
+* Batch convert: OCR language per file from the container track or file name (e.g. "Movie [fra].sup") - thx Gabriel
+* Remux: show durations, elapsed/remaining time, and load the remuxed video when done - thx ghostminhtoan
+* OCR: remember the spell check dictionary per language (no more jumping back to "English (Australia)") - thx Gabriel
+* Clone from video: offer speech-to-text for the clips when the TTS engine needs transcripts (OmniVoice) - thx nielka98
+* Point sync via other subtitle: browse from the current subtitle's folder - thx fraternl
+* seconv: add --ocr-auto-detect-assa-alignment - thx gambar3
+* seconv: add --no-language-suffix to write auto-translated files without the language code - thx Mafuyu0
+* Improve performance of binary OCR matching, select-all timing commands, merge lines and the "Remove text for HI" dialog
+* Fix ASSA/SSA styles dialog changing the style of other lines when an original subtitle is loaded - thx hisui3393
+* Fix "Remove text for hearing impaired" changing dashes/spaces with no option selected - thx kadrimarzouki
+* Fix WebVTT to SubRip wrapping every line in a font tag with the player's default text color - thx maknol
+* Fix "Remove color tags" leaving garbage for rgba() colors
+* Fix Matroska subtitle extraction failing on busy network shares (short reads) - thx shotfirer
+* Fix seconv DVB-sub image export placing images at twice the offset, and MKV DVB-sub going through OCR
+* Fix audio clip extraction on zero/negative duration lines (ffmpeg -t 0 = whole file) in extract audio, clone voice and speech-to-text on selected lines
+* Fix FFmpeg video player stuck at the end after playing to it, and frame step keys dead on audio-only files
+* Fix layout 14 filmstrip going blank near the end of the video
+* Fix "Show speech only" waveform reverting to the full mix after undocking, and drifting with SMPTE timing
+* Fix second subtitle "Remember these settings" failing with audio-only media
+* Fix settings import bringing back old shortcut defaults (e.g. Cmd+H for Replace on macOS)
+* Fix OCR language auto-detect taking title words like "No"/"It"/"Be" for language codes (Dr.No.sup as Norwegian)
+* Fix "Generate background music" discarding the clip just listened to and generating a new one
+* Fix "Improve time codes" moving end times with "Adjust end times" off
+* Fix text to speech casting listing Zonos without an install
+* Update llama.cpp to b11070
+* Update FFmpeg (Windows) to 9.0.2
+* Update Italian translation - thx bovirus
+* Update Polish translation - thx potplayer-fanpack
+
+-----------------------------------------------------------------------------------------------------
+
 v5.3.0-beta8 (21st of September 2026)
 
 * Add editor-style layout 14 with a track timeline (video row and subtitle rows above the waveform)

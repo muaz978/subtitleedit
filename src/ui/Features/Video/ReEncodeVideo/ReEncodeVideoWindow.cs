@@ -5,6 +5,7 @@ using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Styling;
+using Nikse.SubtitleEdit.Controls;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
@@ -32,7 +33,7 @@ public class ReEncodeVideoWindow : Window
 
         var videoSettingsView = MakeVideoSettingsView(vm);
         var progressView = MakeProgressView(vm);
-        var buttonGenerate = new SplitButton
+        var buttonGenerate = new SeSplitButton
         {
             Content = Se.Language.General.Generate,
             Command = vm.GenerateCommand,
@@ -119,7 +120,7 @@ public class ReEncodeVideoWindow : Window
         }.WithBindVisible(vm, nameof(vm.UseSourceResolution));
 
         var labelFrameRate = UiUtil.MakeLabel(Se.Language.General.FrameRate);
-        var comboBoxFrameRate = UiUtil.MakeComboBox(vm.FrameRates, vm, nameof(vm.SelectedFrameRate));
+        var comboBoxFrameRate = UiUtil.MakeComboBox(vm.FrameRates, vm, nameof(vm.SelectedFrameRate)).WithFrameRateDisplay();
         _comboBoxFrameRate = comboBoxFrameRate;
 
         var labelVideoExtension = UiUtil.MakeLabel(Se.Language.General.VideoExtension);
