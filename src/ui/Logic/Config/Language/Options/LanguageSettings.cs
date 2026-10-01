@@ -128,6 +128,7 @@ public class LanguageSettings
     public string WaveformDrawGridLines { get; set; }
     public string WaveformUseSkiaRenderer { get; set; }
     public string WaveformCenterVideoPositionAlsoWhenPaused { get; set; }
+    public string WaveformSelectCurrentSubtitleWhilePaused { get; set; }
     public string WaveformShowToolbar { get; set; }
     public string WaveformShowToolbarEdit { get; set; }
     public string WaveformShowToolbarEditLabel { get; set; }
@@ -183,8 +184,11 @@ public class LanguageSettings
     public string AssaAutoSetResolution { get; set; }
     public string AssaAutoSetResolutionPrompt { get; set; }
 
-    public string ShowStopButton { get; set; }
-    public string ShowFullscreenButton { get; set; }
+    public string VideoControls { get; set; }
+    public string VideoControlsEdit { get; set; }
+    public string VideoControlsPositionText { get; set; }
+    public string VideoControlsVideoFileName { get; set; }
+    public string VideoControlsPlayerName { get; set; }
     public string FullscreenHideControls { get; set; }
     public string ShowSecondarySubtitleDialog { get; set; }
     public string RememberSecondarySubtitleFile { get; set; }
@@ -206,6 +210,7 @@ public class LanguageSettings
     public string ShowAssaLayer { get; set; }
     public string WaveformCursorColor { get; set; }
     public string WaveformShotChangeColor { get; set; }
+    public string WaveformGridColor { get; set; }
     public string WaveformParagraphLeftColor { get; set; }
     public string WaveformParagraphRightColor { get; set; }
     public string WaveformFancyHighColor { get; set; }
@@ -311,6 +316,7 @@ public class LanguageSettings
     public string UseFocusedButtonBackgroundColor { get; set; }
     public string FocusedButtonBackgroundColor { get; set; }
     public string ForceCrLfOnSave { get; set; }
+    public string LinuxClipboardUseExternalTool { get; set; }
     public string ShowFormatLimitWarning { get; set; }
     public string TextBoxButtonShowAutoBreak { get; set; }
     public string TextBoxButtonShowUnbreak { get; set; }
@@ -473,6 +479,7 @@ public class LanguageSettings
         WaveformUseSkiaRenderer = "Use experimental fast renderer";
         WaveformFocusOnMouseOver = "Focus on mouse over";
         WaveformCenterVideoPositionAlsoWhenPaused = "Center video position also while paused";
+        WaveformSelectCurrentSubtitleWhilePaused = "Select current subtitle also while paused";
         WaveformShowToolbar = "Show toolbar";
         WaveformShowToolbarEdit = "Edit toolbar...";
         WaveformShowToolbarEditLabel = "Toolbar items";
@@ -520,8 +527,11 @@ public class LanguageSettings
         CheckForUpdatesChannelStable = "Stable versions only";
         CheckForUpdatesChannelStableAndBeta = "Stable and beta versions";
 
-        ShowStopButton = "Show stop button";
-        ShowFullscreenButton = "Show full-screen button";
+        VideoControls = "Video controls";
+        VideoControlsEdit = "Edit video controls...";
+        VideoControlsPositionText = "Position / duration text";
+        VideoControlsVideoFileName = "Video file name";
+        VideoControlsPlayerName = "Video player name";
         FullscreenHideControls = "Hide video controls in full-screen";
         ShowSecondarySubtitleDialog = "Show style dialog when opening a second subtitle file";
         RememberSecondarySubtitleFile = "Remember second subtitle file";
@@ -550,6 +560,7 @@ public class LanguageSettings
         ShowAssaLayer = "Show ASSA layer box";
         WaveformCursorColor = "Waveform cursor/head color";
         WaveformShotChangeColor = "Waveform shot change color";
+        WaveformGridColor = "Waveform grid color";
         WaveformParagraphLeftColor = "Waveform left border color";
         WaveformParagraphRightColor = "Waveform right border color";
         WaveformFancyHighColor = "Waveform fancy high color";
@@ -654,6 +665,7 @@ public class LanguageSettings
         UseFocusedButtonBackgroundColor = "Use focused button background color";
         FocusedButtonBackgroundColor = "Focused button background color";
         ForceCrLfOnSave = "Force CR+LF on save (text subtitle files)";
+        LinuxClipboardUseExternalTool = "Copy text via xclip/wl-copy (keeps accented characters)";
         ShowFormatLimitWarning = "Warn on save when lines exceed the format's limits (e.g. SCC 32 chars/line)";
         TextBoxButtonShowAutoBreak = "Text box: show auto-break button";
         TextBoxButtonShowUnbreak = "Text box: show unbreak button";

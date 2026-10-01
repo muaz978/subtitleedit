@@ -22,6 +22,11 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
 
         public override bool IsMine(List<string> lines, string fileName)
         {
+            if (!HasSyncTag(lines))
+            {
+                return false; // LoadSubtitle finds nothing without one
+            }
+
             var sb = new StringBuilder();
             foreach (string l in lines)
             {
@@ -239,9 +244,33 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
             return new List<string> { languageTag };
         }
 
+        /// <summary>
+        /// Whether a line holds "&lt;sync " in any casing - LoadSubtitle returns without a
+        /// paragraph otherwise. Checking the lines first skips rebuilding, patching and
+        /// lower-casing the whole file, which every SAMI variant did for every file reaching
+        /// it during auto-detect.
+        /// </summary>
+        internal static bool HasSyncTag(List<string> lines)
+        {
+            foreach (var line in lines)
+            {
+                if (line.IndexOf("<sync ", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public override void LoadSubtitle(Subtitle subtitle, List<string> lines, string fileName)
         {
             _errorCount = 0;
+            if (!HasSyncTag(lines))
+            {
+                return;
+            }
+
             var sb = new StringBuilder();
             foreach (string l in lines)
             {
@@ -283,6 +312,7 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
             }
 
             var p = new Paragraph();
+            var syncs = new List<(long Milliseconds, bool ClearsScreen)>();
             const string expectedChars = @"""'0123456789";
             var className = new StringBuilder();
             var total = new StringBuilder();
@@ -333,6 +363,11 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                 }
 
                 string textToLower = text.ToLowerInvariant();
+                if (long.TryParse(millisecondsAsString, out var syncMilliseconds))
+                {
+                    syncs.Add((syncMilliseconds, textToLower.Contains("&nbsp;")));
+                }
+
                 if (textToLower.Contains(" class="))
                 {
                     className.Clear();
@@ -521,6 +556,32 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
             {
                 p2.Text = p2.Text.Replace('\u00A0', ' '); // non-breaking space to normal space
             }
+
+            if (subtitle.Paragraphs.Count == 0)
+            {
+                AddTimingOnlyParagraphs(subtitle, syncs);
+            }
+        }
+
+        /// <summary>
+        /// A SAMI file can be a timing template: every SYNC is empty, with "&amp;nbsp;" SYNCs
+        /// clearing the screen. Load each empty SYNC as an empty subtitle up to the next SYNC,
+        /// so the timing is not lost (the file used to be rejected as having no subtitles).
+        /// </summary>
+        private static void AddTimingOnlyParagraphs(Subtitle subtitle, List<(long Milliseconds, bool ClearsScreen)> syncs)
+        {
+            syncs.Sort((a, b) => a.Milliseconds.CompareTo(b.Milliseconds));
+            for (var i = 0; i < syncs.Count - 1; i++)
+            {
+                var (start, clearsScreen) = syncs[i];
+                var end = syncs[i + 1].Milliseconds;
+                if (!clearsScreen && end > start)
+                {
+                    subtitle.Paragraphs.Add(new Paragraph(string.Empty, start, end));
+                }
+            }
+
+            subtitle.Renumber();
         }
 
         private string RemoveDiv(string text)

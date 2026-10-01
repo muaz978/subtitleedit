@@ -5,6 +5,7 @@ using Nikse.SubtitleEdit.Features.Assa.ResolutionResampler;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4;
+using Nikse.SubtitleEdit.Core.ContainerFormats.ProgramStream;
 using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
 using Nikse.SubtitleEdit.Core.Dictionaries;
 using Nikse.SubtitleEdit.Core.Enums;
@@ -56,10 +57,13 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
     public static readonly string FormatCavena890 = new Cavena890().Name;
     public const string FormatDCinemaInterop = "D-Cinema interop/png";
     public const string FormatDCinemaSmpte2014 = "D-Cinema SMPTE 2014/png";
+    public const string FormatDvdSup = "DVD sup";
     public const string FormatCustomTextFormat = "Custom text format";
     public static readonly string FormatDostImage = "DOST/image";
     public static readonly string FormatEbuStl = new Ebu().Name;
     public const string FormatFcpImage = "FCP/image";
+    public const string FormatHdDvdSup = "HD-DVD sup";
+    public const string FormatUmdVideo = "PSP UMD Video";
     public const string FormatImagesWithTimeCodesInFileName = "Images with time codes in file name";
     public static readonly string FormatPac = new Pac().Name;
     public static readonly string FormatPacUnicode = new PacUnicode().Name;
@@ -185,6 +189,24 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             var pcsData = BluRaySupParser.ParseBluRaySup(item.FileName, log);
             imageSubtitle = new OcrSubtitleBluRay(pcsData);
         }
+        else if (item.Format == FormatUmdVideo)
+        {
+            // one item per subtitle stream - TrackNumber is its sub-stream id
+            var tracks = UmdVideoSubtitleReader.Read(item.FileName);
+            if (int.TryParse(item.TrackNumber, NumberStyles.Integer, CultureInfo.InvariantCulture, out var subStreamId) &&
+                tracks.TryGetValue(subStreamId, out var pictures))
+            {
+                imageSubtitle = new OcrSubtitleUmdVideo(pictures);
+            }
+        }
+        else if (item.Format == FormatHdDvdSup)
+        {
+            imageSubtitle = new OcrSubtitleHdDvdSup(item.FileName);
+        }
+        else if (item.Format == FormatDvdSup)
+        {
+            imageSubtitle = new OcrSubtitleSpDvdSupImages(item.FileName);
+        }
         else if (item.Format == FormatBdnXml && item.Subtitle != null)
         {
             imageSubtitle = new OcrSubtitleBdn(item.Subtitle, item.FileName, false);
@@ -301,12 +323,8 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 }
             }
         }
-        else if ((item.FileName.EndsWith(".ts", StringComparison.OrdinalIgnoreCase) ||
-                  item.FileName.EndsWith(".m2ts", StringComparison.OrdinalIgnoreCase) ||
-                  item.FileName.EndsWith(".mts", StringComparison.OrdinalIgnoreCase) ||
-                  item.FileName.EndsWith(".mpg", StringComparison.OrdinalIgnoreCase) ||
-                  item.FileName.EndsWith(".mpeg", StringComparison.OrdinalIgnoreCase)) &&
-                 item.Format!.StartsWith("Transport Stream", StringComparison.Ordinal))
+        // no extension check - a transport stream can be named .mp4 (see AddFile)
+        else if (item.Format!.StartsWith("Transport Stream", StringComparison.Ordinal))
         {
             if (item.ImageSubtitle != null)
             {
@@ -447,10 +465,11 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             item.Subtitle = await RunConvertFunctions(item, imageToImage, cancellationToken);
         }
 
-        // Save text based formats
+        // Save text based formats - binary ones like EBU STL are in the list too (for loading),
+        // but their ToText is just "Not supported!", so they go through the binary save below
         foreach (var format in _subtitleFormats)
         {
-            if (format.Name == _config.TargetFormatName && item.Subtitle != null)
+            if (format.IsTextBased && format.Name == _config.TargetFormatName && item.Subtitle != null)
             {
                 await SaveSubtitleFormat(item, format, cancellationToken);
                 return;
@@ -472,11 +491,16 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             {
                 var format = kvp.Value;
 
-                if (format is Ebu && !string.IsNullOrEmpty(_config.EbuHeader))
+                if (format is Ebu)
                 {
-                    item.Subtitle.Header = _config.EbuHeader;
+                    // Ebu.Save writes nothing without a UI helper, so it is needed even when the
+                    // EBU settings dialog was never opened
                     Ebu.EbuUiHelper ??= new UiEbuSaveHelper();
-                    Ebu.EbuUiHelper.JustificationCode = _config.EbuJustificationCode;
+                    if (!string.IsNullOrEmpty(_config.EbuHeader))
+                    {
+                        item.Subtitle.Header = _config.EbuHeader;
+                        Ebu.EbuUiHelper.JustificationCode = _config.EbuJustificationCode;
+                    }
                 }
 
                 if (format is IBinaryPersistableSubtitle binaryPersistableSubtitle)
@@ -486,6 +510,18 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 }
 
                 await SaveSubtitleFormat(item, format, cancellationToken);
+                return;
+            }
+        }
+
+        // Other binary formats in the list (DVB Teletext, ...) - the text loop above skips them
+        // now, and the image-based writer below does not know them.
+        foreach (var format in _subtitleFormats)
+        {
+            if (!format.IsTextBased && format.Name == _config.TargetFormatName && item.Subtitle != null &&
+                format is IBinaryPersistableSubtitle binaryPersistableSubtitle)
+            {
+                SaveSubtitleFormat(item, binaryPersistableSubtitle, format, cancellationToken);
                 return;
             }
         }
@@ -568,6 +604,17 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
                 if (language.Value.Count > 0)
                 {
                     result.Add(new TransportStreamResult { IsImage = false, Subtitle = new Subtitle(language.Value) });
+                }
+            }
+        }
+
+        foreach (var tracks in tsParser.ClosedCaptionSubtitlesLookup.Values)
+        {
+            foreach (var paragraphs in tracks.Values)
+            {
+                if (paragraphs.Count > 0)
+                {
+                    result.Add(new TransportStreamResult { IsImage = false, Subtitle = new Subtitle(paragraphs) });
                 }
             }
         }
@@ -1939,7 +1986,7 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
             if (s.OriginalFormat != null && s.OriginalFormat.Name != targetFormat.Name)
             {
-                s.OriginalFormat.RemoveNativeFormatting(item.Subtitle, targetFormat);
+                s.OriginalFormat.RemoveNativeFormatting(s, targetFormat);
             }
 
             if (targetFormat.Name == AdvancedSubStationAlpha.NameOfFormat)
@@ -2447,6 +2494,17 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         var subtitles = new List<SubtitleLineViewModel>(subtitle.Paragraphs.Select(p => new SubtitleLineViewModel(p, subtitle.OriginalFormat)));
         var subtitlesFixed = new List<SubtitleLineViewModel>();
         var maxCharactersPerSubtitle = c.MaxNumberOfLines * c.SingleLineMaxLength;
+
+        // Same threshold rule as the split/break dialog: at or above the single line max
+        // length means "keep any text that fits on one line", and capping there prevents
+        // merging to a single line that would exceed the max length (#12910).
+        var unbreakLinesShorterThan = c.UnbreakLinesShorterThan > 0
+            ? c.UnbreakLinesShorterThan
+            : Se.Settings.General.UnbreakLinesShorterThan;
+        var mergeLinesShorterThan = unbreakLinesShorterThan >= c.SingleLineMaxLength
+            ? c.SingleLineMaxLength + 1
+            : unbreakLinesShorterThan;
+
         if (c.SplitLongLines)
         {
             var splitOptions = new SplitBreakLongLinesViewModel.SplitOptions
@@ -2459,6 +2517,14 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             for (var index = 0; index < subtitles.Count; index++)
             {
                 var item = new SubtitleLineViewModel(subtitles[index]);
+
+                // As the dialog: a subtitle is not cut into several events when re-wrapping its
+                // lines is enough to make it fit - the rebalance pass below does that.
+                if (c.RebalanceLongLines && SplitBreakLongLinesViewModel.CanBeFixedByRebalancing(item.Text, c.SingleLineMaxLength, c.MaxNumberOfLines, mergeLinesShorterThan, language))
+                {
+                    subtitlesFixed.Add(item);
+                    continue;
+                }
 
                 // Pass the split options the dialog passes. The 3-argument overload uses a
                 // default SplitOptions with MinimumGapMs = 0, so batch produced back-to-back
@@ -2486,7 +2552,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             for (var index = 0; index < subtitlesFixed.Count; index++)
             {
                 var item = subtitlesFixed[index];
-                var rebalancedText = Utilities.AutoBreakLine(item.Text, c.SingleLineMaxLength, Se.Settings.General.UnbreakLinesShorterThan, language);
+                if (c.RebalanceOnlyLinesTooLong && !SplitBreakLongLinesViewModel.HasLineTooLong(item.Text, c.SingleLineMaxLength, c.MaxNumberOfLines))
+                {
+                    continue;
+                }
+
+                var rebalancedText = Utilities.AutoBreakLine(item.Text, c.SingleLineMaxLength, mergeLinesShorterThan, language);
                 if (rebalancedText != item.Text)
                 {
                     item.Text = rebalancedText;

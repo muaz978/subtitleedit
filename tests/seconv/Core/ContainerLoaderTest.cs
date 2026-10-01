@@ -143,6 +143,65 @@ public class ContainerLoaderTest : IDisposable
     }
 
     [Fact]
+    public async Task ConvertAsync_Mp4WithCea608And708InVideo_ProducesSrtPerCaptionTrack()
+    {
+        // H.264 SEI captions are not a subtitle track; the MP4 loader used to report
+        // "No subtitle tracks" although the parser had decoded them (the GUI offered them).
+        var input = Fixtures.Path("container_cea608_708.mp4");
+        Assert.True(File.Exists(input), $"Fixture missing: {input}");
+        var outputFolder = Path.Combine(_tempRoot, "out");
+        Directory.CreateDirectory(outputFolder);
+
+        var converter = new SubtitleConverter();
+        var result = await converter.ConvertAsync(new ConversionOptions
+        {
+            Patterns = [input],
+            Format = "SubRip",
+            OutputFolder = outputFolder,
+            Overwrite = true,
+        });
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        var outputs = Directory.GetFiles(outputFolder, "*.srt");
+        Assert.Contains(outputs, p => Path.GetFileName(p).Contains("cea608_cc1"));
+        Assert.Contains(outputs, p => Path.GetFileName(p).Contains("cea708_s1"));
+        var cc1 = await File.ReadAllTextAsync(outputs.First(p => Path.GetFileName(p).Contains("cea608_cc1")), TestContext.Current.CancellationToken);
+        Assert.Contains("inaudible radio chatter", cc1);
+    }
+
+    /// <summary>
+    /// The loader goes by content before extension, as the GUI does: a Matroska file named .mp4,
+    /// a Blu-ray .sup named .sub and a transport stream named .mpeg were read with the loader of
+    /// their extension (or, for .mpeg, as text for minutes) and failed.
+    /// </summary>
+    [Theory]
+    [InlineData("container_text.mkv", "movie.mp4", false)]
+    [InlineData("sample.sup", "movie.sub", true)]
+    [InlineData("container_teletext.ts", "recording.mpeg", false)]
+    public async Task ConvertAsync_ContainerWithAnotherExtension_IsReadByItsContent(string fixture, string fileName, bool timeCodesOnly)
+    {
+        var input = Path.Combine(_tempRoot, fileName);
+        File.Copy(Fixtures.Path(fixture), input);
+        var outputFolder = Path.Combine(_tempRoot, "out");
+        Directory.CreateDirectory(outputFolder);
+
+        var converter = new SubtitleConverter();
+        var result = await converter.ConvertAsync(new ConversionOptions
+        {
+            Patterns = [input],
+            Format = "SubRip",
+            OutputFolder = outputFolder,
+            Overwrite = true,
+            TimeCodesOnly = timeCodesOnly,
+        });
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        var outputs = Directory.GetFiles(outputFolder, "*.srt");
+        Assert.NotEmpty(outputs);
+        Assert.Contains("-->", await File.ReadAllTextAsync(outputs[0], TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task ConvertAsync_Mp4WithoutUsableTrack_ReportsNoSubtitleTracks()
     {
         var input = Fixtures.Path("container_text.mp4");

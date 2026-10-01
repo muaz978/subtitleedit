@@ -3,6 +3,7 @@ using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.ContainerFormats;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes;
+using Nikse.SubtitleEdit.Core.ContainerFormats.ProgramStream;
 using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
 using Nikse.SubtitleEdit.Core.VobSub;
 using Nikse.SubtitleEdit.UiLogic.Ocr;
@@ -55,6 +56,86 @@ internal static class BitmapSubtitleLoader
             throw new InvalidOperationException($"No Blu-Ray sup subtitles found in: {filePath}");
         }
         return PcsListToItems(pcsList);
+    }
+
+    /// <summary>
+    /// HD-DVD .sup file → bitmap events. The stream carries no frame size; HD-DVD video is
+    /// always 1920x1080.
+    /// </summary>
+    public static IReadOnlyList<BitmapSubtitleItem> LoadHdDvdSup(string filePath)
+    {
+        var pictures = HdDvdSupParser.Parse(filePath);
+        if (pictures.Count == 0)
+        {
+            throw new InvalidOperationException($"No HD-DVD sup subtitles found in: {filePath}");
+        }
+
+        var items = new List<BitmapSubtitleItem>(pictures.Count);
+        foreach (var picture in pictures)
+        {
+            // ImagePosition is only filled in by GetBitmap - read it after decoding.
+            var bmp = picture.GetBitmap();
+            items.Add(new BitmapSubtitleItem(
+                new TimeCode(picture.StartTime.TotalMilliseconds),
+                new TimeCode(picture.EndTime.TotalMilliseconds),
+                bmp,
+                1920,
+                1080,
+                picture.ImagePosition));
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// DVD .sup file ("SP" packets) → bitmap events, rendered like the GUI's OCR (white
+    /// text, black outline). The stream carries no frame size, so pick the DVD standard
+    /// from the display areas (720x576 PAL / 720x480 NTSC).
+    /// </summary>
+    /// <summary>
+    /// One PSP UMD Video subtitle stream → bitmap events on the 720x480 UMD video frame.
+    /// </summary>
+    public static IReadOnlyList<BitmapSubtitleItem> LoadUmdVideo(List<UmdVideoSubtitle> pictures)
+    {
+        var items = new List<BitmapSubtitleItem>(pictures.Count);
+        foreach (var picture in pictures)
+        {
+            items.Add(new BitmapSubtitleItem(
+                new TimeCode(picture.StartTime.TotalMilliseconds),
+                new TimeCode(picture.EndTime.TotalMilliseconds),
+                picture.GetBitmap() ?? new SKBitmap(1, 1),
+                UmdVideoSubtitle.ScreenWidth,
+                UmdVideoSubtitle.ScreenHeight,
+                new SKPointI(picture.X, picture.Y)));
+        }
+
+        return items;
+    }
+
+    public static IReadOnlyList<BitmapSubtitleItem> LoadSpDvdSup(string filePath)
+    {
+        var headers = SpDvdSupParser.Parse(filePath);
+        if (headers.Count == 0)
+        {
+            throw new InvalidOperationException($"No DVD sup subtitles found in: {filePath}");
+        }
+
+        var screenHeight = headers.Any(h => h.Picture.ImageDisplayArea.Bottom > 480) ? 576 : 480;
+        var items = new List<BitmapSubtitleItem>(headers.Count);
+        foreach (var header in headers)
+        {
+            // ImagePosition is only filled in by GetBitmap - read it after decoding.
+            var bmp = header.Picture.GetBitmap(null, SKColors.Transparent, SKColors.White, SKColors.Black, SKColors.Black, false);
+            items.Add(new BitmapSubtitleItem(
+                new TimeCode(header.StartTime.TotalMilliseconds),
+                new TimeCode((header.StartTime + header.Picture.Delay).TotalMilliseconds),
+                bmp,
+                720,
+                screenHeight,
+                header.Picture.ImagePosition));
+        }
+
+        return items;
     }
 
     /// <summary>

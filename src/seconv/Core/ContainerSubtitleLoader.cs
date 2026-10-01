@@ -1,10 +1,13 @@
-using Nikse.SubtitleEdit.Core.Common;
+﻿using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
 using Nikse.SubtitleEdit.Core.ContainerFormats.MaterialExchangeFormat;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes;
+using Nikse.SubtitleEdit.Core.ContainerFormats.ProgramStream;
 using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
+using Nikse.SubtitleEdit.Core.VobSub;
+using Nikse.SubtitleEdit.UiLogic.SubtitleLoading;
 using Spectre.Console;
 
 namespace SeConv.Core;
@@ -31,6 +34,48 @@ internal static class ContainerSubtitleLoader
     public static List<LoadedTrack>? TryLoadTracks(string filePath, ConversionOptions options)
     {
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
+
+        // A Manzanita "private_stream_1" dump can have any extension (.dvbttx, .stl, even .idx,
+        // which the VobSub branch below would take). Teletext dumps are text (the DVB Teletext
+        // format reads them); bitmap dumps need OCR.
+        if (IsManzanitaDvbSubtitle(filePath))
+        {
+            return LoadManzanitaDvbSub(filePath, options);
+        }
+
+        if (IsManzanita(filePath))
+        {
+            return null;
+        }
+
+        // A transport stream saved under another video extension (e.g. an HLS web rip named
+        // .mp4) - the MP4/Matroska parsers below would find nothing in it.
+        if (FileUtil.IsTransportStreamWithOtherVideoExtension(filePath))
+        {
+            return LoadTransportStream(filePath, options);
+        }
+
+        // Content over extension, as the GUI opens them: a Matroska file named .mp4 or .sup, a
+        // Blu-ray .sup named .sub - the loader picked by the extension found nothing in them.
+        if (ext is not (".mkv" or ".mks" or ".webm") && FileUtil.IsMatroskaFileFast(filePath) && FileUtil.IsMatroskaFile(filePath))
+        {
+            return LoadMatroska(filePath, options);
+        }
+
+        if (ext != ".sup" && FileUtil.IsBluRaySupByContent(filePath))
+        {
+            return LoadBluRaySup(filePath, options);
+        }
+
+        // DVB recorder extensions, and transport streams saved as .mpg/.mpeg (the GUI opens these
+        // as TS too); a recorder header before the first packet is fine, IsTransportStream looks
+        // past it. The program stream reader below wants a pack header, so a .mpeg transport
+        // stream fell through to the text loader - minutes of reading a video as lines.
+        if (ext is ".tsv" or ".tts" or ".rec" or ".mpg" or ".mpeg" &&
+            (FileUtil.IsTransportStream(filePath) || FileUtil.IsM2TransportStream(filePath)))
+        {
+            return LoadTransportStream(filePath, options);
+        }
 
         // .webm is Matroska too - a WebVTT track muxed into one was falling through to the
         // text loader, which then failed to detect a format at all.
@@ -76,6 +121,17 @@ internal static class ContainerSubtitleLoader
             }
         }
 
+        // PSP UMD Video (.MPS), PSP movies (.PMF) and ".subs" dumps of their subtitles: png images,
+        // one track per subtitle stream. A video without subtitles goes on to the video check.
+        if (ext is ".mps" or ".pmf" or ".subs")
+        {
+            var umdTracks = LoadUmdVideo(filePath, options);
+            if (umdTracks != null)
+            {
+                return umdTracks;
+            }
+        }
+
         if (ext == ".mcc")
         {
             return LoadMcc(filePath);
@@ -83,6 +139,16 @@ internal static class ContainerSubtitleLoader
 
         if (ext == ".sup")
         {
+            if (HdDvdSupParser.IsHdDvdSup(filePath))
+            {
+                return LoadHdDvdSup(filePath, options);
+            }
+
+            if (FileUtil.IsSpDvdSup(filePath))
+            {
+                return LoadSpDvdSup(filePath, options);
+            }
+
             return LoadBluRaySup(filePath, options);
         }
 
@@ -142,7 +208,149 @@ internal static class ContainerSubtitleLoader
             return LoadMxf(filePath, options);
         }
 
+        if (ext is ".vob" or ".mpg" or ".mpeg" or ".m2p" && ProgramStreamClosedCaptionReader.IsProgramStream(filePath) ||
+            ext is ".m2v" or ".m1v" or ".mpv" && ProgramStreamClosedCaptionReader.IsVideoElementaryStream(filePath))
+        {
+            return LoadProgramStreamClosedCaptions(filePath, options);
+        }
+
+        // A video no container reader took has no subtitles SE can read - the text loader would
+        // spend minutes trying every format on it as lines, then fail anyway.
+        if (Utilities.VideoFileExtensions.Contains(ext) && new FileInfo(filePath).Length > 20_000_000)
+        {
+            throw new InvalidOperationException($"No subtitles found in video file: {filePath}");
+        }
+
+        // Image-list files (BDN xml, SON, DOST, SubRip with png names, ...) name an image per
+        // cue. As text they would convert to the file names, so OCR them like the GUI does.
+        var imageList = TryLoadImageList(filePath, ext);
+        if (imageList != null)
+        {
+            var subtitle = ImageOcrLoader.LoadImageList(imageList, filePath, options);
+            if (subtitle.Paragraphs.Count == 0)
+            {
+                throw new InvalidOperationException($"No subtitles recognised in image-list file: {filePath}");
+            }
+
+            return [new LoadedTrack(subtitle, new SubRip(), string.Empty, null)];
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// The subtitle streams of a PSP UMD Video file, null if it has none. The track number is the
+    /// sub-stream id (0x80 = 128 for the first stream), the name "umd1", "umd2", ...
+    /// </summary>
+    private static List<LoadedTrack>? LoadUmdVideo(string filePath, ConversionOptions options)
+    {
+        var umdTracks = UmdVideoSubtitleReader.Read(filePath);
+        if (umdTracks.Count == 0)
+        {
+            return null;
+        }
+
+        var tracks = new List<LoadedTrack>();
+        foreach (var track in umdTracks)
+        {
+            if (options.TrackNumbers.Count > 0 && !options.TrackNumbers.Contains(track.Key))
+            {
+                continue;
+            }
+
+            var subtitle = ImageOcrLoader.LoadUmdVideo(track.Value, track.Key, options);
+            tracks.Add(new LoadedTrack(subtitle, new SubRip(), "umd" + (track.Key - 0x80 + 1), track.Key));
+        }
+
+        if (tracks.Count == 0)
+        {
+            throw new InvalidOperationException($"No PSP UMD Video subtitle stream matches the track number(s) in: {filePath}");
+        }
+
+        return tracks;
+    }
+
+    private static readonly string[] ImageFileExtensions = [".png", ".bmp", ".jpg", ".tif"];
+
+    /// <summary>
+    /// The image-list subtitle in <paramref name="filePath"/> (cue text = image file names), or
+    /// null for anything else. Same detection as the GUI's File > Open.
+    /// </summary>
+    private static Subtitle? TryLoadImageList(string filePath, string ext)
+    {
+        if (ext == ".xml")
+        {
+            var imageListXml = ImageListSubtitleLoader.TryLoadImageListXml(filePath);
+            if (imageListXml != null)
+            {
+                return imageListXml;
+            }
+        }
+
+        // Only a file that mentions an image file at all is parsed a second time - an
+        // ordinary subtitle never pays for it. Image lists are small; skip big files.
+        string text;
+        try
+        {
+            if (new FileInfo(filePath).Length > 20_000_000)
+            {
+                return null;
+            }
+
+            text = System.Text.Encoding.Latin1.GetString(File.ReadAllBytes(filePath));
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+
+        if (!ImageFileExtensions.Any(e => text.Contains(e, StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        var encoding = LanguageAutoDetect.GetEncodingFromFile(filePath);
+        if (ext is ".ttml" or ".xml" or ".dfxp")
+        {
+            // IMSC image profile: smpte:backgroundImage names png files next to the document.
+            var lines = FileUtil.ReadAllLinesShared(filePath, encoding);
+            var timedTextImage = new TimedTextImage();
+            if (timedTextImage.IsMine(lines, filePath))
+            {
+                var subtitle = new Subtitle();
+                timedTextImage.LoadSubtitle(subtitle, lines, filePath);
+                if (subtitle.Paragraphs.Count > 0)
+                {
+                    return subtitle;
+                }
+            }
+        }
+
+        return ImageListSubtitleLoader.TryLoad(filePath, encoding, Subtitle.Parse(filePath, encoding));
+    }
+
+    /// <summary>
+    /// MPEG program stream (DVD .vob, .mpg): CEA-608 closed captions from the video - DVD style
+    /// Line 21 captions, ATSC A/53 or SCTE 20 user data. The track number is the caption channel
+    /// (1-4 = CC1-CC4).
+    /// </summary>
+    private static List<LoadedTrack>? LoadProgramStreamClosedCaptions(string filePath, ConversionOptions options)
+    {
+        var tracks = new List<LoadedTrack>();
+        foreach (var captionTrack in ProgramStreamClosedCaptionReader.Read(filePath, ProgramStreamClosedCaptionReader.DefaultProbeMilliseconds, null))
+        {
+            if (options.TrackNumbers.Count > 0 && !options.TrackNumbers.Contains(captionTrack.Key))
+            {
+                continue;
+            }
+
+            var subtitle = new Subtitle();
+            subtitle.Paragraphs.AddRange(captionTrack.Value);
+            subtitle.Renumber();
+            tracks.Add(new LoadedTrack(subtitle, new SubRip(), $"cea608_cc{captionTrack.Key}", captionTrack.Key));
+        }
+
+        return tracks.Count > 0 ? tracks : null; // null: let the other loaders have a go
     }
 
     /// <summary>
@@ -184,6 +392,17 @@ internal static class ContainerSubtitleLoader
 
         var subtitleTexts = parser.GetSubtitles();
         var images = parser.GetImages();
+
+        // CEA-608/708 closed captions from a SMPTE 436M ANC track (broadcast MXF). The track
+        // number is the caption track key: 1-4 = CC1-CC4, 100 + n = CEA-708 service n.
+        if (subtitleTexts.Count == 0 && parser.ClosedCaptionTracks.Count > 0)
+        {
+            var captionTracks = GetClosedCaptionTracks(parser.ClosedCaptionTracks, options);
+            if (captionTracks.Count > 0)
+            {
+                return captionTracks;
+            }
+        }
 
         if (subtitleTexts.Count == 0)
         {
@@ -260,6 +479,27 @@ internal static class ContainerSubtitleLoader
         var subtitleTracks = matroska.GetTracks(true);
         if (subtitleTracks.Count == 0)
         {
+            // CEA-608/708 closed captions inside the video track (e.g. a broadcast recording remuxed to .mkv)
+            var videoTrack = MatroskaClosedCaptionReader.GetVideoTrack(matroska);
+            if (videoTrack != null && (options.TrackNumbers.Count == 0 || options.TrackNumbers.Contains(videoTrack.TrackNumber)))
+            {
+                foreach (var captionTrack in MatroskaClosedCaptionReader.Read(matroska, MatroskaClosedCaptionReader.DefaultProbeMilliseconds, null))
+                {
+                    var subtitle = new Subtitle();
+                    subtitle.Paragraphs.AddRange(captionTrack.Value);
+                    subtitle.Renumber();
+                    var trackName = captionTrack.Key > ClosedCaptionExtractor.Cea708TrackKeyOffset
+                        ? $"cea708_{videoTrack.TrackNumber}_s{captionTrack.Key - ClosedCaptionExtractor.Cea708TrackKeyOffset}"
+                        : $"cea608_{videoTrack.TrackNumber}_cc{captionTrack.Key}";
+                    tracks.Add(new LoadedTrack(subtitle, new SubRip(), trackName, videoTrack.TrackNumber));
+                }
+            }
+
+            if (tracks.Count > 0)
+            {
+                return tracks;
+            }
+
             throw new InvalidOperationException($"No subtitle tracks in Matroska file: {filePath}");
         }
 
@@ -422,12 +662,45 @@ internal static class ContainerSubtitleLoader
             tracks.Add(new LoadedTrack(subtitle, new SubRip(), GetMp4TrackLanguage(track, subtitle), trackId, isForced));
         }
 
+        // CEA-608/708 closed captions in the video track's SEI (or a QuickTime c608 track) -
+        // the parser only decodes them when the file has no subtitle track, as the GUI does.
+        if (tracks.Count == 0 && parser.ClosedCaptionTracks.Count > 0 && !options.ForcedOnly)
+        {
+            tracks.AddRange(GetClosedCaptionTracks(parser.ClosedCaptionTracks, options));
+        }
+
         if (tracks.Count == 0)
         {
             throw new InvalidOperationException(
                 $"No subtitle tracks in MP4 file: {filePath}. Subtitles burned into the picture are not a track and cannot be extracted.");
         }
         return tracks;
+    }
+
+    /// <summary>
+    /// One track per decoded closed caption channel. The key is the track number: 1-4 =
+    /// CC1-CC4, 100 + n = CEA-708 service n (see <see cref="ClosedCaptionExtractor"/>).
+    /// </summary>
+    private static List<LoadedTrack> GetClosedCaptionTracks(SortedDictionary<int, List<Nikse.SubtitleEdit.Core.Common.Paragraph>> closedCaptionTracks, ConversionOptions options)
+    {
+        var captionTracks = new List<LoadedTrack>();
+        foreach (var captionTrack in closedCaptionTracks)
+        {
+            if (options.TrackNumbers.Count > 0 && !options.TrackNumbers.Contains(captionTrack.Key))
+            {
+                continue;
+            }
+
+            var subtitle = new Subtitle();
+            subtitle.Paragraphs.AddRange(captionTrack.Value);
+            subtitle.Renumber();
+            var trackName = captionTrack.Key > ClosedCaptionExtractor.Cea708TrackKeyOffset
+                ? $"cea708_s{captionTrack.Key - ClosedCaptionExtractor.Cea708TrackKeyOffset}"
+                : $"cea608_cc{captionTrack.Key}";
+            captionTracks.Add(new LoadedTrack(subtitle, new SubRip(), trackName, captionTrack.Key));
+        }
+
+        return captionTracks;
     }
 
     /// <summary>
@@ -463,6 +736,58 @@ internal static class ContainerSubtitleLoader
         if (subtitle.Paragraphs.Count == 0)
         {
             throw new InvalidOperationException($"No subtitles recognised in Blu-Ray sup file: {filePath}");
+        }
+        return [new LoadedTrack(subtitle, new SubRip(), string.Empty, null)];
+    }
+
+    private static List<LoadedTrack> LoadHdDvdSup(string filePath, ConversionOptions options)
+    {
+        var subtitle = ImageOcrLoader.LoadHdDvdSup(filePath, options);
+        if (subtitle.Paragraphs.Count == 0)
+        {
+            throw new InvalidOperationException($"No subtitles recognised in HD-DVD sup file: {filePath}");
+        }
+        return [new LoadedTrack(subtitle, new SubRip(), string.Empty, null)];
+    }
+
+    private static List<LoadedTrack> LoadSpDvdSup(string filePath, ConversionOptions options)
+    {
+        var subtitle = ImageOcrLoader.LoadSpDvdSup(filePath, options);
+        if (subtitle.Paragraphs.Count == 0)
+        {
+            throw new InvalidOperationException($"No subtitles recognised in DVD sup file: {filePath}");
+        }
+        return [new LoadedTrack(subtitle, new SubRip(), string.Empty, null)];
+    }
+
+    private static bool IsManzanita(string filePath)
+    {
+        try
+        {
+            return FileUtil.IsManzanita(filePath);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsManzanitaDvbSubtitle(string filePath)
+    {
+        return IsManzanita(filePath) &&
+               ManzanitaTransportStreamParser.GetStreamType(filePath) == ManzanitaTransportStreamParser.DvbSubtitleStreamType;
+    }
+
+    private static List<LoadedTrack> LoadManzanitaDvbSub(string filePath, ConversionOptions options)
+    {
+        var subtitle = ImageOcrLoader.LoadManzanitaDvbSub(filePath, options);
+        if (subtitle.Paragraphs.Count == 0)
+        {
+            throw new InvalidOperationException($"No subtitles recognised in Manzanita DVB subtitle file: {filePath}");
         }
         return [new LoadedTrack(subtitle, new SubRip(), string.Empty, null)];
     }
@@ -577,6 +902,31 @@ internal static class ContainerSubtitleLoader
                     var trackName = string.IsNullOrEmpty(languageCode)
                         ? $"arib_{pidEntry.Key}"
                         : $"arib_{pidEntry.Key}_{languageCode}";
+                    tracks.Add(new LoadedTrack(subtitle, new SubRip(), trackName, pidEntry.Key));
+                }
+            }
+
+            // CEA-608/708 closed captions from the video stream (ATSC/cable broadcasts) — also text
+            foreach (var pidEntry in parser.ClosedCaptionSubtitlesLookup)
+            {
+                if (options.TrackNumbers.Count > 0 && !options.TrackNumbers.Contains(pidEntry.Key))
+                {
+                    continue;
+                }
+
+                foreach (var trackEntry in pidEntry.Value)
+                {
+                    if (trackEntry.Value.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var subtitle = new Subtitle();
+                    subtitle.Paragraphs.AddRange(trackEntry.Value);
+                    subtitle.Renumber();
+                    var trackName = trackEntry.Key > ClosedCaptionExtractor.Cea708TrackKeyOffset
+                        ? $"cea708_{pidEntry.Key}_s{trackEntry.Key - ClosedCaptionExtractor.Cea708TrackKeyOffset}"
+                        : $"cea608_{pidEntry.Key}_cc{trackEntry.Key}";
                     tracks.Add(new LoadedTrack(subtitle, new SubRip(), trackName, pidEntry.Key));
                 }
             }

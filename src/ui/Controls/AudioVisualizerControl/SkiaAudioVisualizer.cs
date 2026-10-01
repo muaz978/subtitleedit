@@ -125,6 +125,7 @@ public class SkiaAudioVisualizer : AudioVisualizer
         f.FancyHighColor = ToSkColor(WaveformFancyHighColor, SKColors.Orange);
         f.CursorColor = ToSkColor(WaveformCursorColor, SKColors.Cyan);
         f.ShotChangeColor = ToSkColor(WaveformShotChangeColor, SKColors.AntiqueWhite);
+        f.GridColor = ToSkColor(WaveformGridColor, new SKColor(169, 169, 169, 90));
         f.ParagraphLeftColor = ToSkColor(WaveformParagraphLeftColor, new SKColor(0, 255, 0, 60));
         f.ParagraphRightColor = ToSkColor(WaveformParagraphRightColor, new SKColor(255, 0, 0, 100));
         f.ParagraphBackgroundColor = ToSkColor(ParagraphBackground, SKColors.Transparent);
@@ -135,6 +136,7 @@ public class SkiaAudioVisualizer : AudioVisualizer
         f.FontSize = (float)settings.Waveform.WaveformTextFontSize;
         f.FontBold = settings.Waveform.WaveformTextFontBold;
         f.UnwrapText = settings.Waveform.WaveformUnwrapText;
+        f.BlurText = BlurText;
 
         f.DrawGridLines = DrawGridLines;
         f.FrameMode = settings.General.UseFrameMode;
@@ -481,6 +483,7 @@ internal sealed class SkiaWaveformFrame
     public SKColor FancyHighColor;
     public SKColor CursorColor;
     public SKColor ShotChangeColor;
+    public SKColor GridColor;
     public SKColor ParagraphLeftColor;
     public SKColor ParagraphRightColor;
     public SKColor ParagraphBackgroundColor;
@@ -491,6 +494,7 @@ internal sealed class SkiaWaveformFrame
     public float FontSize;
     public bool FontBold;
     public bool UnwrapText;
+    public bool BlurText;
 
     public bool DrawGridLines;
     public bool FrameMode;
@@ -537,6 +541,7 @@ internal sealed class SkiaWaveformFrame
         target.SelectedColor = SelectedColor;
         target.FancyHighColor = FancyHighColor;
         target.DrawGridLines = DrawGridLines;
+        target.GridColor = GridColor;
         target.FrameMode = FrameMode;
         target.FrameRate = FrameRate;
         target.SelectedRanges.Clear();

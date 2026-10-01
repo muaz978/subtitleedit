@@ -456,6 +456,15 @@ public static class UiUtil
         return _focusedButtonBackgroundBrush;
     }
 
+    /// <summary>
+    /// The label without its `_` access-key marker, for showing a button caption as plain text
+    /// (e.g. "_Done" as a batch row status, which showed the underscore).
+    /// </summary>
+    public static string RemoveAccessKey(string text)
+    {
+        return ParseAccessKey(text).Display;
+    }
+
     // Parses a single `_` access-key marker out of a button label and returns the visible text plus
     // the matching Avalonia Key. Mirrors the WinForms `&` convention used in the language files
     // (e.g. "_OK" → display "OK", Alt+O; "C_ancel" → display "Cancel", Alt+A).
@@ -3165,6 +3174,19 @@ public static class UiUtil
     private static int _subtitleFileNameInTitleSuppressions;
 
     /// <summary>
+    /// Session-only screen privacy mode (#15300), cycled via a shortcut so a screen recording or
+    /// screenshot does not reveal what is being worked on:
+    /// <see cref="ScreenPrivacyLevel.HideFileNames"/> keeps subtitle and video file names out of
+    /// the main window title, dialog titles and the video player;
+    /// <see cref="ScreenPrivacyLevel.HideFileNamesAndTexts"/> also blurs/hides the subtitle text.
+    /// </summary>
+    internal static ScreenPrivacyLevel ScreenPrivacy { get; set; }
+
+    internal static bool HideFileNames => ScreenPrivacy != ScreenPrivacyLevel.Off;
+
+    internal static bool HideTexts => ScreenPrivacy == ScreenPrivacyLevel.HideFileNamesAndTexts;
+
+    /// <summary>
     /// Suppresses the file-name suffix for the dialogs opened inside the returned scope. Batch
     /// convert reuses main-window dialogs as settings editors over a whole list of files - naming
     /// the main window's subtitle in their title bar claims a file they have nothing to do with.
@@ -3194,13 +3216,27 @@ public static class UiUtil
     }
 
     /// <summary>
+    /// A dialog title made from a "Title - {0}" format and a file name. With screen privacy on,
+    /// the file name is left out, as <see cref="MakeWindowTitle"/> does (#15300).
+    /// </summary>
+    internal static string FormatTitleWithFileName(string format, string fileName)
+    {
+        if (!HideFileNames)
+        {
+            return string.Format(format, fileName);
+        }
+
+        return string.Format(format, string.Empty).Trim().TrimEnd('-', ':').Trim();
+    }
+
+    /// <summary>
     /// Window title with the current subtitle file name appended, e.g. "Auto-translate - my movie.srt".
     /// The plain title is returned unchanged when no subtitle file is open, and inside a
     /// <see cref="SuppressSubtitleFileNameInTitle"/> scope.
     /// </summary>
     internal static string MakeWindowTitle(string title)
     {
-        if (_subtitleFileNameInTitleSuppressions > 0)
+        if (_subtitleFileNameInTitleSuppressions > 0 || HideFileNames)
         {
             return title;
         }

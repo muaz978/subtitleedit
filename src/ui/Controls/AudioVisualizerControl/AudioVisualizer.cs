@@ -67,6 +67,9 @@ public class AudioVisualizer : Control
     public static readonly StyledProperty<Color> WaveformShotChangeColorProperty =
        AvaloniaProperty.Register<AudioVisualizer, Color>(nameof(WaveformShotChangeColor));
 
+    public static readonly StyledProperty<Color> WaveformGridColorProperty =
+       AvaloniaProperty.Register<AudioVisualizer, Color>(nameof(WaveformGridColor));
+
     public static readonly StyledProperty<Color> WaveformParagraphLeftColorProperty =
         AvaloniaProperty.Register<AudioVisualizer, Color>(nameof(WaveformParagraphLeftColor));
 
@@ -181,6 +184,17 @@ public class AudioVisualizer : Control
         }
     }
 
+    public Color WaveformGridColor
+    {
+        get => GetValue(WaveformGridColorProperty);
+        set
+        {
+            _paintGridLines = new Pen(new SolidColorBrush(value), 1);
+            SetValue(WaveformGridColorProperty, value);
+            InvalidateVisual();
+        }
+    }
+
     public Color WaveformParagraphLeftColor
     {
         get => GetValue(WaveformParagraphLeftColorProperty);
@@ -231,6 +245,14 @@ public class AudioVisualizer : Control
     /// number/duration footer stay, so timing still works here, but the text is not drawn twice.
     /// </summary>
     public bool ShowParagraphText { get; set; } = true;
+
+    /// <summary>
+    /// Screen privacy mode (#15300): blur all subtitle text - paragraphs, original-subtitle cues
+    /// and the timeline tracks above the waveform. Call InvalidateVisual after changing it.
+    /// </summary>
+    public bool BlurText { get; set; }
+
+    internal static readonly IEffect TextBlurEffect = new ImmutableBlurEffect(6);
     public bool ShowOriginalSubtitleOverlay { get; set; }
 
     private readonly List<WaveformOriginalSubtitleCue> _originalSubtitleCues = new();
@@ -445,7 +467,7 @@ public class AudioVisualizer : Control
     private Pen _paintShotChangeThickPen = new Pen(Brushes.AntiqueWhite, 2);
     private Pen _paintShotChangeThinPen = new Pen(Brushes.AntiqueWhite, 1);
 
-    private readonly Pen _paintGridLines = new Pen(Brushes.DarkGray, 0.2);
+    private Pen _paintGridLines = new Pen(new SolidColorBrush(Color.FromArgb(90, 169, 169, 169)), 1);
     private readonly IBrush _mouseOverBrush = new SolidColorBrush(Color.FromArgb(50, 255, 255, 0));
 
     // Cached drawing resources for fancy waveform
@@ -1394,6 +1416,15 @@ public class AudioVisualizer : Control
         base.OnPointerEntered(e);
 
         if (!FocusOnMouseOver)
+        {
+            return;
+        }
+
+        // Pointer-enter also fires while another application is in front (the mouse crossing the
+        // waveform on the way to it). Focusing then silently moved the window's focus off the
+        // subtitle grid, so after switching back Ctrl+V pasted at the waveform position instead
+        // of over the still-highlighted selected lines (#15436).
+        if (TopLevel.GetTopLevel(this) is WindowBase { IsActive: false })
         {
             return;
         }
@@ -3725,15 +3756,37 @@ public class AudioVisualizer : Control
         var prepared = GetPreparedParagraphText(text);
         if (Se.Settings.Waveform.WaveformUnwrapText)
         {
-            context.DrawText(GetCachedParagraphText(prepared.Unwrapped, prepared.RightToLeft), new Point(x, y));
+            var unwrapped = GetCachedParagraphText(prepared.Unwrapped, prepared.RightToLeft);
+            using (BlurText ? context.PushEffect(TextBlurEffect, new Rect(x, y, unwrapped.Width, unwrapped.Height)) : (IDisposable?)null)
+            {
+                context.DrawText(unwrapped, new Point(x, y));
+            }
+
             return;
         }
 
-        foreach (var line in prepared.Lines)
+        IDisposable? blur = null;
+        if (BlurText)
         {
-            var formattedText = GetCachedParagraphText(line, prepared.RightToLeft);
-            context.DrawText(formattedText, new Point(x, y));
-            y += formattedText.Height;
+            double width = 0, height = 0;
+            foreach (var line in prepared.Lines)
+            {
+                var formattedText = GetCachedParagraphText(line, prepared.RightToLeft);
+                width = Math.Max(width, formattedText.Width);
+                height += formattedText.Height;
+            }
+
+            blur = context.PushEffect(TextBlurEffect, new Rect(x, y, width, height));
+        }
+
+        using (blur)
+        {
+            foreach (var line in prepared.Lines)
+            {
+                var formattedText = GetCachedParagraphText(line, prepared.RightToLeft);
+                context.DrawText(formattedText, new Point(x, y));
+                y += formattedText.Height;
+            }
         }
     }
 

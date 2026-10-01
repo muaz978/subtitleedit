@@ -380,7 +380,7 @@ public partial class TransparentSubtitlesViewModel : ObservableObject
             return;
         }
 
-        JobItems[_jobItemIndex].Status = Se.Language.General.Done;
+        JobItems[_jobItemIndex].Status = UiUtil.RemoveAccessKey(Se.Language.General.Done);
 
         Dispatcher.UIThread.Invoke(async () =>
         {
@@ -729,6 +729,8 @@ public partial class TransparentSubtitlesViewModel : ObservableObject
         }
 
         subtitle = GetSubtitleBasedOnCut(subtitle);
+
+        AssaCentisecondTiming.FloorToCentiseconds(subtitle); // first frame kept, issue #15520
 
         if (subtitle.OriginalFormat is NetflixImsc11Japanese || NetflixImsc11JapaneseToAss.HasJapaneseMarkup(subtitle))
         {

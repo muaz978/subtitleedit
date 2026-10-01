@@ -129,6 +129,13 @@ public class SeGeneral
     public bool ForceCrLfOnSave { get; set; }
 
     /// <summary>
+    /// Linux only: copy text via xclip/wl-copy instead of Avalonia's X11 clipboard, which turns
+    /// non-ASCII characters into '?' for apps requesting the X11 STRING target (issue #15488).
+    /// Falls back to Avalonia when neither tool is installed.
+    /// </summary>
+    public bool LinuxClipboardUseExternalTool { get; set; } = true;
+
+    /// <summary>
     /// Warn before saving in a format with hard line limits (e.g. SCC's 32 chars x 4 lines) when
     /// some subtitles exceed them and will be re-wrapped/truncated. Cleared via "Do not show again".
     /// </summary>
@@ -169,6 +176,13 @@ public class SeGeneral
     public bool ShowColumnTeletext { get; set; }
     public bool TeletextAlignmentPreview { get; set; }
     public bool ShowColumnGap { get; set; }
+
+    /// <summary>
+    /// The "Shot in"/"Shot out" columns: signed distance from the cue to the nearest shot change,
+    /// colored by the beautify time codes profile's zones. Off by default.
+    /// </summary>
+    public bool ShowColumnShotIn { get; set; }
+    public bool ShowColumnShotOut { get; set; }
     public bool ShowColumnDuration { get; set; }
     public bool ShowColumnStyle { get; set; }
     public bool ShowColumnActor { get; set; }
@@ -467,6 +481,23 @@ public class SeGeneral
             SubtitleMaximumDisplayMilliseconds = 5000,
             SubtitleMinimumDisplayMilliseconds = 700,
             SubtitleMaximumWordsPerMinute = 300,
+            CpsLineLengthStrategy = string.Empty,
+            MinimumMillisecondsBetweenLines = 0,
+            DialogStyle = DialogType.DashBothLinesWithSpace,
+            ContinuationStyle = Core.Enums.ContinuationStyle.None
+        });
+        profiles.Add(new RulesProfile
+        {
+            // One to three words per cue, the common Shorts/TikTok caption style (issue #15295).
+            Name = "TikTok/YouTube-shorts (1-3 words)",
+            SubtitleLineMaximumLength = 15,
+            MaxNumberOfLines = 1,
+            MergeLinesShorterThan = 16,
+            SubtitleMaximumCharactersPerSeconds = 30,
+            SubtitleOptimalCharactersPerSeconds = 20,
+            SubtitleMaximumDisplayMilliseconds = 3000,
+            SubtitleMinimumDisplayMilliseconds = 300,
+            SubtitleMaximumWordsPerMinute = 400,
             CpsLineLengthStrategy = string.Empty,
             MinimumMillisecondsBetweenLines = 0,
             DialogStyle = DialogType.DashBothLinesWithSpace,

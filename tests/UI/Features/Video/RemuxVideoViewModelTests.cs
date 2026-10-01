@@ -292,6 +292,153 @@ public class RemuxVideoViewModelTests
         Assert.False(vm.IsVolumeEnabled);
     }
 
+    [AvaloniaFact]
+    public void Scc_SwitchesToMovAndCopiesTheCaptionsAsCea608()
+    {
+        var (vm, _, _) = BuildMixViewModel(false);
+        var srt = new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-srt-does-not-exist.srt"));
+        var scc = new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-scc-does-not-exist.scc"));
+        vm.SubtitleFiles.Add(srt);
+        vm.SubtitleFiles.Add(scc);
+
+        Assert.Equal(".mov", vm.SelectedOutputFormat);
+
+        var args = vm.BuildFfmpegArguments([.. vm.AudioFiles], [.. vm.SubtitleFiles]);
+
+        Assert.Contains("-map 0:v:0 -map 0:a:0 -map 1:a:0 -map 2:s:0 -map 3:s:0 ", args);
+        Assert.Contains("-c:s mov_text -c:s:1 copy", args);
+        Assert.Contains("-c:a copy", args);
+    }
+
+    /// <summary>
+    /// An .mpg gets every subtitle as A/53 closed captions in the video afterwards (#15405), so
+    /// neither .scc (MOV) nor .ass (MKV) switches the container, and ffmpeg gets no subtitle
+    /// streams - it writes an MPEG-2 program stream to the given (temporary) file.
+    /// </summary>
+    [AvaloniaFact]
+    public void Mpg_KeepsSubtitlesOutOfFfmpegAndStaysMpg()
+    {
+        var (vm, _, _) = BuildMixViewModel(false);
+        vm.SelectedOutputFormat = ".mpg";
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-scc-does-not-exist.en.scc")));
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-ass-does-not-exist.ass")));
+
+        Assert.Equal(".mpg", vm.SelectedOutputFormat);
+
+        var temp = Path.Combine(Path.GetTempPath(), "remux-mpg-temp.mpg");
+        var args = vm.BuildFfmpegArguments([.. vm.AudioFiles], [.. vm.SubtitleFiles], temp);
+
+        Assert.Contains("-map 0:v:0 -map 0:a:0 -map 1:a:0 -c:v copy -c:a ac3 -b:a 192k ", args);
+        Assert.DoesNotContain("-map 2:", args);
+        Assert.DoesNotContain("-c:s", args);
+        Assert.DoesNotContain("-metadata:s:s", args);
+        Assert.EndsWith($"-f vob \"{temp}\"", args);
+
+        vm.ReencodeVideoToMpeg2 = true;
+        Assert.Contains("-c:v mpeg2video -q:v 2 ", vm.BuildFfmpegArguments([.. vm.AudioFiles], [.. vm.SubtitleFiles], temp));
+    }
+
+    /// <summary>
+    /// MacCaption (.mcc) can only be embedded in .mpg - with .scc too, .mpg wins over .mov.
+    /// </summary>
+    [AvaloniaFact]
+    public void Mcc_SwitchesToMpg()
+    {
+        var (vm, _, _) = BuildMixViewModel(false);
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-scc-does-not-exist.scc")));
+        Assert.Equal(".mov", vm.SelectedOutputFormat);
+
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-mcc-does-not-exist.mcc")));
+
+        Assert.Equal(".mpg", vm.SelectedOutputFormat);
+    }
+
+    /// <summary>
+    /// The first file's caption data, with the second file's field 1 as field 2 (CC3).
+    /// </summary>
+    [Fact]
+    public void GetClosedCaptionBytes_SecondFileIsField2()
+    {
+        var first = Path.Combine(Path.GetTempPath(), "remux-cc-first-" + System.Guid.NewGuid() + ".scc");
+        var second = Path.Combine(Path.GetTempPath(), "remux-cc-second-" + System.Guid.NewGuid() + ".scc");
+        try
+        {
+            File.WriteAllText(first, "Scenarist_SCC V1.0\n\n00:00:01:00\t9420 9420\n");
+            File.WriteAllText(second, "Scenarist_SCC V1.0\n\n00:00:02:00\t942c 942c 942f\n");
+
+            var captions = RemuxVideoViewModel.GetClosedCaptionBytes([new RemuxFileItem(first), new RemuxFileItem(second)]);
+
+            Assert.Equal(new long[] { 30, 31 }, captions.Field1.Select(p => p.Slot));
+            Assert.Equal(new long[] { 60, 61, 62 }, captions.Field2.Select(p => p.Slot));
+            Assert.False(captions.HasCea708);
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+        }
+    }
+
+    [Theory]
+    [InlineData("ac3, 48000 Hz, stereo, fltp, 192 kb/s", true)]
+    [InlineData("mp2, 48000 Hz, stereo, s16p, 224 kb/s", true)]
+    [InlineData("mp3 (mp3float), 44100 Hz, stereo", true)]
+    [InlineData("aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo", false)]
+    [InlineData("opus, 48000 Hz, stereo", false)]
+    [InlineData(null, false)]
+    public void IsMpegProgramStreamAudio_OnlyMpegAudioAndAc3(string? details, bool expected)
+    {
+        Assert.Equal(expected, RemuxVideoViewModel.IsMpegProgramStreamAudio(details));
+    }
+
+    [Theory]
+    [InlineData("mpeg2video (Main), yuv420p(tv, progressive), 720x480", "mpeg2video")]
+    [InlineData("h264 (High) (avc1 / 0x31637661), yuv420p", "h264")]
+    [InlineData("", "")]
+    public void GetCodecName_IsTheFirstWord(string details, string expected)
+    {
+        Assert.Equal(expected, RemuxVideoViewModel.GetCodecName(details));
+    }
+
+    [AvaloniaFact]
+    public void Subtitles_GetLanguageTagFromFileName()
+    {
+        var (vm, _, _) = BuildMixViewModel(false);
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-does-not-exist.en.scc")));
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-does-not-exist.srt")));
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-does-not-exist.de.srt")));
+
+        var args = vm.BuildFfmpegArguments([.. vm.AudioFiles], [.. vm.SubtitleFiles]);
+
+        Assert.Contains("-metadata:s:s:0 language=eng ", args);
+        Assert.DoesNotContain("-metadata:s:s:1 language=", args);
+        Assert.Contains("-metadata:s:s:2 language=ger ", args);
+    }
+
+    [Theory]
+    [InlineData("movie.en.scc", "eng")]
+    [InlineData("movie.spa.srt", "spa")]
+    [InlineData("movie.fr.forced.srt", "fre")]
+    [InlineData("movie_track3_[dut].srt", "dut")]
+    [InlineData("movie.scc", null)]
+    [InlineData("Dr.No.srt", null)]
+    public void GetSubtitleLanguageFromFileName_ReturnsBibliographicCode(string fileName, string? expected)
+    {
+        Assert.Equal(expected, RemuxVideoViewModel.GetSubtitleLanguageFromFileName(fileName));
+    }
+
+    [AvaloniaFact]
+    public void Mov_KeepsMultipleTracks_ButAssStillSwitchesToMkv()
+    {
+        var (vm, _, _) = BuildMixViewModel(false);
+        vm.SelectedOutputFormat = ".mov";
+        Assert.Equal(".mov", vm.SelectedOutputFormat);
+
+        vm.SubtitleFiles.Add(new RemuxFileItem(Path.Combine(Path.GetTempPath(), "remux-ass-does-not-exist.ass")));
+
+        Assert.Equal(".mkv", vm.SelectedOutputFormat);
+    }
+
     [Theory]
     [InlineData(100, "1.00")]
     [InlineData(15, "0.15")]

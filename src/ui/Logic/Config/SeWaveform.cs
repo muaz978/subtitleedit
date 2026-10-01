@@ -15,6 +15,10 @@ public class SeWaveform
     // "select current subtitle" working) also while paused, so mouse-wheel
     // scrubbing walks the waveform as one continuous strip.
     public bool CenterVideoPositionAlsoWhenPaused { get; set; }
+
+    // With the above on, also select the line under the cursor while scrubbing paused.
+    // Off by default: SE 4 never changed the selection while paused (#15513).
+    public bool SelectCurrentSubtitleWhilePaused { get; set; }
     public bool DrawGridLines { get; set; }
 
     /// <summary>
@@ -36,6 +40,7 @@ public class SeWaveform
     public string WaveformSelectedColor { get; set; }
     public string WaveformCursorColor { get; set; }
     public string WaveformShotChangeColor { get; set; }
+    public string WaveformGridColor { get; set; }
     public string WaveformParagraphLeftColor { get; set; }
     public string WaveformParagraphRightColor { get; set; }
     public string WaveformFancyHighColor { get; set; }
@@ -143,6 +148,7 @@ public class SeWaveform
         WaveformSelectedColor = Color.FromArgb(150, 0, 120, 255).FromColorToHex();
         WaveformCursorColor = Colors.Cyan.FromColorToHex();
         WaveformShotChangeColor = Colors.AntiqueWhite.FromColorToHex();
+        WaveformGridColor = Color.FromArgb(90, 169, 169, 169).FromColorToHex();
         WaveformParagraphLeftColor = Color.FromArgb(90, 0, 255, 0).FromColorToHex();
         WaveformParagraphRightColor = Color.FromArgb(90, 255, 0, 0).FromColorToHex();
         WaveformFancyHighColor = Colors.Orange.FromColorToHex();

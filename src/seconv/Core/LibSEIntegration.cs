@@ -1,7 +1,8 @@
-using Nikse.SubtitleEdit.Core.Common;
+﻿using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.Forms;
 using Nikse.SubtitleEdit.Core.Interfaces;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
+using Nikse.SubtitleEdit.UiLogic.SubtitleLoading;
 using Spectre.Console;
 using System.Text;
 
@@ -13,18 +14,21 @@ namespace SeConv.Core;
 internal static class LibSEIntegration
 {
     /// <summary>
-    /// Gets all subtitle formats from LibSE — text, binary (input-only), and "other text" lists combined.
+    /// Gets all subtitle formats from LibSE — the registered formats, the binary formats and the
+    /// "other text" formats combined. A format that cannot be a conversion target (see
+    /// <see cref="CanWrite"/>) is marked "(input)".
     /// </summary>
     public static List<FormatEntry> GetAvailableFormats()
     {
         var entries = new List<FormatEntry>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // EBU STL and DVB Teletext are registered too, but they are binary.
         foreach (var f in SubtitleFormat.AllSubtitleFormats)
         {
             if (seen.Add(f.Name))
             {
-                entries.Add(new FormatEntry(f, "text"));
+                entries.Add(new FormatEntry(f, f.IsTextBased ? "text" : "binary"));
             }
         }
 
@@ -32,7 +36,7 @@ internal static class LibSEIntegration
         {
             if (seen.Add(f.Name))
             {
-                entries.Add(new FormatEntry(f, "binary (input)"));
+                entries.Add(new FormatEntry(f, CanWrite(f) ? "binary" : "binary (input)"));
             }
         }
 
@@ -48,6 +52,23 @@ internal static class LibSEIntegration
     }
 
     public sealed record FormatEntry(SubtitleFormat Format, string Kind);
+
+    /// <summary>
+    /// True when seconv can write <paramref name="format"/>: a binary format with a writer (EBU,
+    /// PAC, Cavena 890, Cheetah, CapMaker, Ayato, ...), or a registered text format. The rest of
+    /// GetBinaryFormats() (Chk, TSB4, WinCaps32, ...) and all of GetTextOtherFormats() can only be
+    /// read - their ToText is a stub.
+    /// </summary>
+    public static bool CanWrite(SubtitleFormat format)
+    {
+        if (format is IBinaryPersistableSubtitle)
+        {
+            return true;
+        }
+
+        var type = format.GetType();
+        return format.IsTextBased && SubtitleFormat.AllSubtitleFormats.Any(f => f.GetType() == type);
+    }
 
     /// <summary>
     /// Loads a subtitle file using LibSE. When <paramref name="encodingName"/> is null/blank,
@@ -130,6 +151,23 @@ internal static class LibSEIntegration
             }
         }
 
+        // 1b. Formats SE 4 opened that are in none of libse's lists: ARIB STD-B36 (.1hd, ...)
+        // and Adobe Premiere projects (gzipped xml, so the lines above are gzip bytes).
+        var aribSubtitle = NonRegisteredFormatLoader.TryLoadAribB36(filePath);
+        if (aribSubtitle?.OriginalFormat != null)
+        {
+            return (aribSubtitle, aribSubtitle.OriginalFormat);
+        }
+
+        if (filePath.EndsWith(".prproj", StringComparison.OrdinalIgnoreCase))
+        {
+            var prProjSubtitle = NonRegisteredFormatLoader.TryLoadPremiereProject(filePath);
+            if (prProjSubtitle != null)
+            {
+                return (prProjSubtitle, new AdobePremierePrProj());
+            }
+        }
+
         // 2. Try binary formats (Pac, Ebu, Cavena890, ...) — they read raw bytes themselves
         foreach (var format in SubtitleFormat.GetBinaryFormats(true))
         {
@@ -151,18 +189,14 @@ internal static class LibSEIntegration
             }
         }
 
-        // 3. Try the "other text" formats (NkhCuePoints, BdnXml, JSON variants, ...)
-        foreach (var format in SubtitleFormat.GetTextOtherFormats())
+        // 3. Try the load-only text formats (NkhCuePoints, WSB, JSON variants, ...) - the same
+        // fallback as the GUI's File > Open: image-list formats are skipped (they are OCR'd by
+        // ContainerSubtitleLoader; as text they would convert to png file names), and a parser
+        // that throws on a file it doesn't understand counts as "not this format".
+        var loadOnly = LoadOnlyTextFormatLoader.TryLoad(lines, filePath);
+        if (loadOnly?.OriginalFormat != null)
         {
-            if (format.IsMine(lines, filePath))
-            {
-                var freshSubtitle = new Subtitle();
-                format.LoadSubtitle(freshSubtitle, lines, filePath);
-                if (freshSubtitle.Paragraphs.Count > 0)
-                {
-                    return (freshSubtitle, format);
-                }
-            }
+            return (loadOnly, loadOnly.OriginalFormat);
         }
 
         // 4. Last resort: generic auto-guesser (handles freeform CSV, xlsx, ods, JSON variants, ...)
@@ -285,6 +319,12 @@ internal static class LibSEIntegration
                 var n = file.Read(buffer, totalRead, buffer.Length - totalRead);
                 if (n <= 0) break;
                 totalRead += n;
+            }
+
+            var utf16 = LanguageAutoDetect.GetUtf16WithoutByteOrderMark(totalRead == buffer.Length ? buffer : buffer.AsSpan(0, totalRead).ToArray());
+            if (utf16 != null)
+            {
+                return utf16;
             }
 
             if (LooksLikeUtf8(buffer, totalRead))
@@ -452,6 +492,11 @@ internal static class LibSEIntegration
 
         var targetFormat = ResolveFormatByName(formatName)
             ?? throw new InvalidOperationException($"Unknown subtitle format: {formatName}");
+        if (!CanWrite(targetFormat))
+        {
+            // Its ToText is a stub - without this the output was an empty or "Not supported" file.
+            throw new InvalidOperationException($"{targetFormat.Name} can be read but not written. Run 'seconv formats' to see which formats can be a conversion target.");
+        }
 
         // Strip native source-format markup that the target wouldn't understand
         if (sourceFormat != null && !sourceFormat.GetType().Equals(targetFormat.GetType()))
@@ -494,6 +539,7 @@ internal static class LibSEIntegration
             {
                 pac.CodePage = pacCodePage.Value;
             }
+            pac.SecondaryCodePage = options?.PacSecondaryCodePage ?? -1;
             pac.Save(filePath, subtitle);
             return;
         }
@@ -1159,9 +1205,11 @@ internal static class LibSEIntegration
             "capmaker" or "capmakerplus" => CapMakerPlus.NameOfFormat,
             "ayato" => "Ayato",
             "bluraysup" or "blurayup" or "sup" => "Blu-ray sup",
+            "dvdsup" or "spdvdsup" => "DVD sup",
             "vobsub" => "VobSub",
             "bdnxml" or "bdn-xml" => "BDN-XML",
             "bdnxml8bit" or "bdn-xml8bit" or "bdnxml8-bit" or "bdn-xml8-bit" => "BDN-XML 8-bit",
+            "imscimage" or "imsc-image" => "IMSC image",
             "dost" or "dostimage" => "DOST/image",
             "fcp" or "fcpimage" => "FCP/image",
             "dcinemainterop" or "dcinema-interop" => "D-Cinema interop/png",

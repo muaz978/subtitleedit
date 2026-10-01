@@ -13,6 +13,7 @@ using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Features.Files.ExportImageBased;
 using Nikse.SubtitleEdit.Features.Main.Layout;
 using Nikse.SubtitleEdit.Features.Shared.PromptFileSaved;
+using Nikse.SubtitleEdit.Features.Shared.PromptFilesSaved;
 using Nikse.SubtitleEdit.Features.Shared;
 using Nikse.SubtitleEdit.Features.Shared.PromptTextBox;
 using Nikse.SubtitleEdit.Logic;
@@ -132,6 +133,7 @@ public partial class BurnInViewModel : ObservableObject
     private readonly StringBuilder _log;
     private readonly TempSubtitleFiles _tempSubtitleFiles = new();
     private long _startTicks;
+    private long _runStartTicks;
     private long _processedFrames;
     private Process? _ffmpegProcess;
     private readonly Timer _timerAnalyze;
@@ -606,7 +608,7 @@ public partial class BurnInViewModel : ObservableObject
             return;
         }
 
-        JobItems[_jobItemIndex].Status = Se.Language.General.Done;
+        JobItems[_jobItemIndex].Status = UiUtil.RemoveAccessKey(Se.Language.General.Done);
 
         Dispatcher.UIThread.Invoke(async () =>
         {
@@ -637,6 +639,10 @@ public partial class BurnInViewModel : ObservableObject
 
         EndRun();
 
+        var runTime = TimeSpan.FromTicks(DateTime.UtcNow.Ticks - _runStartTicks);
+        var elapsed = runTime.TotalHours >= 1
+            ? $"{(int)runTime.TotalHours}:{runTime.Minutes:00}:{runTime.Seconds:00}"
+            : $"{runTime.Minutes}:{runTime.Seconds:00}";
         var jobItem = JobItems[_jobItemIndex];
         if (JobItems.Count == 1 && jobItem.Status != StatusSkipped)
         {
@@ -647,21 +653,29 @@ public partial class BurnInViewModel : ObservableObject
                     string.Format(Se.Language.General.VideoFileGeneratedX, jobItem.OutputVideoFileName),
                     jobItem.OutputVideoFileName,
                     true,
-                    true);
+                    true,
+                    elapsed);
             });
         }
         else
         {
-            var sb = new StringBuilder($"Generated files ({JobItems.Count}):" + Environment.NewLine + Environment.NewLine);
-            foreach (var item in JobItems)
-            {
-                sb.AppendLine($"{item.OutputVideoFileName} ==> {item.Status}");
-            }
+            // Batch: one card per video with its own play / show in folder, instead of a plain
+            // "file ==> status" message box with no way to reach the output.
+            var files = JobItems
+                .Select(p => new SavedFileItem(
+                    p.OutputVideoFileName,
+                    p.Status == UiUtil.RemoveAccessKey(Se.Language.General.Done) && File.Exists(p.OutputVideoFileName),
+                    p.Status))
+                .ToList();
+            var doneCount = files.Count(p => p.IsSuccess);
+            var headline = doneCount == files.Count
+                ? string.Format(Se.Language.General.XVideosGenerated, doneCount)
+                : string.Format(Se.Language.General.XOfYVideosGenerated, doneCount, files.Count);
 
-            await MessageBox.Show(Window!,
-                "Generating done",
-                sb.ToString(),
-                MessageBoxButtons.OK);
+            await _windowService.ShowDialogAsync<PromptFilesSavedWindow, PromptFilesSavedViewModel>(Window!, vm =>
+            {
+                vm.Initialize(Se.Language.General.VideoFilesGenerated, headline, files, elapsed);
+            });
         }
     }
 
@@ -1319,6 +1333,8 @@ public partial class BurnInViewModel : ObservableObject
 
         subtitle = GetSubtitleBasedOnCut(subtitle);
 
+        AssaCentisecondTiming.FloorToCentiseconds(subtitle); // first frame kept, issue #15520
+
         if (subtitle.OriginalFormat is NetflixImsc11Japanese || NetflixImsc11JapaneseToAss.HasJapaneseMarkup(subtitle))
         {
             // Furigana, bouten and vertical writing become extra positioned render lines - burning
@@ -1864,6 +1880,7 @@ public partial class BurnInViewModel : ObservableObject
         ProgressValue = 0;
         SaveSettings();
 
+        _runStartTicks = DateTime.UtcNow.Ticks;
         await InitAndStartJobItem(0);
     }
 

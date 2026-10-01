@@ -432,6 +432,8 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowFormatLimitWarning, nameof(_vm.ShowFormatLimitWarning)),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoTrimWhiteSpace, nameof(_vm.AutoTrimWhiteSpace)),
             MakeCheckboxSetting(Se.Language.Options.Settings.RemoveBlankLinesWhenOpening, nameof(_vm.RemoveBlankLinesWhenOpening)),
+            new SettingsItem(!OperatingSystem.IsLinux(), Se.Language.Options.Settings.LinuxClipboardUseExternalTool,
+                () => UiUtil.MakeCheckBox(_vm, nameof(_vm.LinuxClipboardUseExternalTool))),
             new SettingsItem(Se.Language.Options.Settings.DefaultEncoding, () => new ComboBox
             {
                 Width = 200,
@@ -601,8 +603,8 @@ public class SettingsPage : UserControl
                     MakeVideoPlayerComboBox()
                 }
             }),
-            MakeCheckboxSetting(Se.Language.Options.Settings.ShowStopButton, nameof(_vm.ShowStopButton)),
-            MakeCheckboxSetting(Se.Language.Options.Settings.ShowFullscreenButton, nameof(_vm.ShowFullscreenButton)),
+            new SettingsItem(Se.Language.Options.Settings.VideoControls,
+                () => UiUtil.MakeButton(Se.Language.Options.Settings.VideoControlsEdit, _vm.EditVideoControlsCommand)),
             MakeCheckboxSetting(Se.Language.Options.Settings.FullscreenHideControls, nameof(_vm.FullscreenHideControls)),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoOpenVideoFile, nameof(_vm.AutoOpenVideoFile)),
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowSecondarySubtitleDialog, nameof(_vm.ShowSecondarySubtitleDialog)),
@@ -768,6 +770,7 @@ public class SettingsPage : UserControl
             new SettingsItem(Se.Language.Options.Settings.WaveformMouseWheelVideoPositionStep,
                 () => UiUtil.MakeComboBox(_vm.WaveformMouseWheelVideoPositionSteps, _vm, nameof(_vm.SelectedWaveformMouseWheelVideoPositionStep))),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformCenterVideoPositionAlsoWhenPaused, nameof(_vm.WaveformCenterVideoPositionAlsoWhenPaused)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.WaveformSelectCurrentSubtitleWhilePaused, nameof(_vm.WaveformSelectCurrentSubtitleWhilePaused)),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformDrawGridLines, nameof(_vm.WaveformDrawGridLines)),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformUseSkiaRenderer, nameof(_vm.WaveformUseSkiaRenderer)),
             // SE 4 parity: the per-paragraph footer in the waveform ("#43  01:10" and the
@@ -792,6 +795,7 @@ public class SettingsPage : UserControl
             new SettingsItem(Se.Language.Options.Settings.WaveformSelectedColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformSelectedColor))),
             new SettingsItem(Se.Language.Options.Settings.WaveformCursorColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformCursorColor))),
             new SettingsItem(Se.Language.Options.Settings.WaveformShotChangeColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformShotChangeColor))),
+            new SettingsItem(Se.Language.Options.Settings.WaveformGridColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformGridColor))),
             new SettingsItem(Se.Language.Options.Settings.WaveformParagraphLeftColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformParagraphLeftColor))),
             new SettingsItem(Se.Language.Options.Settings.WaveformParagraphRightColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformParagraphRightColor))),
             new SettingsItem(Se.Language.Options.Settings.WaveformFancyHighColor, () => UiUtil.MakeColorPickerButton(_vm, nameof(_vm.WaveformFancyHighColor))),

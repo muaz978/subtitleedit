@@ -10,6 +10,7 @@ using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Core.ContainerFormats;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Matroska;
 using Nikse.SubtitleEdit.Core.ContainerFormats.Mp4.Boxes;
+using Nikse.SubtitleEdit.Core.ContainerFormats.ProgramStream;
 using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
 using Nikse.SubtitleEdit.Core.Interfaces;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
@@ -2321,6 +2322,11 @@ public partial class OcrViewModel : ObservableObject
     [RelayCommand]
     private void Ok()
     {
+        if (IsOcrRunning)
+        {
+            return; // Enter/Alt+O mid-run closed the window with a partial result while OCR kept running (#15500)
+        }
+
         // A just-finished OCR run may still have line texts in the coalesced UI queue.
         OcrUiUpdates.Flush();
 
@@ -2585,6 +2591,9 @@ public partial class OcrViewModel : ObservableObject
             }
 
             _ocrFixEngine.Initialize(_fixEngineSubtitle, threeLetterCode, SelectedDictionary);
+
+            // nOCR and binary image compare write "*" for a glyph they could not match.
+            _ocrFixEngine.FillUnknownCharacters = ocrEngine.EngineType is OcrEngineType.nOcr or OcrEngineType.BinaryImageCompare;
         }
         else
         {
@@ -5215,7 +5224,7 @@ public partial class OcrViewModel : ObservableObject
     public void Initialize(List<BluRaySupParser.PcsData> subtitles, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleBluRay(subtitles);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage();
@@ -5224,7 +5233,7 @@ public partial class OcrViewModel : ObservableObject
     public void Initialize(List<VobSubMergedPack> vobSubMergedPackList, List<SKColor> palette, string vobSubFileName, string? languageCode = null)
     {
         _sourceFileName = vobSubFileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, vobSubFileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, vobSubFileName);
         _ocrSubtitle = new OcrSubtitleVobSub(vobSubMergedPackList, palette);
         SetOcrSubtitleItems();
         IsVobSubVisible = true;
@@ -5235,7 +5244,7 @@ public partial class OcrViewModel : ObservableObject
     public void Initialize(Trak mp4SubtitleTrack, List<Paragraph> paragraphs, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleMp4VobSub(mp4SubtitleTrack, paragraphs);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage(mp4SubtitleTrack.Mdia?.Mdhd?.Iso639ThreeLetterCode);
@@ -5244,7 +5253,7 @@ public partial class OcrViewModel : ObservableObject
     public void Initialize(List<VobSubMergedPack> mergedVobSubPacks, List<SKColor> palette, MatroskaTrackInfo matroskaSubtitleInfo, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleVobSub(mergedVobSubPacks, palette);
         SetOcrSubtitleItems();
         IsVobSubVisible = true;
@@ -5255,7 +5264,7 @@ public partial class OcrViewModel : ObservableObject
     public void Initialize(MatroskaTrackInfo matroskaSubtitleInfo, Subtitle subtitle, List<DvbSubPes> subtitleImages, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleMkvDvb(matroskaSubtitleInfo, subtitle, subtitleImages);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage(matroskaSubtitleInfo.Language);
@@ -5264,7 +5273,7 @@ public partial class OcrViewModel : ObservableObject
     public void Initialize(MatroskaTrackInfo matroskaSubtitleInfo, List<BluRaySupParser.PcsData> pcsDataList, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleMkvBluRay(matroskaSubtitleInfo, pcsDataList);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage(matroskaSubtitleInfo.Language);
@@ -5273,8 +5282,17 @@ public partial class OcrViewModel : ObservableObject
     public void Initialize(IList<IBinaryParagraphWithPosition> list, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleIBinaryParagraph(list);
+        SetOcrSubtitleItems();
+        AutoDetectSourceLanguage();
+    }
+
+    public void InitializeBinaryParagraphList(IBinaryParagraphList binaryParagraphList, Subtitle subtitle, string fileName)
+    {
+        _sourceFileName = fileName;
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
+        _ocrSubtitle = new OcrSubtitleBinaryParagraphList(binaryParagraphList, subtitle);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage();
     }
@@ -5282,7 +5300,7 @@ public partial class OcrViewModel : ObservableObject
     public void InitializeBdn(Subtitle subtitle, string fileName, bool isSon)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleBdn(subtitle, fileName, isSon);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage();
@@ -5291,7 +5309,7 @@ public partial class OcrViewModel : ObservableObject
     public void InitializeWebVtt(Subtitle subtitle, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleWebVttImages(subtitle, fileName);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage();
@@ -5300,8 +5318,26 @@ public partial class OcrViewModel : ObservableObject
     public void InitializeSpDvdSup(string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleSpDvdSupImages(fileName);
+        SetOcrSubtitleItems();
+        AutoDetectSourceLanguage();
+    }
+
+    public void InitializeUmdVideo(List<UmdVideoSubtitle> pictures, string fileName)
+    {
+        _sourceFileName = fileName;
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
+        _ocrSubtitle = new OcrSubtitleUmdVideo(pictures);
+        SetOcrSubtitleItems();
+        AutoDetectSourceLanguage();
+    }
+
+    public void InitializeHdDvdSup(string fileName)
+    {
+        _sourceFileName = fileName;
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
+        _ocrSubtitle = new OcrSubtitleHdDvdSup(fileName);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage();
     }
@@ -5309,7 +5345,7 @@ public partial class OcrViewModel : ObservableObject
     internal void Initialize(List<TransportStreamSubtitle> subtitles, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, fileName);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, fileName);
         _ocrSubtitle = new OcrSubtitleTransportStream(subtitles);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage();
@@ -5318,7 +5354,7 @@ public partial class OcrViewModel : ObservableObject
     internal void Initialize(List<ImportImageItem> images)
     {
         _sourceFileName = string.Empty;
-        Title = string.Format(Se.Language.Ocr.OcrX, Se.Language.General.Images);
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, Se.Language.General.Images);
         _ocrSubtitle = new OcrImportImage(images);
         SetOcrSubtitleItems();
     }
@@ -5326,7 +5362,7 @@ public partial class OcrViewModel : ObservableObject
     internal void InitializeDivX(List<XSub> list, string fileName)
     {
         _sourceFileName = fileName;
-        Title = string.Format(Se.Language.Ocr.OcrX, "DivX");
+        Title = UiUtil.FormatTitleWithFileName(Se.Language.Ocr.OcrX, "DivX");
         _ocrSubtitle = new OcrSubtitleDivX(list, fileName);
         SetOcrSubtitleItems();
         AutoDetectSourceLanguage();

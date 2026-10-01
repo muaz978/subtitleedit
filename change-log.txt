@@ -3,6 +3,162 @@ Subtitle Edit Changelog
 
 -----------------------------------------------------------------------------------------------------
 
+v5.3.0-beta18 (1st of October 2026)
+
+* Add import of subtitles from DVD (IFO/VOB) with title picker, fast rip and exact cell timing (SE 4 parity)
+* Add reading of PSP UMD Video subtitles (.MPS/.PMF and .subs dumps)
+* Add reading of HD-DVD sup subtitles
+* Add reading of DVD "SP" sup in Batch convert and seconv
+* Add reading of CEA-608 captions from .m2v
+* Open transport streams saved with a video extension like .mp4 (GUI, Batch convert, seconv)
+* Open more files found in a scan of real issue files (UTF-16 without BOM, styles-only ASS, IMSC1 and more)
+* seconv: read the SE 4 formats the GUI opens again, and follow the "use word split list" OCR setting
+* OCR: access keys for Start/Pause/Edit-export, and OK is blocked while OCR runs - thx skylinekiller
+* Remux video: accept every video container as an audio source - thx MaxBunny1786
+* Blu-ray sup: write PTS on the video frame grid - thx Lukewarm1141
+* Toolbar: hide right-side items instead of overlapping icons when the window is narrow - thx hisui3393
+* Fix image export dropping glyphs like ♪ missing from the font (falls back to a system font) - thx JoaoGri
+* Fix Linux: copy text via xclip/wl-copy to keep accented characters - thx Pemicope
+* Fix Batch convert not keeping the source's UTF-8 BOM choice - thx Pemicope
+* Fix transport stream subtitles being off by the file's start time in the players
+* Fix FFmpeg player: play on the file's own timestamps, like mpv
+* Fix MP4 closed captions: 1 ms early cues, UI freeze on large files, CEA-608 roll-up
+* Fix CEA-708 pop-on caption timing, and keep the space around mid-row styled words in CEA-608/708
+* Fix Spanish "Fix common OCR errors" splitting forms of "sobrevalorar"
+* Update audio.cpp to v0.9.0 (lower GPU memory use for Higgs, Fish and ACE-Step)
+* Update CrispASR to v0.8.39 (fixes macOS 14 and older "exit code 134" crash) - thx YujKodato
+* Update Chinese Traditional translation - thx love80312
+* Update Korean translation - thx 12si27
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta17 (30th of September 2026)
+
+* Add reading of EZTitles binary project files (.ezt), with italic, color and alignment
+* Add reading of CEA-608 closed captions from DVD .vob / program stream .mpg video
+* Add export of the shot changes list to a file
+* Add "Check with speech-to-text" to Improve time codes: confirm or undo the aligner's large moves and first sync subtitles that are seconds off or drifting
+* Add "Move to category" on the Multiple replace rule context menu - thx Shae-Clark
+* Remux video: embed subtitles as A/53 CEA-608 closed captions in .mpg - thx MaxBunny1786
+* Open the load-only text formats again from File > Open and Batch convert (SE 4 parity)
+* Open Adobe Premiere projects (.prproj), ARIB STD-B36 files and image-list subtitle files for OCR again (SE 4 parity)
+* seconv: add DVD sup and IMSC image outputs, and refuse formats that can only be read
+* Subtitle grid: keep the error color visible on the selected row - thx Ingo
+* Improve performance of opening large non-subtitle files, VobSub reading, auto-translate, fix names and more
+* Fix transport stream subtitle reading (PGS in .ts, multi-program timing, PTS wrap, partial DVB pages, teletext without PTS, CEA-708 Korean)
+* Fix EZTitles XML: decode cues with the time code standard, not the video frame rate
+* Fix IMSC image export: write the PNGs as files
+* Fix Merge: keep line breaks when merging with an empty line - thx maknol
+* Fix waveform taking focus on mouse over while the window is inactive - thx mariajuferreira1958-creator
+* Fix Linux: startup could hang on fonts without a family name
+* Fix PAC code-page detection (Greek, Thai, short English lines), Cut video of .ts/.mpg/.vob ranges and more from a bug hunt
+* Update French translation - thx Need74
+* Update Korean translation - thx 12si27
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta16 (29th of September 2026)
+
+* Add reading of CEA-608/708 closed captions from video in .ts, .mkv, H.265 .mp4, fragmented .mp4 and .mxf (SMPTE 436M) files
+* Add CEA-608 channel / CEA-708 service picker when opening captions from MP4/MKV
+* Add "Multilingual" language option for Purfview Faster Whisper XXL speech to text - thx fointypinger
+* Add "Only subtitles with a too-long line" and more options to Batch convert split/rebalance long lines - thx xyv1997
+* Compare: include duration in HTML export - thx andor1999
+* Compare: show file names using the space the header has - thx vertigo220
+* Remux: tag subtitle tracks with the language from the file name - thx MaxBunny1786
+* MCC: read CEA-608 captions when there is no CEA-708 text
+* OCR: "use word split list" is now off by default - thx WAusJackBauer
+* Fix CEA-708: handle CR, BS, FF and HCR control codes (roll-up lines no longer run together)
+* Fix MP4: merge CEA-608 roll-up/paint-on screens into one cue per line
+* Fix waveform, speech to text and alignment: keep gaps in audio timestamps - thx sherkhan30452
+* Fix Batch convert to EBU STL writing invalid files
+* Fix Batch convert ASSA to other formats not converting tags like Save as - thx Slava46
+* Fix Compare window not remembering size and position - thx vertigo220
+* Fix Shortcuts search for a lone modifier like "ctrl" - thx Surlime
+* Update CrispASR to v0.8.38
+* Update Czech translation - thx Matěj Fouma
+* Update Japanese translation - thx hisui3393
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta15 (28th of September 2026)
+
+* Add Compare merge view: edit the current subtitle while comparing - thx perkesfurmah-collab
+* Add "Set style..." quick-pick shortcut with preview, and "Set style 1-10" shortcuts - thx hisui3393
+* Add optional "Shot in"/"Shot out" columns in the subtitle grid
+* Add waveform grid color setting (also in waveform color themes) - thx mariajuferreira1958-creator
+* Remux video: embed CEA-608 closed captions (.scc) in .mov - thx MaxBunny1786
+* Merge continuation lines: merge unless the line ends a sentence (SE4 parity)
+* Fix CEA-608/708: keep italics when decoding embedded captions - thx MaxBunny1786
+* Fix MP4/MOV: read c608 closed caption tracks correctly - thx MaxBunny1786
+* Update Italian translation - thx bovirus
+* Update Japanese translation - thx hisui3393
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta14 (27th of September 2026)
+
+* Add "Detect speakers" (Sortformer diarization) for Crisp ASR
+* Add customizable order and visibility of the video player controls - thx maknol
+* Add AI review prompt templates, reference context and AI-generated context - thx Morv55555
+* Add PAC secondary code page for lines in another script (open, Export PAC and seconv)
+* Add Cheetah Caption ASC format, and load ELR Studio .ela/.elb, ELR json, timing-only SAMI and Timed Images xml (for OCR)
+* seconv: convert Manzanita DVB bitmap dumps
+* PAC: detect the code page when opening files (was always Latin)
+* OCR fix: split run-together words like SE4 does, and fill nOCR's unknown glyphs
+* Cut video: much faster opening and generating (seek to ranges instead of decoding the whole video)
+* Open large RTF subtitles ~8x faster
+* TTS add-to-video: warn when the video stream comes out truncated - thx laszlolaszlo
+* ASSA styles storage: category fixes (name clashes, "Remove all", Export, rename/move, case-insensitive names) and import of Subtitle Edit 4 category exports (.template)
+* ASSA/SSA styles: block OK/Apply on empty or duplicate style names, and border type combo now follows the current style
+* YouTube Transcript: read markdown-bold time codes and skip spoken time codes
+* Fix duplicate Ctrl+Shift+V default shortcut (voice manager vs. fill selected lines) - thx GrampaWildWilly
+* Fix ASSA/SSA styles: Cancel after Apply applied the dialog again
+* Fix Batch convert ASSA dropping fonts embedded from the styles dialog
+* Fix common errors: fix overlap for equal end/start never applied
+* Fix nOCR hand-drawn lines landing on the neighbor pixel
+* Fix OCR italics moving spaced closing punctuation into the next italic word
+* Fix PAC: one "secondary code page" line turning a whole file Latin
+* Fix seconv nOCR/BinaryOCR giving only "*" on PGS input
+* Fix Shot changes list not copying rows to the clipboard
+* Fix two formats throwing on detection (Video CD DAT, CLQTT JSON)
+* Fix English OCR fix splitting some valid words
+* Update Latin nOCR database
+* Update Italian translation - thx bovirus
+* Update Polish translation - thx potplayer-fanpack
+
+-----------------------------------------------------------------------------------------------------
+
+v5.3.0-beta13 (26th of September 2026)
+
+* Add TikTok/YouTube Shorts (1-3 words) rule profile - thx hardpenguin
+* Add brightness (tone) bar to the color picker - thx bichitoxxx
+* Add "Toggle screen privacy" shortcut: hide file names, then also blur texts - thx kadrimarzouki
+* Add Crisp ASR Parakeet Ultra models
+* Add OpenAI-compatible text to speech output format (Auto/MP3/PCM) - thx laszlolaszlo
+* Add Remux option to turn off "Optimize for web streaming" (faststart)
+* Burn-in: show a "videos generated" dialog after batch mode
+* ASSA styles: ask to overwrite on copy to storage/file, and allow reordering storage styles - thx bichitoxxx
+* Open original/import/insert file pickers now start in the current subtitle's folder - thx bichitoxxx
+* Speech to text: merging short lines now respects the rule profile's number of lines - thx hardpenguin
+* Fix Alt+Decimal shortcuts (e.g. toggle dashes) never firing - thx kadrimarzouki
+* Fix second subtitle settings not re-styling from the loaded file - thx kadrimarzouki
+* Fix dragged text box height reset after Settings OK/Apply - thx kadrimarzouki
+* Fix text commands (delete, surround with) acting on display-only reference rows, and empty original lines shown as reference rows - thx kadrimarzouki
+* Fix duplicate recent colors in the color picker - thx bichitoxxx
+* Fix Burn-in batch mode only burning the logo into the first video
+* Fix Burn-in Logo/video position windows not maximizing
+* Fix batch video tools showing "_Done" as job status
+* Fix subtitle text boxes using the UI font instead of the subtitle text box font - thx Surlime
+* Update CrispASR to v0.8.37
+* Update audio.cpp runtime to v0.8.2-audio8-perf-hotfix
+* Update Czech translation - thx Matěj Fouma
+* Update Dutch translation - thx CmdSpock
+* Update Italian translation - thx bovirus
+* Update Korean translation - thx 12si27
+
+-----------------------------------------------------------------------------------------------------
+
 v5.3.0-beta12 (25th of September 2026)
 
 * Add OpenAI-compatible text to speech engine (OpenAI, OpenRouter, custom server) - thx laszlolaszlo

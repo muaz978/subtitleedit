@@ -38,7 +38,6 @@ internal sealed class SkiaWaveformRenderer
     private const float ChapterFlagPadding = 5;
     private const float TimeLineTextOffset = 14;
     private static readonly SKColor ChapterColor = new(0xC0, 0x8A, 0xDF);
-    private static readonly SKColor GridColor = new(169, 169, 169, 64);
     private static readonly SKColor CenterLineColor = new(169, 169, 169, 140);
     private static readonly SKColor TimeLineTickColor = new(128, 128, 128);
     private static readonly SKColor ShotChangeStartColor = new(0, 100, 0, 175);
@@ -57,6 +56,7 @@ internal sealed class SkiaWaveformRenderer
     private readonly SKPaint _vertices = new() { Color = SKColors.White };
     private readonly SKPaint _image = new() { IsAntialias = false };
     private readonly SKPaint _text = new() { IsAntialias = true };
+    private readonly SKImageFilter _textBlur = SKImageFilter.CreateBlur(4, 4);
     private readonly SKPath _path = new();
     private readonly SKPath _wavePath = new();
     private readonly SKPathEffect _dashShotChange = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0);
@@ -254,7 +254,7 @@ internal sealed class SkiaWaveformRenderer
             _layerWidth, _layerHeight, f.WaveformHeight, _scale, anchorColumn, f.ZoomFactor,
             f.VerticalZoomFactor, f.SampleRate, f.HighestPeak, (int)f.DisplayMode, (int)f.DrawStyle,
             ColorKey(f.WaveformColor), ColorKey(f.FancyHighColor), ColorKey(f.SelectedColor),
-            ColorKey(f.BackgroundColor), f.DrawGridLines, f.FrameMode, f.FrameRate, SelectionKey(f));
+            ColorKey(f.BackgroundColor), f.DrawGridLines, ColorKey(f.GridColor), f.FrameMode, f.FrameRate, SelectionKey(f));
 
         var cached = CacheMode == SkiaWaveformCacheMode.Picture ? _layerPicture != null : _layerImage != null;
         if (_layerValid && cached && ReferenceEquals(_layerPeaks, f.Peaks) && _layerKey.Equals(key))
@@ -335,7 +335,7 @@ internal sealed class SkiaWaveformRenderer
         float Width, float Height, float WaveformHeight, float Scale, double AnchorColumn,
         double ZoomFactor, double VerticalZoomFactor, int SampleRate, int HighestPeak,
         int DisplayMode, int DrawStyle, uint WaveformColor, uint FancyHighColor, uint SelectedColor,
-        uint BackgroundColor, bool DrawGridLines, bool FrameMode, double FrameRate, long SelectionHash);
+        uint BackgroundColor, bool DrawGridLines, uint GridColor, bool FrameMode, double FrameRate, long SelectionHash);
 
     private void DrawGridLines(SKCanvas canvas, SkiaWaveformFrame f)
     {
@@ -392,13 +392,13 @@ internal sealed class SkiaWaveformRenderer
         {
             for (var y = stepPixels; y < f.Height; y += stepPixels)
             {
-                FillRect(canvas, 0, Snap(y), f.Width, 1 / _scale, GridColor);
+                FillRect(canvas, 0, Snap(y), f.Width, 1 / _scale, f.GridColor);
             }
         }
 
         // One filled device-pixel rect per line: measured ~4x cheaper than the same lines as a
         // hairline path on the CPU rasterizer, and crisper (no anti-aliased half coverage).
-        void AddVertical(double x) => FillRect(canvas, Snap(x), 0, 1 / _scale, f.Height, GridColor);
+        void AddVertical(double x) => FillRect(canvas, Snap(x), 0, 1 / _scale, f.Height, f.GridColor);
     }
 
     private static int PickFramesPerStep(double pixelsPerFrame, double minPixelGap)
@@ -816,6 +816,21 @@ internal sealed class SkiaWaveformRenderer
     }
 
     private void DrawParagraphText(SKCanvas canvas, SkiaWaveformFrame f, SkiaParagraph p, float x, float y, byte alpha)
+    {
+        // Screen privacy mode (#15300) blurs the subtitle text; the shared text paint is reset
+        // below so numbers, durations and time labels stay sharp.
+        _text.ImageFilter = f.BlurText ? _textBlur : null;
+        try
+        {
+            DrawParagraphTextLines(canvas, f, p, x, y, alpha);
+        }
+        finally
+        {
+            _text.ImageFilter = null;
+        }
+    }
+
+    private void DrawParagraphTextLines(SKCanvas canvas, SkiaWaveformFrame f, SkiaParagraph p, float x, float y, byte alpha)
     {
         var color = f.TextColor.WithAlpha((byte)(f.TextColor.Alpha * alpha / 255));
         if (f.UnwrapText)

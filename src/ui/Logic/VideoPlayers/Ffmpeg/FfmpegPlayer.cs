@@ -5,6 +5,7 @@ using Nikse.SubtitleEdit.Logic.VideoPlayers.LibMpvDynamic;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -485,6 +486,36 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         return timestamp == ffmpeg.AV_NOPTS_VALUE ? double.NaN : timestamp * ffmpeg.av_q2d(timeBase);
     }
 
+    /// <summary>
+    /// The last time on the file's own (not rebased) timeline. libavformat's duration is the
+    /// length from the first time stamp for MPEG-TS, MPEG-PS and FLV, which read it from the time
+    /// stamps or a metadata tag, so their end is start + duration. Matroska's segment duration and
+    /// a fragmented MP4's run from zero, so their duration already is the end; an MP4 with a
+    /// leading empty edit reports only its media length, which is shorter than its start.
+    /// </summary>
+    internal static double TimelineEnd(string? formatName, double startSeconds, double durationSeconds)
+    {
+        if (durationSeconds <= 0 || double.IsNaN(durationSeconds) || startSeconds <= 0 || double.IsNaN(startSeconds))
+        {
+            return durationSeconds;
+        }
+
+        var names = (formatName ?? string.Empty).Split(',');
+        var durationIsLength = names.Any(name => name is "mpegts" or "mpeg" or "flv");
+        return durationIsLength || durationSeconds < startSeconds ? startSeconds + durationSeconds : durationSeconds;
+    }
+
+    /// <summary>
+    /// Transport streams count from the file's first time stamp: their clock starts anywhere
+    /// (hours in for a broadcast recording) and subtitles read from them are timed from the
+    /// file's start - as mpv plays them (LibMpvDynamicPlayer.UseFileStartAsZero), and as ffmpeg,
+    /// mkvmerge and other players count. Every other container keeps its own time stamps.
+    /// </summary>
+    internal static bool UsesFileStartAsZero(string? formatName)
+    {
+        return (formatName ?? string.Empty).Split(',').Contains("mpegts");
+    }
+
     private static string? DictionaryValue(AVDictionary* dictionary, string key)
     {
         var entry = ffmpeg.av_dict_get(dictionary, key, null, 0);
@@ -503,7 +534,16 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         private readonly int _videoStreamIndex = -1;
         private volatile int _audioStreamIndex = -1; // written by the UI thread on a track switch, read by the demux thread
         private readonly List<int> _audioStreamIndexes = new();
+        /// <summary>The file's first time stamp.</summary>
         private readonly double _startTimeSeconds;
+
+        /// <summary>
+        /// Time stamp shown as position zero. Positions are the file's own time stamps (#9828), as
+        /// mpv shows them and as subtitles extracted from the file (MP4 CEA-608/708, tfdt/edit list
+        /// times) are timed - except for transport streams, which count from the file's start
+        /// like their subtitles do (see <see cref="UsesFileStartAsZero"/>).
+        /// </summary>
+        private readonly double _originSeconds;
 
         private readonly PacketQueue _videoPackets = new();
         private readonly PacketQueue _audioPackets = new();
@@ -714,7 +754,9 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                 }
             }
 
-            Duration = duration;
+            var formatName = Marshal.PtrToStringUTF8((IntPtr)format->iformat->name);
+            _originSeconds = UsesFileStartAsZero(formatName) ? _startTimeSeconds : 0;
+            Duration = TimelineEnd(formatName, _startTimeSeconds, duration) - _originSeconds;
 
             _audioSink = CreateAudioSink();
             if (_hasAudio)
@@ -796,7 +838,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
         {
             try
             {
-                var index = FfmpegFrameIndexer.Build(NativeMediaPath.ForMpv(_fileName), _videoStreamIndex, _startTimeSeconds, _indexCancel.Token);
+                var index = FfmpegFrameIndexer.Build(NativeMediaPath.ForMpv(_fileName), _videoStreamIndex, _originSeconds, _indexCancel.Token);
                 if (index == null || index.Count == 0 || _closing)
                 {
                     return;
@@ -1154,7 +1196,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             // frame before it. With it, the landing frame and its key frame are known, so the
             // demuxer is sent to exactly that key frame, in the stream's own time base.
             var seekStream = -1;
-            var timestamp = (long)((target + _startTimeSeconds) * ffmpeg.AV_TIME_BASE);
+            var timestamp = (long)((target + _originSeconds) * ffmpeg.AV_TIME_BASE);
             var landing = target;
             var tolerance = double.NaN;
             var historyFrom = double.NaN;
@@ -1357,7 +1399,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             pts = TimestampToSeconds(frame->pts, timeBase);
                         }
 
-                        pts = double.IsNaN(pts) ? 0 : pts - _startTimeSeconds;
+                        pts = double.IsNaN(pts) ? 0 : pts - _originSeconds;
                         CheckFrameIndex(pts, ref lastIndexPosition, ref indexHits, ref indexMisses);
 
                         var beforeTarget = dropUntil >= 0 && pts < dropUntil && !presentedForSerial;
@@ -1899,7 +1941,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
                             pts = TimestampToSeconds(frame->pts, timeBase);
                         }
 
-                        pts = double.IsNaN(pts) ? 0 : pts - _startTimeSeconds;
+                        pts = double.IsNaN(pts) ? 0 : pts - _originSeconds;
                         var frameSeconds = frame->sample_rate > 0 ? frame->nb_samples / (double)frame->sample_rate : 0;
                         if (dropUntil >= 0 && !anchored && pts + frameSeconds < dropUntil)
                         {
@@ -2507,7 +2549,7 @@ public sealed unsafe class FfmpegPlayer : IVideoPlayer, IDisposable
             var rate = _format->streams[_videoStreamIndex]->avg_frame_rate;
             var frameDuration = rate.num > 0 && rate.den > 0 ? 1.0 / ffmpeg.av_q2d(rate) : 1.0 / 25.0;
             var target = currentPts + (forward ? frameDuration : -frameDuration);
-            if (target < -frameDuration * 0.5 || (Duration > 0 && target > Duration))
+            if (target < _startTimeSeconds - _originSeconds - frameDuration * 0.5 || (Duration > 0 && target > Duration))
             {
                 return double.NaN;
             }

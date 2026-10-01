@@ -3,6 +3,7 @@ using Nikse.SubtitleEdit.Features.Assa;
 using Nikse.SubtitleEdit.Features.Video.BurnIn;
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Nikse.SubtitleEdit.Logic.Config;
 
@@ -15,8 +16,17 @@ public class SeVideo
     public SeVideoBackgroundMusic BackgroundMusic { get; set; }
     public string VideoPlayer { get; set; }
     public double Volume { get; set; }
-    public bool ShowStopButton { get; set; }
-    public bool ShowFullscreenButton { get; set; }
+    /// <summary>
+    /// Order and visibility of the controls under the video player (#15286).
+    /// </summary>
+    public List<SeVideoControlsItem> ControlsItems { get; set; }
+
+    // Replaced by ControlsItems - only read to carry an older settings file's choice over
+    // (see Se.MigrateVideoControlsItems), and never written back.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ShowStopButton { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ShowFullscreenButton { get; set; }
     public bool FullscreenHideControls { get; set; }
     public bool AutoOpen { get; set; }
     public bool OpenSearchParentFolder { get; set; }
@@ -27,6 +37,7 @@ public class SeVideo
     public bool VideoPlayerDisplayTimeLeft { get; set; }
     public string CutDefaultVideoExtension { get; set; }
     public bool CutAlsoCutSubtitle { get; set; }
+    public string CutVideoEncoding { get; set; } = Logic.Media.FfmpegGenerator.DefaultCutVideoEncoding;
     public bool CutTransitionEnabled { get; set; }
     public string CutTransition { get; set; } = "fade";
     public double CutTransitionDuration { get; set; } = 0.5;
@@ -150,8 +161,7 @@ public class SeVideo
         BackgroundMusic = new();
         VideoPlayer = OperatingSystem.IsWindows() ? VideoPlayerName.MpvWid : VideoPlayerName.MpvOpenGl;
         Volume = 60;
-        ShowStopButton = true;
-        ShowFullscreenButton = true;
+        ControlsItems = SeVideoControlsItem.MakeDefaults();
         AutoOpen = true;
         OpenSearchParentFolder = true;
         CutType = Features.Video.CutVideo.CutType.MergeSegments.ToString();

@@ -82,6 +82,12 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
 
         public override bool IsMine(List<string> lines, string fileName)
         {
+            if (!SubStationAlpha.HasEvents(lines))
+            {
+                Errors = null;
+                return false; // no event line, no paragraph
+            }
+
             var subtitle = new Subtitle();
 
             var all = JoinLines(lines);
@@ -105,7 +111,36 @@ namespace Nikse.SubtitleEdit.Core.SubtitleFormats
                 return true;
             }
 
-            return false;
+            // Styles but no lines yet - a style template, an episode not subtitled yet. It is an
+            // ASSA file; opening it keeps the styles instead of "unknown format".
+            return subtitle.Paragraphs.Count == 0 && _errorCount == 0 && IsStylesOnlyScript(lines);
+        }
+
+        private static bool IsStylesOnlyScript(List<string> lines)
+        {
+            var section = string.Empty;
+            var hasScriptInfo = false;
+            var hasStyle = false;
+            var hasEventsFormat = false;
+            foreach (var line in lines)
+            {
+                var s = line.Trim();
+                if (s.StartsWith('[') && s.EndsWith(']'))
+                {
+                    section = s.ToLowerInvariant();
+                    hasScriptInfo |= section == "[script info]";
+                }
+                else if (section == "[v4+ styles]" && s.StartsWith("Style:", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasStyle = true;
+                }
+                else if (section == "[events]" && s.StartsWith("Format:", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasEventsFormat = true;
+                }
+            }
+
+            return hasScriptInfo && hasStyle && hasEventsFormat;
         }
 
         public static string HeaderNoStyles = @"[Script Info]

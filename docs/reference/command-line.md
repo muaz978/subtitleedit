@@ -159,6 +159,7 @@ seconv lint *.srt --json             # CI-friendly: exit 1 on any issue
 | `--resolution:<WxH>` | ASSA, image-based | Sets `PlayResX`/`PlayResY` for ASSA; sets canvas for image outputs (default `1920x1080`) |
 | `--assa-style-file:<file>` | ASSA | Apply `[V4+ Styles]` block from another ASSA file |
 | `--pac-codepage:<page>` | PAC | Code page name (`Latin`, `Greek`, `Hebrew`, …) or numeric (0–12). See `seconv list-pac-codepages` |
+| `--pac-secondary-codepage:<page>` | PAC | Code page for lines in another script (e.g. `Cyrillic` for the Russian lines of a Hebrew file); those lines are flagged "secondary code page". Reading detects it automatically |
 | `--ebu-header-file:<file>` | EBU STL | Reuse the GSI header block from an existing `.stl` file |
 | `--plaintext-merge` | Plain text (`txt`) | Merge all subtitles into one space-separated block (no blank lines). Takes precedence over the two options below |
 | `--plaintext-unbreak` | Plain text (`txt`) | Unbreak each subtitle, joining its lines into one |
@@ -279,7 +280,7 @@ An AVI stream header carries no language, so a multi-stream `.avi` names its out
 | `--ocr-prompt:<text\|file>` | Prompt for the prompt-driven OCR engines (`llamacpp`, `ollama`); rejected for the others. `{language}` is replaced with `--ocr-language`. A value that names an existing file, or ends in `.txt`/`.prompt`/`.md`, is read from that file; inline text gets `\n`/`\r`/`\t` unescaped. Default: the same prompt as the SE OCR window, except that LFM2.5-VL gets its own tuned prompt unless `--ocr-prompt` is given. |
 | `--time-codes-only` | Image sources (`.sup`, VobSub `.sub`/`.idx`, MKV PGS/VobSub, MP4 VobSub, TS DVB-sub, AVI XSUB) → text format with time codes only and empty text. **Skips OCR entirely** — no OCR engine required. Ignored for text inputs and image output targets. |
 | `--no-vobsub-isolate-colors` | Disable VobSub OCR colour isolation, which is **on by default**. Isolation rebuilds each subpicture as a crisp black-on-white bitmap via histogram-based colour analysis — the most frequent opaque colour (the glyph fill) becomes black and the gray outline / anti-alias colours collapse into the white background, which helps on discs whose outlines otherwise melt adjacent characters together (`Yuri` → `Yurl`). Pass this flag to OCR the raw palette instead. Ignored for non-VobSub sources and with `--time-codes-only`. |
-| `--no-pgs-isolate-colors` | Disable PGS / DVB-sub OCR colour isolation, which is likewise **on by default** — except for `applevision`, which always reads the original images (binarising costs Vision umlauts and trailing punctuation, and the GUI does not binarise for it either). |
+| `--no-pgs-isolate-colors` | Disable PGS / DVB-sub OCR colour isolation, which is likewise **on by default** — except for `applevision`, which always reads the original images (binarising costs Vision umlauts and trailing punctuation, and the GUI does not binarise for it either), and for `nocr` / `binaryocr`, which split letters on the original image's transparency and cannot segment the opaque isolated bitmap. |
 
 > **OCR database files are not bundled with `seconv`.** The `nocr` and `binaryocr` engines need a `.nocr` or `.db` file passed via `--ocr-db`. Sources:
 >
@@ -430,7 +431,7 @@ a no-op. `ollama` and `lmstudio` have no per-model template, so it is simply
 |---|---|
 | `--multiple-replace:<path>` | Multiple-replace rules applied per paragraph after operations. Accepts the legacy SE *MultipleSearchAndReplaceGroups* XML **and** the file the SE5 GUI exports from *Tools → Multiple replace → export* — either `.template` (JSON) or `.csv`. Supports case-insensitive, `CaseSensitive`, and `RegularExpression` rules; only active rules are applied. The format is chosen by extension, then by content |
 | `--custom-format:<path.xml>` | SE *CustomFormatItem* XML (use with `--format customtext`) |
-| `--settings:<path.json>` | JSON file overlaying `Configuration.Settings` (general / tools / removeTextForHearingImpaired) plus image-output styling (exportImages). Optional `profiles` map for named overlays. The `tools` section also carries the auto-translate prompts (`llamaCppPrompt`, `ollamaPrompt`, `lmStudioPrompt`), so a `profiles` entry can hold a per-target-language prompt |
+| `--settings:<path.json>` | JSON file overlaying `Configuration.Settings` (general / tools / removeTextForHearingImpaired) plus image-output styling (exportImages). Optional `profiles` map for named overlays. The `tools` section also carries the auto-translate prompts (`llamaCppPrompt`, `ollamaPrompt`, `lmStudioPrompt`), so a `profiles` entry can hold a per-target-language prompt. `tools.ocrUseWordSplitList: true` lets *Fix common OCR errors* split run-together words via the word split list (off by default, as in the GUI, because it also splits valid words missing from the dictionary) |
 | `--profile:<name>` | Selects a named overlay from the settings file's `profiles` map. Requires `--settings` |
 
 #### Multiple-replace rule files
@@ -531,7 +532,8 @@ The keys and defaults below are exactly what `dump-settings` emits:
     "mergeShortLinesOnlyContinuous": true,
     "llamaCppPrompt": "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:",
     "ollamaPrompt": "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments or notes:",
-    "lmStudioPrompt": "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:"
+    "lmStudioPrompt": "Translate from {0} to {1}, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:",
+    "ocrUseWordSplitList": false
   },
   "removeTextForHearingImpaired": {
     "removeTextBetweenBrackets": true,
@@ -775,9 +777,11 @@ This mirrors the desktop app, where batch convert's *Remove formatting* function
 | `capmaker`, `capmakerplus` | CapMakerPlus — binary |
 | `ayato` | Ayato — binary |
 | `bluraysup`, `blurayup`, `sup` | Blu-Ray sup — image |
+| `dvdsup`, `spdvdsup` | DVD sup (SP-wrapped DVD subpictures) — image |
 | `vobsub` | VobSub — image |
 | `bdnxml`, `bdn-xml` | BDN-XML — image (folder of PNGs + index.xml) |
 | `bdnxml8bit`, `bdn-xml8-bit` | BDN-XML with 8-bit palette-indexed PNGs — image |
+| `imscimage`, `imsc-image` | IMSC 1.1 image profile — image (`.ttml` plus one PNG per subtitle next to it) |
 | `dost`, `dostimage` | DOST/image |
 | `fcpimage`, `fcp` | FCP/image |
 | `dcinemainterop`, `dcinema-interop` | D-Cinema interop/png |

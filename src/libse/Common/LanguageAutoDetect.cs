@@ -594,6 +594,12 @@ namespace Nikse.SubtitleEdit.Core.Common
 
         private static string AutoDetectGoogleLanguage(string text, int bestCount)
         {
+            return AutoDetectGoogleLanguage(text, bestCount, out _);
+        }
+
+        /// <param name="score">The number of keyword hits for the returned language.</param>
+        private static string AutoDetectGoogleLanguage(string text, int bestCount, out int score)
+        {
             // Score-based selection instead of first-match-wins: every language block below is
             // evaluated and records a candidate via Consider(); the candidate with the most
             // keyword hits wins (ties keep the earlier/higher-priority language via strict '>').
@@ -1031,6 +1037,7 @@ namespace Nikse.SubtitleEdit.Core.Common
                 Consider("is", count);
             }
 
+            score = bestScore;
             return best;
         }
 
@@ -1345,6 +1352,21 @@ namespace Nikse.SubtitleEdit.Core.Common
             }
 
             return languageId;
+        }
+
+        /// <summary>
+        /// Like <see cref="AutoDetectGoogleLanguageOrNull"/>, but only from dictionary words -
+        /// without the letter-statistics fallback, which also "recognizes" text decoded with the
+        /// wrong code page (Arabic read as Cyrillic still looks like Russian letters).
+        /// </summary>
+        /// <param name="subtitle">Subtitle to detect the language of.</param>
+        /// <param name="score">Keyword hits for the returned language - higher is more certain.</param>
+        public static string AutoDetectGoogleLanguageFromWordsOrNull(Subtitle subtitle, out int score)
+        {
+            var s = new Subtitle(subtitle);
+            s.RemoveEmptyLines();
+            var languageId = AutoDetectGoogleLanguage(s.GetAllTexts(500000).TrimEnd(), s.Paragraphs.Count / 14, out score);
+            return string.IsNullOrEmpty(languageId) ? null : languageId;
         }
 
         /// <summary>
@@ -2023,6 +2045,50 @@ namespace Nikse.SubtitleEdit.Core.Common
             return count;
         }
 
+        /// <summary>
+        /// UTF-16 without a byte order mark, told by its zero bytes: text in the Latin range has a
+        /// zero high byte in every other position (even positions for big endian, odd for little
+        /// endian), which no 8-bit or UTF-8 text file has. Such a file was read as UTF-8 with a
+        /// NUL between every character, and no format recognised it.
+        /// </summary>
+        /// <returns>The UTF-16 encoding, or null if the bytes do not look like UTF-16</returns>
+        public static Encoding GetUtf16WithoutByteOrderMark(byte[] buffer)
+        {
+            var length = buffer.Length - buffer.Length % 2;
+            if (length < 64)
+            {
+                return null;
+            }
+
+            var evenZeros = 0;
+            var oddZeros = 0;
+            for (var i = 0; i < length; i += 2)
+            {
+                if (buffer[i] == 0)
+                {
+                    evenZeros++;
+                }
+
+                if (buffer[i + 1] == 0)
+                {
+                    oddZeros++;
+                }
+            }
+
+            var pairs = length / 2;
+            if (evenZeros > pairs * 0.4 && oddZeros < pairs * 0.02)
+            {
+                return Encoding.BigEndianUnicode;
+            }
+
+            if (oddZeros > pairs * 0.4 && evenZeros < pairs * 0.02)
+            {
+                return Encoding.Unicode;
+            }
+
+            return null;
+        }
+
         public static Encoding GetEncodingFromFile(string fileName, bool skipAnsiAuto = false)
         {
             var encoding = Encoding.Default;
@@ -2086,6 +2152,12 @@ namespace Nikse.SubtitleEdit.Core.Common
                         file.Position = 0;
                         var buffer = new byte[length];
                         file.ReadFully(buffer, 0, buffer.Length);
+
+                        var utf16 = GetUtf16WithoutByteOrderMark(buffer);
+                        if (utf16 != null)
+                        {
+                            return utf16;
+                        }
 
                         if (IsUtf8(buffer, out var couldBeUtf8))
                         {

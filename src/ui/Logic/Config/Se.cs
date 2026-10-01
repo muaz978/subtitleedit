@@ -18,10 +18,10 @@ namespace Nikse.SubtitleEdit.Logic.Config;
 public class Se
 {
     internal const int CurrentMacOsFontMigrationVersion = 1;
-    internal const int CurrentShortcutsMigrationVersion = 4;
+    internal const int CurrentShortcutsMigrationVersion = 5;
     internal const int CurrentLayoutMigrationVersion = 2;
 
-    public static string Version { get; set; } = "v5.3.0-beta12";
+    public static string Version { get; set; } = "v5.3.0-beta18";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -459,6 +459,10 @@ public class Se
     /// Version 4 (macOS only): several defaults moved off standard macOS shortcuts (#14941, see
     /// <see cref="ShortcutsMain.MacOsDefaultChanges"/>). Bindings still on the old default move to
     /// the new one, unless another action already uses the new keys.
+    ///
+    /// Version 5: v5.3.0 betas shipped Ctrl+Shift+V (Cmd+Shift+V on macOS) as the default for the
+    /// voice manager, which "fill selected lines with clipboard text" already had (#15326). The
+    /// voice manager has no default now, and bindings still on the stale default are cleared.
     /// </summary>
     internal void MigrateShortcuts()
     {
@@ -516,6 +520,20 @@ public class Se
         if (fromVersion < 4 && isMacOS)
         {
             MigrateMacOsDefaultShortcuts();
+        }
+
+        if (fromVersion < 5)
+        {
+            string[] oldVoiceManagerKeys = [isMacOS ? "Win" : "Control", "Shift", "V"];
+            foreach (var shortcut in Shortcuts)
+            {
+                if (shortcut.ActionName == nameof(MainViewModel.ShowVideoVoiceManagerCommand) &&
+                    shortcut.Keys != null &&
+                    IsSameKeys([.. shortcut.Keys.Select(ShortcutManager.NormalizeKeyToken)], oldVoiceManagerKeys))
+                {
+                    shortcut.Keys.Clear();
+                }
+            }
         }
     }
 
@@ -798,6 +816,28 @@ public class Se
     /// (the output goes to "-f null -"), so removing it changes nothing on older ffmpeg builds.
     /// A user who has edited the arguments in any other way keeps their own version.
     /// </summary>
+    /// <summary>
+    /// Makes sure the video controls layout has one item per type, and moves the old "Show stop
+    /// button" / "Show full-screen button" settings into the items' visibility (#15286).
+    /// </summary>
+    internal static void MigrateVideoControlsItems(SeVideo video)
+    {
+        video.ControlsItems = SeVideoControlsItem.Normalize(video.ControlsItems);
+
+        if (video.ShowStopButton == false)
+        {
+            video.ControlsItems.First(p => p.Type == SeVideoControlsItemType.Stop).IsVisible = false;
+        }
+
+        if (video.ShowFullscreenButton == false)
+        {
+            video.ControlsItems.First(p => p.Type == SeVideoControlsItemType.FullScreen).IsVisible = false;
+        }
+
+        video.ShowStopButton = null;
+        video.ShowFullscreenButton = null;
+    }
+
     internal static void MigrateShotChangesFfmpegArguments(SeVideo video)
     {
         var arguments = video.ShowChangesFFmpegArguments;
@@ -995,6 +1035,8 @@ public class Se
 
         MigrateShotChangesFfmpegArguments(Settings.Video);
         MigrateMpvAudioBuffer(Settings.Video);
+
+        MigrateVideoControlsItems(Settings.Video);
 
         if (Settings.Waveform == null)
         {

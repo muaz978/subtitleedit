@@ -381,6 +381,40 @@ namespace Nikse.SubtitleEdit.Core.Common
         }
 
         /// <summary>
+        /// A Blu-ray .sup by its content, strict enough for a file with another extension (e.g. a
+        /// .sup saved as .sub): "PG", a PGS segment type, and the next segment's "PG" right after
+        /// the first segment - two bytes of "PG" alone also start plenty of text files.
+        /// </summary>
+        public static bool IsBluRaySupByContent(string fileName)
+        {
+            using (var fs = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                var header = new byte[13];
+                if (fs.ReadFully(header, 0, header.Length) < header.Length ||
+                    header[0] != 0x50 || header[1] != 0x47)
+                {
+                    return false;
+                }
+
+                var segmentType = header[10];
+                if (segmentType != 0x80 && (segmentType < 0x14 || segmentType > 0x18))
+                {
+                    return false;
+                }
+
+                var nextSegment = 13L + ((header[11] << 8) | header[12]);
+                if (nextSegment + 2 > fs.Length)
+                {
+                    return false;
+                }
+
+                fs.Seek(nextSegment, SeekOrigin.Begin);
+                var next = new byte[2];
+                return fs.ReadFully(next, 0, next.Length) == next.Length && next[0] == 0x50 && next[1] == 0x47;
+            }
+        }
+
+        /// <summary>
         /// Checks if a file is a raw PGS elementary stream, i.e. a sequence of PGS display
         /// segments without the "PG" + PTS/DTS headers a standalone Blu-ray .sup file has.
         /// Such files come from extracting an S_HDMV/PGS Matroska track in raw mode; the
@@ -476,6 +510,33 @@ namespace Nikse.SubtitleEdit.Core.Common
             using (var fs = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
                 return TransportStreamParser.IsM2TransportStream(fs);
+            }
+        }
+
+        private static readonly string[] TransportStreamExtensions = { ".ts", ".tsv", ".tts", ".rec", ".mpeg", ".mpg", ".m2ts", ".mts" };
+
+        /// <summary>
+        /// True for a video file whose content is an MPEG transport stream although its extension
+        /// is not a transport stream one - typically an HLS web rip saved as .mp4. Transport stream
+        /// extensions are left out, as callers already route those by extension (and a .m2ts can be
+        /// TextST instead).
+        /// </summary>
+        public static bool IsTransportStreamWithOtherVideoExtension(string fileName)
+        {
+            var ext = Path.GetExtension(fileName).ToLowerInvariant();
+            if (TransportStreamExtensions.Contains(ext) || !Utilities.VideoFileExtensions.Contains(ext))
+            {
+                return false;
+            }
+
+            try
+            {
+                return new FileInfo(fileName).Length > 10000 &&
+                       (IsTransportStream(fileName) || IsM2TransportStream(fileName));
+            }
+            catch
+            {
+                return false;
             }
         }
 

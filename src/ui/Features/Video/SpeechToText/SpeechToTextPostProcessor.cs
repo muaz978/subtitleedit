@@ -5,6 +5,7 @@ using Nikse.SubtitleEdit.Core.Dictionaries;
 using Nikse.SubtitleEdit.Core.Forms;
 using Nikse.SubtitleEdit.Core.Forms.FixCommonErrors;
 using Nikse.SubtitleEdit.Features.Tools.ChangeFormatting;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech.AutoCast;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.UiLogic.AudioToText;
 using System;
@@ -175,7 +176,7 @@ namespace Nikse.SubtitleEdit.Features.Video.SpeechToText
                 new FixDanishLetterI().Fix(subtitle, new EmptyFixCallback());
             }
 
-            var postProcessed = Fix(subtitle, usePostProcessing, addPeriods, mergeLines, fixCasing, fixShortDuration, splitLines, engine);
+            var postProcessed = FixPerSpeaker(subtitle, usePostProcessing, addPeriods, mergeLines, fixCasing, fixShortDuration, splitLines, engine);
             if (usePostProcessing && changeUnderlineToColor)
             {
                 foreach (var paragraph in postProcessed.Paragraphs)
@@ -188,6 +189,91 @@ namespace Nikse.SubtitleEdit.Features.Video.SpeechToText
             QualityReport.Analyze(postProcessed, general.SubtitleMinimumDisplayMilliseconds, general.SubtitleMaximumDisplayMilliseconds, general.SubtitleMaximumCharactersPerSeconds);
 
             return postProcessed;
+        }
+
+        /// <summary>
+        /// <see cref="Fix(Subtitle, bool, bool, bool, bool, bool, bool, Engine)"/> for a diarized
+        /// transcript ("(speaker 0) Hello."): each run of lines by one speaker is post-processed on
+        /// its own, without its label, and gets the label back afterwards.
+        /// </summary>
+        /// <remarks>
+        /// The merge and split steps treat a label as words, so on the whole transcript they moved
+        /// labels into the middle of lines and merged two speakers into one line - after which the
+        /// second speaker's words were credited to the first.
+        /// </remarks>
+        private Subtitle FixPerSpeaker(Subtitle subtitle, bool usePostProcessing, bool addPeriods, bool mergeLines, bool fixCasing, bool fixShortDuration, bool splitLines, Engine engine)
+        {
+            if (!usePostProcessing || !subtitle.Paragraphs.Any(p => SpeakerLabelParser.TrySplit(p.Text, out _, out _)))
+            {
+                return Fix(subtitle, usePostProcessing, addPeriods, mergeLines, fixCasing, fixShortDuration, splitLines, engine);
+            }
+
+            var result = new Subtitle();
+            var index = 0;
+            while (index < subtitle.Paragraphs.Count)
+            {
+                var label = GetSpeakerLabel(subtitle.Paragraphs[index].Text, out var speaker);
+                var run = new Subtitle();
+                while (index < subtitle.Paragraphs.Count)
+                {
+                    var paragraph = subtitle.Paragraphs[index];
+                    GetSpeakerLabel(paragraph.Text, out var paragraphSpeaker);
+                    if (paragraphSpeaker != speaker)
+                    {
+                        break;
+                    }
+
+                    SpeakerLabelParser.TrySplit(paragraph.Text, out _, out var spokenText);
+                    run.Paragraphs.Add(new Paragraph(paragraph) { Text = spokenText });
+                    index++;
+                }
+
+                var nextRunStart = index < subtitle.Paragraphs.Count ? subtitle.Paragraphs[index].StartTime.TotalMilliseconds : double.MaxValue;
+                var fixedRun = Fix(run, usePostProcessing, addPeriods, mergeLines, fixCasing, fixShortDuration, splitLines, engine);
+                foreach (var paragraph in fixedRun.Paragraphs)
+                {
+                    if (label.Length > 0)
+                    {
+                        paragraph.Text = label + " " + paragraph.Text;
+                    }
+
+                    result.Paragraphs.Add(paragraph);
+                }
+
+                // A run cannot see the next speaker, so lengthening its last short line could
+                // run it into their first one.
+                var last = fixedRun.Paragraphs.LastOrDefault();
+                var latestEnd = nextRunStart - Configuration.Settings.General.MinimumMillisecondsBetweenLines;
+                if (last != null && last.EndTime.TotalMilliseconds > latestEnd && latestEnd > last.StartTime.TotalMilliseconds)
+                {
+                    last.EndTime.TotalMilliseconds = latestEnd;
+                }
+            }
+
+            result.Renumber();
+            return result;
+        }
+
+        /// <returns>The label as the engine wrote it ("(speaker 0)"), or empty for an unlabelled line.</returns>
+        private static string GetSpeakerLabel(string text, out string speaker)
+        {
+            if (!SpeakerLabelParser.TrySplit(text, out speaker, out var spokenText))
+            {
+                return string.Empty;
+            }
+
+            return text[..(text.Length - spokenText.Length)].Trim();
+        }
+
+        /// <summary>
+        /// Longest text a merged cue may hold: the rule profile's line length times its
+        /// number of lines. A fixed "times two" merged one-line profiles (TikTok/Shorts)
+        /// back into two-line cues (issue #15295).
+        /// </summary>
+        public static int GetParagraphMaxChars()
+        {
+            var general = Configuration.Settings.General;
+            return general.SubtitleLineMaximumLength * Math.Max(1, general.MaxNumberOfLines);
         }
 
         internal static bool IsNonStandardLineTerminationLanguage(string language)
@@ -378,9 +464,10 @@ namespace Nikse.SubtitleEdit.Features.Video.SpeechToText
                             MergeNextIntoP(language, pNew, next);
                             var textNoHtml = HtmlUtil.RemoveHtmlTags(pNew.Text, true);
                             var arr = textNoHtml.SplitToLines();
+                            var tooManyLines = arr.Count > Math.Max(1, Configuration.Settings.General.MaxNumberOfLines);
                             foreach (var line in arr)
                             {
-                                if (line.Length > Configuration.Settings.General.SubtitleLineMaximumLength)
+                                if (tooManyLines || line.Length > Configuration.Settings.General.SubtitleLineMaximumLength)
                                 {
                                     var text = Utilities.AutoBreakLine(pNew.Text, language);
                                     arr = text.SplitToLines();
@@ -447,7 +534,7 @@ namespace Nikse.SubtitleEdit.Features.Video.SpeechToText
 
             const int maxMillisecondsBetweenLines = 100;
             var shortLineCharsCount = Configuration.Settings.General.SubtitleLineMaximumLength;
-            var deleteItems = new List<Paragraph>();
+            var deleteItems = new HashSet<Paragraph>(ReferenceEqualityComparer.Instance);
 
             var s = new Subtitle(subtitle);
             for (var i = 0; i < s.Paragraphs.Count - 1; i++)
@@ -476,7 +563,9 @@ namespace Nikse.SubtitleEdit.Features.Video.SpeechToText
                 var arr = newText.SplitToLines();
                 if (arr.Count == 2)
                 {
-                    if (arr[0].CountCharacters(false) < Configuration.Settings.General.SubtitleLineMaximumLength &&
+                    // Joining into one two-line cue is only allowed when the profile has two lines.
+                    if (Configuration.Settings.General.MaxNumberOfLines >= 2 &&
+                        arr[0].CountCharacters(false) < Configuration.Settings.General.SubtitleLineMaximumLength &&
                         arr[1].CountCharacters(false) < Configuration.Settings.General.SubtitleLineMaximumLength)
                     {
                         p.Text = newText;
@@ -497,9 +586,9 @@ namespace Nikse.SubtitleEdit.Features.Video.SpeechToText
                 }
             }
 
-            foreach (var deleteItem in deleteItems)
+            if (deleteItems.Count > 0)
             {
-                s.Paragraphs.Remove(deleteItem);
+                s.Paragraphs.RemoveAll(deleteItems.Contains);
             }
 
             s.Renumber();
