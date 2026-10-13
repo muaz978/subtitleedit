@@ -98,6 +98,46 @@ public class AssaSetPositionRotationTests
         Assert.Equal(@"\pos(1,2)\frz25", AssaSetPositionViewModel.BuildPositionTags(1, 2, 25.00m, 0));
     }
 
+    [Theory]
+    [InlineData("Hi", @"{\pos(1,2)}Hi")]
+    [InlineData(@"{\an8\i1}Hi", @"{\pos(1,2)\an8\i1}Hi")] // #15617: join the existing block
+    [InlineData(@"{\pos(5,6)\frz25\i1}Hi", @"{\pos(1,2)\i1}Hi")]
+    [InlineData(@"{\pos(5,6)}Hi", @"{\pos(1,2)}Hi")]
+    [InlineData(@"{comment}Hi", @"{\pos(1,2)}{comment}Hi")]
+    [InlineData(@"Hi {\i1}there", @"{\pos(1,2)}Hi {\i1}there")]
+    public void ApplyPositionTags_MergesIntoALeadingOverrideBlock(string text, string expected)
+    {
+        Assert.Equal(expected, AssaSetPositionViewModel.ApplyPositionTags(text, @"\pos(1,2)"));
+    }
+
+    [Theory]
+    [InlineData(@"{\t(0,1000,\frz360)}Spin", @"{\pos(1,2)\t(0,1000,\frz360)}Spin")]
+    [InlineData(@"{\frz10\t(0,1000,\frz360)}Spin", @"{\pos(1,2)\t(0,1000,\frz360)}Spin")]
+    [InlineData(@"{\t(0,500,\fscx120)\frz5}Spin", @"{\pos(1,2)\t(0,500,\fscx120)}Spin")]
+    public void ApplyPositionTags_KeepsFrzInsideTransforms(string text, string expected)
+    {
+        Assert.Equal(expected, AssaSetPositionViewModel.ApplyPositionTags(text, @"\pos(1,2)"));
+    }
+
+    [Theory]
+    [InlineData(@"{\t(0,1000,\frz360)}Spin", 7, 7)]
+    [InlineData(@"{\frz10\t(0,1000,\frz360)}Spin", 7, 10)]
+    [InlineData(@"{\t(0,1000,\frz360)\frz-3.5}Spin", 0, -3.5)]
+    [InlineData("Spin", 4, 4)]
+    public void ReadRotation_IgnoresFrzInsideTransforms(string text, decimal styleAngle, decimal expected)
+    {
+        Assert.Equal(expected, AssaSetPositionViewModel.ReadRotation(text, styleAngle));
+    }
+
+    [Theory]
+    [InlineData(@"{\pos(960.5,540)\i1}Hi", @"{\pos(1,2)\i1}Hi")]
+    [InlineData(@"{\pos(-10,-20.25)}Hi", @"{\pos(1,2)}Hi")]
+    [InlineData(@"{\pos( 960 , 540 )\i1}Hi", @"{\pos(1,2)\i1}Hi")]
+    public void ApplyPositionTags_ReplacesDecimalNegativeAndSpacedPos(string text, string expected)
+    {
+        Assert.Equal(expected, AssaSetPositionViewModel.ApplyPositionTags(text, @"\pos(1,2)"));
+    }
+
     [AvaloniaFact]
     public void ResultTags_CombineTheScriptSpaceAnchorAndTheRotation()
     {

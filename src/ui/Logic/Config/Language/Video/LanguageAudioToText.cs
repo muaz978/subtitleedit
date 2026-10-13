@@ -7,6 +7,11 @@ public class LanguageAudioToText
     public string TranslateToEnglish { get; set; }
     public string Transcribing { get; set; }
     public string TranscribingXOfY { get; set; }
+    public string LinesTranscribedXOfYFailedZ { get; set; }
+    public string LinesTranscribedXOfYCancelled { get; set; }
+    public string NoLinesTranscribed { get; set; }
+    public string ApplyTranscribedLines { get; set; }
+    public string RetryFailedLines { get; set; }
     public string IsolateSpeech { get; set; }
     public string IsolateSpeechHint { get; set; }
     public string IsolatingSpeech { get; set; }
@@ -14,6 +19,9 @@ public class LanguageAudioToText
     public string DetectSpeakers { get; set; }
     public string DetectSpeakersHint { get; set; }
     public string DetectSpeakersNeedsNewerCrispAsr { get; set; }
+    public string XNeedsNewerCrispAsr { get; set; }
+    public string Vad { get; set; }
+    public string VadHint { get; set; }
     public string InputLanguage { get; set; }
     public string AdvancedWhisperSettings { get; set; }
     public string DownloadingSpeechToTextEngine { get; set; }
@@ -88,6 +96,11 @@ public class LanguageAudioToText
         TranslateToEnglish = "Translate to English";
         Transcribing = "Transcribing...";
         TranscribingXOfY = "Transcribing {0} of {1}...";
+        LinesTranscribedXOfYFailedZ = "{0} of {1} lines were transcribed - {2} failed or had no speech.\n\nFailed lines keep their current text. Apply the transcribed lines, or retry the failed ones (you can change engine or settings first)?";
+        LinesTranscribedXOfYCancelled = "Transcription was cancelled after {0} of {1} lines.\n\nApply the transcribed lines? The other lines keep their current text.";
+        NoLinesTranscribed = "None of the {0} lines could be transcribed.\nPlease check the tools log for details.";
+        ApplyTranscribedLines = "Apply transcribed";
+        RetryFailedLines = "Retry failed";
         IsolateSpeech = "Isolate speech (slow)";
         IsolateSpeechHint = "Removes music and sound effects before transcribing. Gives fewer missed lines and better timing on audio with loud music, but takes about as long as the audio itself with a GPU - and many times longer without one.";
         IsolatingSpeech = "Isolating speech...";
@@ -95,6 +108,9 @@ public class LanguageAudioToText
         DetectSpeakers = "Detect speakers";
         DetectSpeakersHint = "Starts each line with the speaker, like \"(speaker 0)\", using NVIDIA's Sortformer diarization (up to 8 speakers). Works best with backends that split lines where the speaker changes, like Parakeet and Cohere.";
         DetectSpeakersNeedsNewerCrispAsr = "\"Detect speakers\" needs Crisp ASR v{0} or newer, but v{1} is installed.\n\nUpdate Crisp ASR (the gear button next to the engine) or turn off \"Detect speakers\".";
+        XNeedsNewerCrispAsr = "{0} needs Crisp ASR v{1} or newer, but v{2} is installed.\n\nDownload and install the update now?";
+        Vad = "VAD";
+        VadHint = "Voice activity detection: only the speech is transcribed, cut where the speaker pauses.\nAuto: Silero, and only for the engines that need it (Cohere, Mega, Index-Echo).\nSilero, FireRedVAD, Whisper-VAD, WebRTC: always on, for every Crisp ASR engine. FireRedVAD is the most accurate, Whisper-VAD gives the fewest, cleanest cuts but is the slowest.\nIndex-Echo always uses Silero. --vad, --vad-model or --chunk-seconds in the advanced settings take precedence.";
         InputLanguage = "Input language";
         AdvancedWhisperSettings = "Advanced speech-to-text parameters";
         DownloadingSpeechToTextEngine = "Downloading speech-to-text engine";

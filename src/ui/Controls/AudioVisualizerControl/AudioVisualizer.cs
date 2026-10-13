@@ -330,12 +330,13 @@ public class AudioVisualizer : Control
     private List<double> _shotChanges = new List<double>();
 
     /// <summary>
-    /// Shot changes (seconds)
+    /// Shot changes (seconds), kept sorted - snapping, drawing and the extend-to-shot-change
+    /// commands binary-search them, while imported lists can come in any order.
     /// </summary>
     public List<double> ShotChanges
     {
         get => _shotChanges;
-        set { _shotChanges = value; }
+        set => _shotChanges = ShotChangesHelper.EnsureSorted(value ?? new List<double>());
     }
 
     /// <summary>
@@ -356,6 +357,39 @@ public class AudioVisualizer : Control
     /// under the pointer: a drag that has started keeps its paragraph.
     /// </summary>
     internal Func<SubtitleLineViewModel, bool>? HitTestFilter { get; set; }
+
+    /// <summary>
+    /// Says whether two paragraphs are in the same track; null when there is only one. The
+    /// editor-style layout's <see cref="TimelineTracks"/> splits the subtitles over rows (by
+    /// layer, actor or style), and there a subtitle's neighbours - the ones a move or resize
+    /// stops at, and the ones an edge drag can hand over to - are the subtitles in its own row,
+    /// not the ones next to it in time.
+    /// </summary>
+    internal Func<SubtitleLineViewModel, SubtitleLineViewModel, bool>? IsSameTrack { get; set; }
+
+    /// <summary>
+    /// Index of the nearest paragraph before (step -1) or after (step 1) the one at index that
+    /// is in the same track, or -1 for none.
+    /// </summary>
+    private int FindNeighborIndex(List<SubtitleLineViewModel> paragraphs, int index, int step)
+    {
+        if (index < 0 || index >= paragraphs.Count)
+        {
+            return -1;
+        }
+
+        var isSameTrack = IsSameTrack;
+        var paragraph = paragraphs[index];
+        for (var i = index + step; i >= 0 && i < paragraphs.Count; i += step)
+        {
+            if (isSameTrack == null || isSameTrack(paragraph, paragraphs[i]))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
 
     /// <summary>Samples per second of the loaded peaks, 0 without any - the x axis scale.</summary>
     internal int SampleRate => WavePeaks?.SampleRate ?? 0;
@@ -1301,9 +1335,10 @@ public class AudioVisualizer : Control
             _interactionMode = InteractionMode.ResizingLeft;
 
             var idx = displayableParagraphs.IndexOf(p);
-            if (idx > 0)
+            var prevIdx = FindNeighborIndex(displayableParagraphs, idx, -1);
+            if (prevIdx >= 0)
             {
-                var prevParagraph = displayableParagraphs[idx - 1];
+                var prevParagraph = displayableParagraphs[prevIdx];
                 double prevRightPos = SecondsToXPosition(prevParagraph.EndTime.TotalSeconds - StartPositionSeconds);
 
                 // Only consider "Or" mode if the previous paragraph's right edge is very close
@@ -1314,9 +1349,9 @@ public class AudioVisualizer : Control
                 }
             }
 
-            if (_isAltDown && idx > 0)
+            if (_isAltDown && prevIdx >= 0)
             {
-                var p2 = HitTestParagraph(point, displayableParagraphs, idx - 1, 100);
+                var p2 = HitTestParagraph(point, displayableParagraphs, prevIdx, 100);
                 if (p2 != null)
                 {
                     _activeParagraphPrevious = p2;
@@ -1330,9 +1365,10 @@ public class AudioVisualizer : Control
             _interactionMode = InteractionMode.ResizingRight;
 
             var idx = displayableParagraphs.IndexOf(p);
-            if (idx < displayableParagraphs.Count - 1)
+            var nextIdx = FindNeighborIndex(displayableParagraphs, idx, 1);
+            if (nextIdx >= 0)
             {
-                var nextParagraph = displayableParagraphs[idx + 1];
+                var nextParagraph = displayableParagraphs[nextIdx];
                 double nextLeftPos = SecondsToXPosition(nextParagraph.StartTime.TotalSeconds - StartPositionSeconds);
 
                 // Only consider "Or" mode if the next paragraph's left edge is very close
@@ -1343,9 +1379,9 @@ public class AudioVisualizer : Control
                 }
             }
 
-            if (_isAltDown && idx < displayableParagraphs.Count - 1)
+            if (_isAltDown && nextIdx >= 0)
             {
-                var p2 = HitTestParagraphRight(point, displayableParagraphs, idx + 1, 100);
+                var p2 = HitTestParagraphRight(point, displayableParagraphs, nextIdx, 100);
                 if (p2 != null)
                 {
                     _activeParagraphNext = p2;
@@ -1594,8 +1630,10 @@ public class AudioVisualizer : Control
         var newEnd = _originalEndSeconds;
 
         var currentIndex = _displayableParagraphs.IndexOf(_activeParagraph);
-        var previous = currentIndex > 0 ? _displayableParagraphs[currentIndex - 1] : null;
-        var next = currentIndex < _displayableParagraphs.Count - 1 ? _displayableParagraphs[currentIndex + 1] : null;
+        var previousIndex = FindNeighborIndex(_displayableParagraphs, currentIndex, -1);
+        var nextIndex = FindNeighborIndex(_displayableParagraphs, currentIndex, 1);
+        var previous = previousIndex >= 0 ? _displayableParagraphs[previousIndex] : null;
+        var next = nextIndex >= 0 ? _displayableParagraphs[nextIndex] : null;
 
         if (_isShiftDown || Se.Settings.Waveform.AllowOverlap)
         {
@@ -1634,8 +1672,8 @@ public class AudioVisualizer : Control
                 bool alreadyOverlapping = false;
                 if (_activeParagraph != null && currentIndex >= 0)
                 {
-                    var prevParagraph = currentIndex > 0 ? _displayableParagraphs[currentIndex - 1] : null;
-                    var nextParagraph = currentIndex < _displayableParagraphs.Count - 1 ? _displayableParagraphs[currentIndex + 1] : null;
+                    var prevParagraph = previousIndex >= 0 ? _displayableParagraphs[previousIndex] : null;
+                    var nextParagraph = nextIndex >= 0 ? _displayableParagraphs[nextIndex] : null;
 
                     bool alreadyOverlapsPrevious = prevParagraph != null && _originalStartSeconds < prevParagraph.EndTime.TotalSeconds;
                     bool alreadyOverlapsNext = nextParagraph != null && _originalEndSeconds > nextParagraph.StartTime.TotalSeconds;
@@ -2171,10 +2209,11 @@ public class AudioVisualizer : Control
         // If we found an edge, check for adjacent paragraphs that might be closer
         if (closestEdgeParagraph != null)
         {
-            if (isClosestEdgeLeft && closestEdgeIndex > 0)
+            var neighborIndex = FindNeighborIndex(_displayableParagraphs, closestEdgeIndex, isClosestEdgeLeft ? -1 : 1);
+            if (isClosestEdgeLeft && neighborIndex >= 0)
             {
                 // Check if previous paragraph's right edge is closer
-                var prev = _displayableParagraphs[closestEdgeIndex - 1];
+                var prev = _displayableParagraphs[neighborIndex];
                 var prevRight = ToX(prev.EndTime.TotalSeconds - startPosSeconds);
                 var distToPrevRight = Math.Abs(pointX - prevRight);
 
@@ -2183,10 +2222,10 @@ public class AudioVisualizer : Control
                     return prev;
                 }
             }
-            else if (!isClosestEdgeLeft && closestEdgeIndex < _displayableParagraphs.Count - 1)
+            else if (!isClosestEdgeLeft && neighborIndex >= 0)
             {
                 // Check if next paragraph's left edge is closer
-                var next = _displayableParagraphs[closestEdgeIndex + 1];
+                var next = _displayableParagraphs[neighborIndex];
                 var nextLeft = ToX(next.StartTime.TotalSeconds - startPosSeconds);
                 var distToNextLeft = Math.Abs(pointX - nextLeft);
 
@@ -2500,7 +2539,13 @@ public class AudioVisualizer : Control
         double AnchorPixel,
         double ZoomFactor,
         int SampleRate,
-        double VideoOffsetMs);
+        double VideoOffsetMs,
+        double FrameNumbersFrameRate);
+
+    // Zero unless the ruler shows frame numbers; else the frame rate they are counted at, so a
+    // mode or frame rate change rebuilds the cached labels.
+    private protected static double TimeLabelFrameNumbersFrameRate =>
+        Se.Settings.General.UseFrameNumbers ? Configuration.Settings.General.CurrentFrameRate : 0;
 
     private void DrawTimeLine(DrawingContext context, ref RenderContext renderCtx)
     {
@@ -2528,7 +2573,8 @@ public class AudioVisualizer : Control
             anchorPixel,
             renderCtx.ZoomFactor,
             renderCtx.SampleRate,
-            Se.Settings.General.CurrentVideoOffsetInMs);
+            Se.Settings.General.CurrentVideoOffsetInMs,
+            TimeLabelFrameNumbersFrameRate);
 
         if (!_timeLineCacheValid || !_timeLineCacheKey.Equals(cacheKey))
         {
@@ -2605,6 +2651,12 @@ public class AudioVisualizer : Control
         if (Math.Abs(Se.Settings.General.CurrentVideoOffsetInMs) > 0.00001)
         {
             seconds = seconds + Se.Settings.General.CurrentVideoOffsetInMs / 1000.0;
+        }
+
+        // The ticks stay on whole seconds; each is labeled with the frame it falls on (#15603).
+        if (Se.Settings.General.UseFrameNumbers)
+        {
+            return FrameNumbers.Format(seconds * 1000.0);
         }
 
         // SE 4 parity: zero-pad minutes/hours so the labels keep a stable width across the
@@ -3559,7 +3611,18 @@ public class AudioVisualizer : Control
     // interpolations, and the CPS label another format - per visible paragraph per frame, only
     // to look up an already-shaped FormattedText. Keyed on the values so a hit allocates nothing;
     // the frame-mode flag is part of the key because ToShortDisplayString switches on it.
-    private readonly Dictionary<(int Number, long DurationMs, bool FrameMode, double FrameRate), string> _footerNumberDurationCache = new(512);
+    private readonly Dictionary<(int Number, long DurationMs, bool FrameMode, bool FrameNumbers, double FrameRate), string> _footerNumberDurationCache = new(512);
+
+    /// <summary>
+    /// A duration as the waveform labels show it: a frame count in frame numbers mode, else
+    /// the short time code ("2,500" or "02:12").
+    /// </summary>
+    private protected static string FormatDurationLabel(double milliseconds)
+    {
+        return Se.Settings.General.UseFrameNumbers
+            ? FrameNumbers.Format(milliseconds)
+            : new TimeCode(milliseconds).ToShortDisplayString();
+    }
     private readonly Dictionary<double, string> _footerCpsCache = new(256);
 
     private protected string GetCachedNumberAndDurationLabel(SubtitleLineViewModel paragraph)
@@ -3571,6 +3634,7 @@ public class AudioVisualizer : Control
         var key = (paragraph.Number,
                    (long)paragraph.Duration.TotalMilliseconds,
                    frameMode,
+                   Se.Settings.General.UseFrameNumbers,
                    frameMode ? Configuration.Settings.General.CurrentFrameRate : 0);
         if (!_footerNumberDurationCache.TryGetValue(key, out var label))
         {
@@ -3581,11 +3645,8 @@ public class AudioVisualizer : Control
                 _footerNumberDurationCache.Clear();
             }
 
-            // ToShortDisplayString consults the libse UseTimeFormatHHMMSSFF flag, which SE 5
-            // mirrors from Se.Settings.General.UseFrameMode (Se.cs:409). So flipping frame
-            // mode on automatically switches this label between the time form ("2,500") and
-            // the frame form ("00:00:02:12") without an explicit branch here.
-            label = $"#{paragraph.Number}  {new TimeCode(paragraph.Duration.TotalMilliseconds).ToShortDisplayString()}";
+            // See FormatDurationLabel - the time code mode is part of the key.
+            label = $"#{paragraph.Number}  {FormatDurationLabel(paragraph.Duration.TotalMilliseconds)}";
             _footerNumberDurationCache[key] = label;
         }
 
@@ -3701,8 +3762,11 @@ public class AudioVisualizer : Control
         var startIndex = FindFirstIndexAfterTime(_originalSubtitleCueMaxEnds, start, static maxEnd => maxEnd);
         var lastStart = -1d;
         var count = 0;
+        var sortedRunEnd = -1;
+        var minSpacing = GetThinnedSpacingSeconds(end > start ? renderCtx.Width / (end - start) : 0);
 
-        for (var i = startIndex; i < _originalSubtitleCues.Count; i++)
+        var i = startIndex;
+        while (i < _originalSubtitleCues.Count)
         {
             var cue = _originalSubtitleCues[i];
             if (cue.StartSeconds > end)
@@ -3712,16 +3776,32 @@ public class AudioVisualizer : Control
 
             if (cue.EndSeconds < start)
             {
+                i++;
                 continue;
             }
 
-            var isTooShortOrDense = count > 200 &&
-                                    (cue.EndSeconds - cue.StartSeconds < 0.00001 || cue.StartSeconds - lastStart < 0.09);
-            if (isTooShortOrDense)
+            // No cap on the count, see LoadParagraphsInLock (issue #15587).
+            if (count > ParagraphsBeforeThinning)
             {
-                continue;
+                if (cue.StartSeconds - lastStart < minSpacing)
+                {
+                    if (i >= sortedRunEnd)
+                    {
+                        sortedRunEnd = FindSortedRunEnd(_originalSubtitleCues, i, end, static c => c.StartSeconds);
+                    }
+
+                    i = FindFirstIndexAtOrAfterStart(_originalSubtitleCues, i + 1, sortedRunEnd, lastStart + minSpacing, static c => c.StartSeconds);
+                    continue;
+                }
+
+                if (cue.EndSeconds - cue.StartSeconds < 0.00001)
+                {
+                    i++;
+                    continue;
+                }
             }
 
+            i++;
             lastStart = cue.StartSeconds;
             count++;
 
@@ -3742,11 +3822,6 @@ public class AudioVisualizer : Control
                 {
                     DrawParagraphText(context, cue.Text, left + 3, top + 14);
                 }
-            }
-
-            if (count >= 250)
-            {
-                break;
             }
         }
     }
@@ -3858,10 +3933,7 @@ public class AudioVisualizer : Control
             }
             else
             {
-                // ToShortDisplayString consults the libse UseTimeFormatHHMMSSFF flag, which SE 5
-                // mirrors from Se.Settings.General.UseFrameMode (Se.cs:409). So flipping frame
-                // mode on automatically switches this label between the time form ("2,500") and
-                // the frame form ("00:00:02:12") without an explicit branch here.
+                // Follows the time code mode (time, frames or frame count) - see FormatDurationLabel.
                 var withDuration = GetCachedNumberAndDurationLabel(paragraph);
                 var probe = GetCachedParagraphText(withDuration);
 
@@ -4160,9 +4232,8 @@ public class AudioVisualizer : Control
             return;
         }
 
-        // ToShortDisplayString mirrors Se.Settings.General.UseFrameMode, so this label follows the
-        // same time/frame formatting as the existing paragraph footer (see DrawParagraphFooter).
-        var durationText = GetCachedParagraphText(new TimeCode(durationMs).ToShortDisplayString());
+        // Same time code mode formatting as the paragraph footer (see DrawParagraphFooter).
+        var durationText = GetCachedParagraphText(FormatDurationLabel(durationMs));
         if (durationText.Width >= currentRegionWidth - 4)
         {
             return;
@@ -4361,9 +4432,13 @@ public class AudioVisualizer : Control
 
         var lastStartTime = -1d;
         var count = 0;
+        var sortedRunEnd = -1;
+        var viewSeconds = EndPositionSeconds - StartPositionSeconds;
+        var minSpacing = GetThinnedSpacingSeconds(viewSeconds > 0 ? Bounds.Width / viewSeconds : 0) * TimeCode.BaseUnit;
 
-        // 2. Linear scan only the relevant window
-        for (var i = startIndex; i < subtitle.Count; i++)
+        // 2. Scan only the relevant window
+        var i = startIndex;
+        while (i < subtitle.Count)
         {
             var p = subtitle[i];
             var pStart = p.StartTime.TotalMilliseconds;
@@ -4377,23 +4452,39 @@ public class AudioVisualizer : Control
             // Skip subtitles that end before our window starts
             if (p.EndTime.TotalMilliseconds < startThreshold)
             {
+                i++;
                 continue;
             }
 
-            // 3. Apply filtering logic immediately to avoid second loop
-            var isTooShortOrDense = count > 200 && (p.Duration.TotalMilliseconds < 0.01 || pStart - lastStartTime < 90);
-
-            if (!isTooShortOrDense)
+            // 3. Thin out dense sections. There is no cap on the count: a capped scan filled up on
+            // a burst of tens of thousands of frame-by-frame typesetting lines in the left margin
+            // and never reached the lines actually on screen (issue #15587). Jumping past the rest
+            // of a burst keeps the work at roughly one binary search per drawn line.
+            if (count > ParagraphsBeforeThinning)
             {
-                _displayableParagraphs.Add(p);
-                lastStartTime = pStart;
-                count++;
+                if (pStart - lastStartTime < minSpacing)
+                {
+                    if (i >= sortedRunEnd)
+                    {
+                        sortedRunEnd = FindSortedRunEnd(subtitle, i, endThreshold, static paragraph => paragraph.StartTime.TotalMilliseconds);
+                    }
+
+                    i = FindFirstIndexAtOrAfterStart(subtitle, i + 1, sortedRunEnd, lastStartTime + minSpacing,
+                        static paragraph => paragraph.StartTime.TotalMilliseconds);
+                    continue;
+                }
+
+                if (p.Duration.TotalMilliseconds < 0.01)
+                {
+                    i++;
+                    continue;
+                }
             }
 
-            if (count >= 250)
-            {
-                break;
-            }
+            _displayableParagraphs.Add(p);
+            lastStartTime = pStart;
+            count++;
+            i++;
         }
 
         // 4. Optimized Selection Handling
@@ -4414,6 +4505,71 @@ public class AudioVisualizer : Control
                 AllSelectedParagraphs.Add(p);
             }
         }
+    }
+
+    /// <summary>Paragraphs drawn as-is before dense sections start getting thinned out.</summary>
+    private protected const int ParagraphsBeforeThinning = 200;
+
+    /// <summary>
+    /// Minimum start-to-start spacing between thinned paragraphs: 90 ms, or 5 px when zoomed out
+    /// far enough that 90 ms is narrower than that (closer starts would just overdraw each other).
+    /// </summary>
+    private protected static double GetThinnedSpacingSeconds(double pixelsPerSecond)
+    {
+        const double minSpacingSeconds = 0.09;
+        const double minSpacingPixels = 5;
+        return pixelsPerSecond > 0 ? Math.Max(minSpacingSeconds, minSpacingPixels / pixelsPerSecond) : minSpacingSeconds;
+    }
+
+    /// <summary>
+    /// End (exclusive) of the run of items from <paramref name="from"/> that is sorted by start. The
+    /// list is not always sorted - ASSA files often have typesetting lines appended after the
+    /// dialogue - and a binary search across an unsorted stretch can jump past lines on screen.
+    /// The scan stops at the first start after <paramref name="stopAfter"/>, where the caller's
+    /// scan of the view stops too.
+    /// </summary>
+    private protected static int FindSortedRunEnd<T>(IReadOnlyList<T> items, int from, double stopAfter, Func<T, double> getStartTime)
+    {
+        var previous = getStartTime(items[from]);
+        for (var k = from + 1; k < items.Count; k++)
+        {
+            var start = getStartTime(items[k]);
+            if (start < previous || start > stopAfter)
+            {
+                return k;
+            }
+
+            previous = start;
+        }
+
+        return items.Count;
+    }
+
+    /// <summary>
+    /// First index in [<paramref name="low"/>, <paramref name="end"/>) whose start is at or after
+    /// <paramref name="time"/>, or <paramref name="end"/>. The range must be sorted by start - see
+    /// <see cref="FindSortedRunEnd{T}"/>.
+    /// </summary>
+    private protected static int FindFirstIndexAtOrAfterStart<T>(IReadOnlyList<T> items, int low, int end, double time, Func<T, double> getStartTime)
+    {
+        var high = end - 1;
+        var result = end;
+
+        while (low <= high)
+        {
+            var mid = low + (high - low) / 2;
+            if (getStartTime(items[mid]) >= time)
+            {
+                result = mid;
+                high = mid - 1;
+            }
+            else
+            {
+                low = mid + 1;
+            }
+        }
+
+        return result;
     }
 
     // Helper for Binary Search

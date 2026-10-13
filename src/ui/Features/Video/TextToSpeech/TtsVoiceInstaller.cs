@@ -188,7 +188,7 @@ public static class TtsVoiceInstaller
 
     /// <summary>
     /// Ensures the CrispASR runtime that MOSS-TTS (CrispASR) runs on is installed.
-    /// The moss-tts backend ships in CrispASR v0.8.13 and newer (SE pins v0.8.39).
+    /// The moss-tts backend ships in CrispASR v0.8.13 and newer (SE pins v0.8.43).
     /// </summary>
     public static Task<bool> EnsureCrispAsrForMossTts(Window? window, IWindowService windowService, bool forceRedownload)
         => EnsureCrispAsrAsync(window, windowService, forceRedownload,
@@ -198,7 +198,7 @@ public static class TtsVoiceInstaller
 
     /// <summary>
     /// Ensures the CrispASR runtime that dots.tts (CrispASR) runs on is installed.
-    /// The dots-tts backend ships in CrispASR v0.8.25 and newer (SE pins v0.8.39); the version
+    /// The dots-tts backend ships in CrispASR v0.8.25 and newer (SE pins v0.8.43); the version
     /// note names that floor because older builds have no dots-tts backend at all and abort on
     /// the unknown --backend value.
     /// </summary>
@@ -367,14 +367,16 @@ public static class TtsVoiceInstaller
             return false;
         }
 
-        // The four audio.cpp engines share this binary. A server started from the old build
+        // The audio.cpp engines share this binary. A server started from the old build
         // must go before the archive is extracted: on Windows the running exe cannot be
         // overwritten at all, and elsewhere the stale process would keep answering requests
         // (and reject any model family the new build added) until Subtitle Edit restarts.
         IndexTts25AudioCpp.StopServer();
         HiggsTtsAudioCpp.StopServer();
         FishTtsAudioCpp.StopServer();
+        BreezeTtsAudioCpp.StopServer();
         FireRedTts3AudioCpp.StopServer();
+        KugelAudioAudioCpp.StopServer();
 
         var dlResult = await windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(
             window, vm => vm.StartDownloadIndexTts25AudioCppEngine(backend));

@@ -23,17 +23,22 @@ namespace UITests.Features.Files.Compare;
 public class CompareHeaderFileNameTests : IDisposable
 {
     private readonly SeCompare _savedSettings = Se.Settings.File.Compare;
+
+    // A closed CompareWindow saves its size for the next one - see CompareEditTests.
+    private readonly SettingsScope _windowPositions = new("General.WindowPositions");
     private Window? _window;
 
     public CompareHeaderFileNameTests()
     {
         Se.Settings.File.Compare = new SeCompare();
+        Se.Settings.General.WindowPositions = new List<SeWindowPosition>();
     }
 
     public void Dispose()
     {
         _window?.Close();
         Se.Settings.File.Compare = _savedSettings;
+        _windowPositions.Dispose();
     }
 
     [AvaloniaFact]
@@ -72,6 +77,60 @@ public class CompareHeaderFileNameTests : IDisposable
         var labelRight = label.TranslatePoint(new Point(label.Bounds.Width, 0), window)!.Value.X;
         var captionLeft = caption.TranslatePoint(new Point(0, 0), window)!.Value.X;
         Assert.InRange(captionLeft - labelRight, 0, 20);
+    }
+
+    [AvaloniaFact]
+    public void ReferenceHeader_WithLongCurrentName_DoesNotDrawTheCaptionUnderTheReadOnlyPill()
+    {
+        // Before a reference is loaded, the right card shows the button that loads the current
+        // file - it used to carry the whole file name and push the caption under the pill (#15619).
+        var name = string.Concat(Enumerable.Repeat("Very.Long.File.Name.", 6)) + "en.srt";
+        var (_, window) = Show(name, width: 900);
+
+        var caption = FindText(window, Se.Language.File.CompareReference);
+        var pill = FindText(window, Se.Language.File.CompareReadOnly).FindAncestorOfType<Border>()!;
+        var pillLeft = pill.TranslatePoint(new Point(0, 0), window)!.Value.X;
+
+        // What is drawn, not the layout box: on a card too narrow for the caption, the name
+        // area clips it - with wider fonts (the Linux CI runner) the box itself can run past.
+        var visibleRight = caption.TranslatePoint(new Point(caption.Bounds.Width, 0), window)!.Value.X;
+        foreach (var clip in caption.GetVisualAncestors().OfType<Control>().Where(p => p.ClipToBounds))
+        {
+            visibleRight = Math.Min(visibleRight, clip.TranslatePoint(new Point(clip.Bounds.Width, 0), window)!.Value.X);
+        }
+
+        Assert.True(visibleRight <= pillLeft + 0.5, $"caption visible until {visibleRight}, pill starts at {pillLeft}");
+    }
+
+    [AvaloniaFact]
+    public void LoadSavedFileHint_FollowsTheCurrentFile()
+    {
+        // The hint was built once with the first file's name, while the button loads whatever
+        // file is current - after Browse or a drop on the left it named the wrong file.
+        using var scope = new SettingsScope("Appearance.ShowHints");
+        Se.Settings.Appearance.ShowHints = true;
+        var newFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"compare-new-{Guid.NewGuid():N}.srt");
+        System.IO.File.WriteAllText(newFile, "1\n00:00:01,000 --> 00:00:02,000\nNew\n");
+        try
+        {
+            var (vm, window) = Show("old.srt", width: 1200);
+            var button = window.GetVisualDescendants().OfType<Button>()
+                .First(p => p.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == Se.Language.File.CompareLoadSavedFile));
+            Assert.Contains("old.srt", ToolTip.GetTip(button) as string);
+
+            _ = vm.LoadLeftFileAsync(newFile);
+            for (var pump = 0; pump < 12; pump++)
+            {
+                Dispatcher.UIThread.RunJobs();
+            }
+
+            Assert.Equal(newFile, vm.LeftFileName);
+            Assert.Contains(System.IO.Path.GetFileName(newFile), ToolTip.GetTip(button) as string);
+        }
+        finally
+        {
+            System.IO.File.Delete(newFile);
+        }
     }
 
     private (CompareViewModel vm, Window window) Show(string leftName, double width)

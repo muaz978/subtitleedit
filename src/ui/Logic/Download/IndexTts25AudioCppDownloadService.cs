@@ -33,10 +33,10 @@ public class IndexTts25AudioCppDownloadService : IIndexTts25AudioCppDownloadServ
 {
     private readonly HttpClient _httpClient;
 
-    // 2026-09-30: upstream v0.9.0 @ 795c45fb, compiled with the index_tts2 + higgs_audio_tts +
-    // fish_audio + fireredtts3 + ace_step families (same set as 2026-09-25). Lower memory for
-    // Higgs (prefill storage reuse, #704/#705), Fish and ACE-Step (#737); output unchanged.
-    private const string ReleaseTag = "audiocpp-indextts25-2026-09-30";
+    // 2026-10-13: the 2026-10-08b build (upstream v0.9.1 @ f04de8ec, index_tts2 + higgs_audio_tts
+    // + fish_audio + fireredtts3 + ace_step + kugelaudio + sidon) plus breeze_tts for Breeze
+    // TTS 2. Same upstream commit, so the other families are unchanged.
+    private const string ReleaseTag = "audiocpp-indextts25-2026-10-13";
     private const string ReleaseBase =
         "https://github.com/SubtitleEdit/support-files/releases/download/" + ReleaseTag + "/";
 

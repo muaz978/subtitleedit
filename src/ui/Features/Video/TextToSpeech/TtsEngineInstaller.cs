@@ -503,6 +503,19 @@ public static class TtsEngineInstaller
                 startDownloadModels: (vm, key) => vm.StartDownloadFishTtsAudioCppModels(key));
         }
 
+        if (engine is BreezeTtsAudioCpp)
+        {
+            return await EnsureAudioCppEngineWithLicense(
+                window, windowService, refreshVoices,
+                engineDisplayName: "Breeze TTS 2",
+                requiredFamily: BreezeTtsAudioCpp.FamilyName,
+                licenseDefinition: BreezeTtsAudioCpp.LicenseDefinition,
+                isLicenseAccepted: BreezeTtsAudioCpp.IsLicenseAccepted,
+                modelKey: BreezeTtsAudioCpp.ResolveModelKey(model),
+                areModelsInstalled: BreezeTtsAudioCpp.AreModelsInstalled,
+                startDownloadModels: (vm, key) => vm.StartDownloadBreezeTtsAudioCppModels(key));
+        }
+
         if (engine is FireRedTts3AudioCpp)
         {
             // Apache-2.0 weights: no licence gate, otherwise the same runtime + model flow.
@@ -515,6 +528,20 @@ public static class TtsEngineInstaller
                 modelKey: FireRedTts3AudioCpp.ResolveModelKey(model),
                 areModelsInstalled: FireRedTts3AudioCpp.AreModelsInstalled,
                 startDownloadModels: (vm, key) => vm.StartDownloadFireRedTts3AudioCppModels(key));
+        }
+
+        if (engine is KugelAudioAudioCpp)
+        {
+            // MIT weights: no licence gate, otherwise the same runtime + model flow.
+            return await EnsureAudioCppEngineWithLicense(
+                window, windowService, refreshVoices,
+                engineDisplayName: "KugelAudio",
+                requiredFamily: KugelAudioAudioCpp.FamilyName,
+                licenseDefinition: null,
+                isLicenseAccepted: () => true,
+                modelKey: KugelAudioAudioCpp.ResolveModelKey(model),
+                areModelsInstalled: KugelAudioAudioCpp.AreModelsInstalled,
+                startDownloadModels: (vm, key) => vm.StartDownloadKugelAudioAudioCppModels(key));
         }
 
         if (engine is ZonosTtsCrispAsr)
@@ -1124,7 +1151,7 @@ public static class TtsEngineInstaller
         AzureSpeech => Se.Settings.Video.TextToSpeech.AzureApiKey,
         ElevenLabs => Se.Settings.Video.TextToSpeech.ElevenLabsApiKey,
         Murf => Se.Settings.Video.TextToSpeech.MurfApiKey,
-        MistralSpeech => Se.Settings.Video.TextToSpeech.MistralApiKey,
+        MistralSpeech => Se.Settings.Providers.MistralApiKey,
         OpenAiCompatibleSpeech => OpenAiCompatibleSpeech.GetApiKey(OpenAiCompatibleSpeech.SavedProvider),
         _ => string.Empty,
     };

@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Features.Options.Shortcuts.CustomSearch;
+using Nikse.SubtitleEdit.Features.Options.Shortcuts.CustomShortcuts;
 using Nikse.SubtitleEdit.Features.Options.Shortcuts.PickMilliseconds;
 using Nikse.SubtitleEdit.Features.Options.Shortcuts.SurroundWith;
 using Nikse.SubtitleEdit.Features.Shared;
@@ -35,6 +36,7 @@ public partial class ShortcutsViewModel : ObservableObject
     [ObservableProperty] private bool _isControlsEnabled;
     [ObservableProperty] private bool _ctrlIsSelected;
     [ObservableProperty] private bool _altIsSelected;
+    [ObservableProperty] private bool _altGrIsSelected;
     [ObservableProperty] private bool _shiftIsSelected;
     [ObservableProperty] private bool _winIsSelected;
     [ObservableProperty] private bool _isConfigureVisible;
@@ -64,6 +66,10 @@ public partial class ShortcutsViewModel : ObservableObject
     // leaves the settings untouched.
     private readonly string[] _surroundLeftSlots = new string[Se.SurroundWithSlotCount];
     private readonly string[] _surroundRightSlots = new string[Se.SurroundWithSlotCount];
+    private readonly SurroundWithBehavior[] _surroundBehaviorSlots = new SurroundWithBehavior[Se.SurroundWithSlotCount];
+    private readonly SurroundWithScope[] _surroundScopeSlots = new SurroundWithScope[Se.SurroundWithSlotCount];
+    // Same for the custom shortcut slots (name + steps).
+    private readonly SeCustomShortcut[] _customShortcutSlots = new SeCustomShortcut[Se.CustomShortcutSlotCount];
     // Same for the "search via" slots (name + URL).
     private readonly string[] _customSearchNameSlots = new string[Se.CustomSearchSlotCount];
     private readonly string[] _customSearchUrlSlots = new string[Se.CustomSearchSlotCount];
@@ -78,6 +84,7 @@ public partial class ShortcutsViewModel : ObservableObject
 
     // Add this flag to prevent updates during selection changes
     private bool _isLoadingSelection = false;
+
 
     public ShortcutsViewModel(IWindowService windowService, IFileHelper fileHelper)
     {
@@ -107,6 +114,12 @@ public partial class ShortcutsViewModel : ObservableObject
         {
             _surroundLeftSlots[i] = Se.Settings.GetSurroundLeft(i + 1);
             _surroundRightSlots[i] = Se.Settings.GetSurroundRight(i + 1);
+            _surroundBehaviorSlots[i] = Se.Settings.GetSurroundBehavior(i + 1);
+            _surroundScopeSlots[i] = Se.Settings.GetSurroundScope(i + 1);
+        }
+        for (var i = 0; i < Se.CustomShortcutSlotCount; i++)
+        {
+            _customShortcutSlots[i] = Se.Settings.GetCustomShortcut(i + 1).Clone();
         }
         for (var i = 0; i < Se.CustomSearchSlotCount; i++)
         {
@@ -136,10 +149,22 @@ public partial class ShortcutsViewModel : ObservableObject
         UpdateVisibleShortcuts(SearchText);
     }
 
+    /// <summary>
+    /// AltGr is only offered on Windows (the checkbox is hidden elsewhere), so a stored AltGr
+    /// token is dropped when the shortcut is edited on another OS. Settable for tests.
+    /// </summary>
+    internal bool IsAltGrSupported { get; set; } = OperatingSystem.IsWindows();
+
     partial void OnCtrlIsSelectedChanged(bool value)
     {
         if (!_isLoadingSelection)
         {
+            // Windows reports AltGr as Ctrl+Alt, so Ctrl+AltGr can never fire - keep them exclusive.
+            if (value)
+            {
+                AltGrIsSelected = false;
+            }
+
             UpdateShortcutDo();
         }
     }
@@ -148,6 +173,11 @@ public partial class ShortcutsViewModel : ObservableObject
     {
         if (!_isLoadingSelection)
         {
+            if (value)
+            {
+                AltGrIsSelected = false;
+            }
+
             UpdateShortcutDo();
         }
     }
@@ -156,6 +186,20 @@ public partial class ShortcutsViewModel : ObservableObject
     {
         if (!_isLoadingSelection)
         {
+            UpdateShortcutDo();
+        }
+    }
+
+    partial void OnAltGrIsSelectedChanged(bool value)
+    {
+        if (!_isLoadingSelection)
+        {
+            if (value)
+            {
+                CtrlIsSelected = false;
+                AltIsSelected = false;
+            }
+
             UpdateShortcutDo();
         }
     }
@@ -249,6 +293,14 @@ public partial class ShortcutsViewModel : ObservableObject
         _configurableCommands.Add(vm.SurroundWith6Command);
         _configurableCommands.Add(vm.SurroundWith7Command);
         _configurableCommands.Add(vm.SurroundWith8Command);
+        _configurableCommands.Add(vm.CustomShortcut1Command);
+        _configurableCommands.Add(vm.CustomShortcut2Command);
+        _configurableCommands.Add(vm.CustomShortcut3Command);
+        _configurableCommands.Add(vm.CustomShortcut4Command);
+        _configurableCommands.Add(vm.CustomShortcut5Command);
+        _configurableCommands.Add(vm.CustomShortcut6Command);
+        _configurableCommands.Add(vm.CustomShortcut7Command);
+        _configurableCommands.Add(vm.CustomShortcut8Command);
         _configurableCommands.Add(vm.CustomSearch1Command);
         _configurableCommands.Add(vm.CustomSearch2Command);
         _configurableCommands.Add(vm.CustomSearch3Command);
@@ -262,6 +314,14 @@ public partial class ShortcutsViewModel : ObservableObject
         _configurableCommands.Add(vm.VideoMoveCustom3ForwardCommand);
         _configurableCommands.Add(vm.VideoMoveCustom4BackCommand);
         _configurableCommands.Add(vm.VideoMoveCustom4ForwardCommand);
+        _configurableCommands.Add(vm.VideoMoveCustom1BackAndPauseCommand);
+        _configurableCommands.Add(vm.VideoMoveCustom1ForwardAndPauseCommand);
+        _configurableCommands.Add(vm.VideoMoveCustom2BackAndPauseCommand);
+        _configurableCommands.Add(vm.VideoMoveCustom2ForwardAndPauseCommand);
+        _configurableCommands.Add(vm.VideoMoveCustom3BackAndPauseCommand);
+        _configurableCommands.Add(vm.VideoMoveCustom3ForwardAndPauseCommand);
+        _configurableCommands.Add(vm.VideoMoveCustom4BackAndPauseCommand);
+        _configurableCommands.Add(vm.VideoMoveCustom4ForwardAndPauseCommand);
         _configurableCommands.Add(vm.MoveSelectedLinesCustom1BackCommand);
         _configurableCommands.Add(vm.MoveSelectedLinesCustom1ForwardCommand);
         _configurableCommands.Add(vm.MoveSelectedLinesCustom2BackCommand);
@@ -581,6 +641,11 @@ public partial class ShortcutsViewModel : ObservableObject
         }
 
         Se.Settings.Shortcuts = shortcuts;
+        for (var i = 0; i < Se.CustomShortcutSlotCount; i++)
+        {
+            Se.Settings.SetCustomShortcut(i + 1, _customShortcutSlots[i]);
+            ShortcutsMain.CommandTranslationLookup[$"CustomShortcut{i + 1}Command"] = ShortcutsMain.GetCustomShortcutTitle(i + 1);
+        }
 
         Se.Settings.Color1 = _color1.FromColorToHex();
         Se.Settings.Color2 = _color2.FromColorToHex();
@@ -593,6 +658,8 @@ public partial class ShortcutsViewModel : ObservableObject
         for (var i = 0; i < Se.SurroundWithSlotCount; i++)
         {
             Se.Settings.SetSurround(i + 1, _surroundLeftSlots[i], _surroundRightSlots[i]);
+            Se.Settings.SetSurroundBehavior(i + 1, _surroundBehaviorSlots[i]);
+            Se.Settings.SetSurroundScope(i + 1, _surroundScopeSlots[i]);
         }
         for (var i = 0; i < Se.CustomSearchSlotCount; i++)
         {
@@ -639,6 +706,13 @@ public partial class ShortcutsViewModel : ObservableObject
         var node = SelectedNode;
         if (Window == null || MainViewModel == null || node?.ShortCut == null)
         {
+            return;
+        }
+
+        var customShortcutSlotIndex = GetCustomShortcutSlotIndex(node.ShortCut.Action);
+        if (customShortcutSlotIndex >= 0)
+        {
+            await ConfigureCustomShortcutSlot(customShortcutSlotIndex);
             return;
         }
 
@@ -769,142 +843,55 @@ public partial class ShortcutsViewModel : ObservableObject
                 _color8 = result.SelectedColor;
             }
         }
-        else if (node.ShortCut.Action == MainViewModel.VideoMoveCustom1BackCommand)
+        else if (GetVideoSeekNodes(MainViewModel).FirstOrDefault(n => n.Command == node.ShortCut.Action) is { Command: not null } seekNode)
         {
             var result = await _windowService.ShowDialogAsync<PickMillisecondsWindow, PickMillisecondsViewModel>(Window, vm =>
             {
-                vm.Initialize(_videoSeekSlots[0]);
+                vm.Initialize(_videoSeekSlots[seekNode.Slot]);
             });
             if (result.OkPressed)
             {
-                _videoSeekSlots[0] = result.Milliseconds;
+                _videoSeekSlots[seekNode.Slot] = result.Milliseconds;
 
-                var flatNodeBack = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == MainViewModel.VideoMoveCustom1BackCommand);
-                if (flatNodeBack != null)
+                // The plain move and its "...and pause" twin share the slot, so retitle both.
+                foreach (var sameSlot in GetVideoSeekNodes(MainViewModel).Where(n => n.Slot == seekNode.Slot))
                 {
-                    flatNodeBack.Title = string.Format(Se.Language.General.VideoCustom1BackX, _videoSeekSlots[0]);
+                    var flatNode = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == sameSlot.Command);
+                    if (flatNode != null)
+                    {
+                        flatNode.Title = string.Format(sameSlot.TitleFormat, _videoSeekSlots[seekNode.Slot]);
+                    }
                 }
             }
         }
-        else if (node.ShortCut.Action == MainViewModel.VideoMoveCustom1ForwardCommand)
-        {
-            var result = await _windowService.ShowDialogAsync<PickMillisecondsWindow, PickMillisecondsViewModel>(Window, vm =>
-            {
-                vm.Initialize(_videoSeekSlots[1]);
-            });
-            if (result.OkPressed)
-            {
-                _videoSeekSlots[1] = result.Milliseconds;
+    }
 
-                var flatNodeForward = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == MainViewModel.VideoMoveCustom1ForwardCommand);
-                if (flatNodeForward != null)
-                {
-                    flatNodeForward.Title = string.Format(Se.Language.General.VideoCustom1ForwardX, _videoSeekSlots[1]);
-                }
-            }
-        }
-        else if (node.ShortCut.Action == MainViewModel.VideoMoveCustom2BackCommand)
-        {
-            var result = await _windowService.ShowDialogAsync<PickMillisecondsWindow, PickMillisecondsViewModel>(Window, vm =>
-            {
-                vm.Initialize(_videoSeekSlots[2]);
-            });
-            if (result.OkPressed)
-            {
-                _videoSeekSlots[2] = result.Milliseconds;
-
-                var flatNodeBack = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == MainViewModel.VideoMoveCustom2BackCommand);
-                if (flatNodeBack != null)
-                {
-                    flatNodeBack.Title = string.Format(Se.Language.General.VideoCustom2BackX, _videoSeekSlots[2]);
-                }
-            }
-        }
-        else if (node.ShortCut.Action == MainViewModel.VideoMoveCustom2ForwardCommand)
-        {
-            var result = await _windowService.ShowDialogAsync<PickMillisecondsWindow, PickMillisecondsViewModel>(Window, vm =>
-            {
-                vm.Initialize(_videoSeekSlots[3]);
-            });
-            if (result.OkPressed)
-            {
-                _videoSeekSlots[3] = result.Milliseconds;
-
-                var flatNodeForward = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == MainViewModel.VideoMoveCustom2ForwardCommand);
-                if (flatNodeForward != null)
-                {
-                    flatNodeForward.Title = string.Format(Se.Language.General.VideoCustom2ForwardX, _videoSeekSlots[3]);
-                }
-            }
-        }
-        else if (node.ShortCut.Action == MainViewModel.VideoMoveCustom3BackCommand)
-        {
-            var result = await _windowService.ShowDialogAsync<PickMillisecondsWindow, PickMillisecondsViewModel>(Window, vm =>
-            {
-                vm.Initialize(_videoSeekSlots[4]);
-            });
-            if (result.OkPressed)
-            {
-                _videoSeekSlots[4] = result.Milliseconds;
-
-                var flatNodeBack = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == MainViewModel.VideoMoveCustom3BackCommand);
-                if (flatNodeBack != null)
-                {
-                    flatNodeBack.Title = string.Format(Se.Language.General.VideoCustom3BackX, _videoSeekSlots[4]);
-                }
-            }
-        }
-        else if (node.ShortCut.Action == MainViewModel.VideoMoveCustom3ForwardCommand)
-        {
-            var result = await _windowService.ShowDialogAsync<PickMillisecondsWindow, PickMillisecondsViewModel>(Window, vm =>
-            {
-                vm.Initialize(_videoSeekSlots[5]);
-            });
-            if (result.OkPressed)
-            {
-                _videoSeekSlots[5] = result.Milliseconds;
-
-                var flatNodeForward = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == MainViewModel.VideoMoveCustom3ForwardCommand);
-                if (flatNodeForward != null)
-                {
-                    flatNodeForward.Title = string.Format(Se.Language.General.VideoCustom3ForwardX, _videoSeekSlots[5]);
-                }
-            }
-        }
-        else if (node.ShortCut.Action == MainViewModel.VideoMoveCustom4BackCommand)
-        {
-            var result = await _windowService.ShowDialogAsync<PickMillisecondsWindow, PickMillisecondsViewModel>(Window, vm =>
-            {
-                vm.Initialize(_videoSeekSlots[6]);
-            });
-            if (result.OkPressed)
-            {
-                _videoSeekSlots[6] = result.Milliseconds;
-
-                var flatNodeBack = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == MainViewModel.VideoMoveCustom4BackCommand);
-                if (flatNodeBack != null)
-                {
-                    flatNodeBack.Title = string.Format(Se.Language.General.VideoCustom4BackX, _videoSeekSlots[6]);
-                }
-            }
-        }
-        else if (node.ShortCut.Action == MainViewModel.VideoMoveCustom4ForwardCommand)
-        {
-            var result = await _windowService.ShowDialogAsync<PickMillisecondsWindow, PickMillisecondsViewModel>(Window, vm =>
-            {
-                vm.Initialize(_videoSeekSlots[7]);
-            });
-            if (result.OkPressed)
-            {
-                _videoSeekSlots[7] = result.Milliseconds;
-
-                var flatNodeForward = FlatNodes.FirstOrDefault(n => n?.ShortCut?.Action == MainViewModel.VideoMoveCustom4ForwardCommand);
-                if (flatNodeForward != null)
-                {
-                    flatNodeForward.Title = string.Format(Se.Language.General.VideoCustom4ForwardX, _videoSeekSlots[7]);
-                }
-            }
-        }
+    /// <summary>
+    /// The video "move custom" shortcuts and the <see cref="_videoSeekSlots"/> index holding their
+    /// milliseconds. Each "...and pause" variant uses the same slot as its plain move.
+    /// </summary>
+    private static (IRelayCommand Command, int Slot, string TitleFormat)[] GetVideoSeekNodes(MainViewModel vm)
+    {
+        var l = Se.Language.General;
+        return
+        [
+            (vm.VideoMoveCustom1BackCommand, 0, l.VideoCustom1BackX),
+            (vm.VideoMoveCustom1BackAndPauseCommand, 0, l.VideoCustom1BackAndPauseX),
+            (vm.VideoMoveCustom1ForwardCommand, 1, l.VideoCustom1ForwardX),
+            (vm.VideoMoveCustom1ForwardAndPauseCommand, 1, l.VideoCustom1ForwardAndPauseX),
+            (vm.VideoMoveCustom2BackCommand, 2, l.VideoCustom2BackX),
+            (vm.VideoMoveCustom2BackAndPauseCommand, 2, l.VideoCustom2BackAndPauseX),
+            (vm.VideoMoveCustom2ForwardCommand, 3, l.VideoCustom2ForwardX),
+            (vm.VideoMoveCustom2ForwardAndPauseCommand, 3, l.VideoCustom2ForwardAndPauseX),
+            (vm.VideoMoveCustom3BackCommand, 4, l.VideoCustom3BackX),
+            (vm.VideoMoveCustom3BackAndPauseCommand, 4, l.VideoCustom3BackAndPauseX),
+            (vm.VideoMoveCustom3ForwardCommand, 5, l.VideoCustom3ForwardX),
+            (vm.VideoMoveCustom3ForwardAndPauseCommand, 5, l.VideoCustom3ForwardAndPauseX),
+            (vm.VideoMoveCustom4BackCommand, 6, l.VideoCustom4BackX),
+            (vm.VideoMoveCustom4BackAndPauseCommand, 6, l.VideoCustom4BackAndPauseX),
+            (vm.VideoMoveCustom4ForwardCommand, 7, l.VideoCustom4ForwardX),
+            (vm.VideoMoveCustom4ForwardAndPauseCommand, 7, l.VideoCustom4ForwardAndPauseX),
+        ];
     }
 
     /// <summary>
@@ -987,6 +974,69 @@ public partial class ShortcutsViewModel : ObservableObject
         return -1;
     }
 
+    private List<CustomShortcutCommandItem> GetCustomShortcutCommandItems()
+    {
+        if (MainViewModel == null)
+        {
+            return new List<CustomShortcutCommandItem>();
+        }
+
+        return ShortcutsMain.GetCommandsForCustomShortcuts(MainViewModel)
+            .Select(p => new CustomShortcutCommandItem(p.Name, ShortcutsMain.GetCommandDisplayName(p.Name), ShortcutGroupUi.GetName(p.Group)))
+            .OrderBy(p => p.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    private int GetCustomShortcutSlotIndex(IRelayCommand action)
+    {
+        if (MainViewModel == null)
+        {
+            return -1;
+        }
+
+        if (action == MainViewModel.CustomShortcut1Command) { return 0; }
+        if (action == MainViewModel.CustomShortcut2Command) { return 1; }
+        if (action == MainViewModel.CustomShortcut3Command) { return 2; }
+        if (action == MainViewModel.CustomShortcut4Command) { return 3; }
+        if (action == MainViewModel.CustomShortcut5Command) { return 4; }
+        if (action == MainViewModel.CustomShortcut6Command) { return 5; }
+        if (action == MainViewModel.CustomShortcut7Command) { return 6; }
+        if (action == MainViewModel.CustomShortcut8Command) { return 7; }
+        return -1;
+    }
+
+    private async Task ConfigureCustomShortcutSlot(int slotIndex)
+    {
+        if (Window == null)
+        {
+            return;
+        }
+
+        var slotNumber = slotIndex + 1;
+        var result = await _windowService.ShowDialogAsync<CustomShortcutEditWindow, CustomShortcutEditViewModel>(Window,
+            vm => vm.Initialize(_customShortcutSlots[slotIndex], GetCustomShortcutCommandItems(),
+                ShortcutsMain.GetCustomShortcutTitle(slotNumber, null)));
+        if (!result.OkPressed)
+        {
+            return;
+        }
+
+        _customShortcutSlots[slotIndex] = result.CustomShortcut;
+
+        var node = FlatNodes.FirstOrDefault(n => n?.ShortCut != null && GetCustomShortcutSlotIndex(n.ShortCut.Action) == slotIndex);
+        if (node?.ShortCut != null)
+        {
+            node.Title = ShortcutsMain.GetCustomShortcutTitle(slotNumber, result.CustomShortcut.Name);
+
+            // The area is part of the binding: saving on OK stores it from the category.
+            var category = result.CustomShortcut.GetActiveIn();
+            node.ShortCut.Category = category;
+            node.ShortCut.Control = category.ToString();
+            node.ActiveIn = GetActiveInName(category);
+            node.ActiveInOpacity = category == ShortcutCategory.General ? 0.55 : 1.0;
+        }
+    }
+
     private async Task ConfigureSurroundSlot(int slotIndex)
     {
         if (Window == null)
@@ -996,7 +1046,7 @@ public partial class ShortcutsViewModel : ObservableObject
 
         var result = await _windowService.ShowDialogAsync<SurroundWithWindow, SurroundWithViewModel>(Window, vm =>
         {
-            vm.Initialize(_surroundLeftSlots[slotIndex], _surroundRightSlots[slotIndex]);
+            vm.Initialize(_surroundLeftSlots[slotIndex], _surroundRightSlots[slotIndex], _surroundBehaviorSlots[slotIndex], _surroundScopeSlots[slotIndex]);
         });
         if (!result.OkPressed)
         {
@@ -1005,6 +1055,8 @@ public partial class ShortcutsViewModel : ObservableObject
 
         _surroundLeftSlots[slotIndex] = result.Before;
         _surroundRightSlots[slotIndex] = result.After;
+        _surroundBehaviorSlots[slotIndex] = result.Behavior;
+        _surroundScopeSlots[slotIndex] = result.Scope;
 
         var flatNodeBack = FlatNodes.FirstOrDefault(n => n?.ShortCut != null && GetSurroundSlotIndex(n.ShortCut.Action) == slotIndex);
         if (flatNodeBack != null)
@@ -1198,6 +1250,7 @@ public partial class ShortcutsViewModel : ObservableObject
             "Control",
             "Ctrl",
             "Alt",
+            ShortcutManager.AltGrToken,
             "Shift",
             "Win",
             Key.LeftCtrl.ToString(),
@@ -1246,6 +1299,7 @@ public partial class ShortcutsViewModel : ObservableObject
             SelectedShortcut = result.PressedKeyOnly;
             CtrlIsSelected = result.IsControlPressed;
             AltIsSelected = result.IsAltPressed;
+            AltGrIsSelected = result.IsAltGrPressed;
             ShiftIsSelected = result.IsShiftPressed;
             WinIsSelected = result.IsWinPressed;
             UpdateShortcutDo();
@@ -1276,15 +1330,22 @@ public partial class ShortcutsViewModel : ObservableObject
         }
 
         var keys = new List<string>();
+        var altGr = AltGrIsSelected && IsAltGrSupported;
 
-        if (CtrlIsSelected)
+        // AltGr arrives as Ctrl+Alt, so a stored Ctrl/Alt next to AltGr could never match.
+        if (CtrlIsSelected && !altGr)
         {
             keys.Add("Ctrl");
         }
 
-        if (AltIsSelected)
+        if (AltIsSelected && !altGr)
         {
             keys.Add("Alt");
+        }
+
+        if (altGr)
+        {
+            keys.Add(ShortcutManager.AltGrToken);
         }
 
         if (ShiftIsSelected)
@@ -1321,6 +1382,7 @@ public partial class ShortcutsViewModel : ObservableObject
         node.Title = MakeDisplayName(node.ShortCut!);
         CtrlIsSelected = false;
         AltIsSelected = false;
+        AltGrIsSelected = false;
         ShiftIsSelected = false;
         WinIsSelected = false;
         SelectedShortcut = null;
@@ -1417,6 +1479,7 @@ public partial class ShortcutsViewModel : ObservableObject
         {
             "ctrl" or "control" => "Control",
             "alt" or "option" or "opt" => "Alt",
+            "altgr" => ShortcutManager.AltGrToken,
             "shift" => "Shift",
             "win" or "windows" or "cmd" or "command" or "meta" or "super" => "Win",
             _ => null,
@@ -1476,6 +1539,7 @@ public partial class ShortcutsViewModel : ObservableObject
             AltIsSelected = node.ShortCut.Keys.Contains("Alt") ||
                             node.ShortCut.Keys.Contains(Key.LeftAlt.ToString()) ||
                             node.ShortCut.Keys.Contains(Key.RightAlt.ToString());
+            AltGrIsSelected = node.ShortCut.Keys.Contains(ShortcutManager.AltGrToken);
             ShiftIsSelected = node.ShortCut.Keys.Contains("Shift") ||
                               node.ShortCut.Keys.Contains(Key.LeftShift.ToString()) ||
                               node.ShortCut.Keys.Contains(Key.RightShift.ToString());
@@ -1488,6 +1552,7 @@ public partial class ShortcutsViewModel : ObservableObject
                 "Control",
                 "Ctrl",
                 "Alt",
+                ShortcutManager.AltGrToken,
                 "Shift",
                 "Win",
                 Key.LeftCtrl.ToString(),

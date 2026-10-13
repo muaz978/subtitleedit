@@ -130,6 +130,28 @@ public class ExportHandlerBluRaySupOverlapTests : IDisposable
         Assert.Equal(Margin, WindowY(segments.Where(s => s.Type == Wds).ElementAt(1), 0));
     }
 
+    /// <summary>
+    /// A cue shorter than half a frame stays up one frame; the next cue starting on that frame
+    /// overlaps it on the grid. Written apart, the first one's clear came after the second one's
+    /// start - the PTS went backwards.
+    /// </summary>
+    [Fact]
+    public void CueShorterThanHalfAFrame_NextCueOnSameFrame_PtsNeverGoBackwards()
+    {
+        var a = Cue(0, 1.000, 1.005, ExportAlignment.BottomCenter, SKColors.White);
+        var b = Cue(1, 1.010, 2.000, ExportAlignment.BottomCenter, SKColors.White);
+        a.FramesPerSecond = 23.976;
+        b.FramesPerSecond = 23.976;
+
+        var segments = ReadSegments(Export(a, b));
+
+        var pts = segments.Select(s => s.Pts).ToList();
+        Assert.Equal(pts.OrderBy(p => p), pts);
+        var pcs = segments.Where(s => s.Type == Pcs).ToList();
+        Assert.Equal(new long[] { BluRaySupPicture.MillisecondsToPts(1010, 23.976), BluRaySupPicture.MillisecondsToPts(2000, 23.976) }, pcs.Select(p => p.Pts));
+        Assert.Equal(new[] { 1, 0 }, pcs.Select(ObjectCount));
+    }
+
     [Fact]
     public void TwoOverlappingLines_ShareTheScreenWhileBothAreOn()
     {
@@ -223,6 +245,53 @@ public class ExportHandlerBluRaySupOverlapTests : IDisposable
             Cue(1, 2, 3, ExportAlignment.BottomCenter, SKColors.White)));
 
         Assert.Equal(new[] { 1, 0, 1, 0 }, segments.Where(s => s.Type == Pcs).Select(ObjectCount));
+    }
+
+    /// <summary>
+    /// A gap shorter than half a frame that straddles the middle of a frame: the end rounds down
+    /// and the next start up, which left one frame with nothing on screen (issue #15933, the
+    /// typewriter effect's 1 ms gaps). The first line now stays up until the second one starts.
+    /// </summary>
+    [Fact]
+    public void GapShorterThanHalfAFrame_AcrossAFrame_LeavesNoEmptyFrame()
+    {
+        // At 25 fps 3.019 s rounds to the frame at 3.000 s and 3.021 s to the one at 3.040 s.
+        var segments = ReadSegments(Export(
+            Cue(0, 1, 3.019, ExportAlignment.BottomCenter, SKColors.White),
+            Cue(1, 3.021, 5, ExportAlignment.BottomCenter, SKColors.White)));
+
+        var pcs = segments.Where(s => s.Type == Pcs).ToList();
+        Assert.Equal(new long[] { 1000 * 90, 3040 * 90, 3040 * 90, 5000 * 90 }, pcs.Select(p => p.Pts));
+        Assert.Equal(new[] { 1, 0, 1, 0 }, pcs.Select(ObjectCount));
+        Assert.Single(segments.Where(s => s.Type == Ods && s.Pts == 1000 * 90));
+    }
+
+    [Fact]
+    public void OneMillisecondGap_At23976_LeavesNoEmptyFrame()
+    {
+        // Two typewriter steps from the issue #15933 sample, 55.367 s and 55.368 s.
+        var a = Cue(0, 54.000, 55.367, ExportAlignment.BottomCenter, SKColors.White);
+        var b = Cue(1, 55.368, 57.000, ExportAlignment.BottomCenter, SKColors.White);
+        a.FramesPerSecond = 23.976;
+        b.FramesPerSecond = 23.976;
+
+        var segments = ReadSegments(Export(a, b));
+
+        var pcs = segments.Where(s => s.Type == Pcs).ToList();
+        Assert.Equal(new[] { 1, 0, 1, 0 }, pcs.Select(ObjectCount));
+        Assert.Equal(BluRaySupPicture.MillisecondsToPts(55368, 23.976), pcs[1].Pts);
+        Assert.Equal(pcs[2].Pts, pcs[1].Pts);
+    }
+
+    [Fact]
+    public void GapOfHalfAFrameOrMore_IsKept()
+    {
+        var segments = ReadSegments(Export(
+            Cue(0, 1, 3.000, ExportAlignment.BottomCenter, SKColors.White),
+            Cue(1, 3.020, 5, ExportAlignment.BottomCenter, SKColors.White)));
+
+        var pcs = segments.Where(s => s.Type == Pcs).ToList();
+        Assert.Equal(new long[] { 1000 * 90, 3000 * 90, 3040 * 90, 5000 * 90 }, pcs.Select(p => p.Pts));
     }
 
     [Fact]

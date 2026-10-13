@@ -12,6 +12,9 @@ public class LanguageMain
     public string CharactersPerSecond { get; set; }
     public string ChooseColumn { get; set; }
     public string ColumnPaste { get; set; }
+    public string CommandPaletteTitle { get; set; }
+    public string CommandPaletteSearchPlaceholder { get; set; }
+    public string CommandPaletteNoCommandsFound { get; set; }
     public string CreatedEmptyTranslation { get; set; }
     public string DeleteText { get; set; }
     public string DeleteTextAndShiftCellsUp { get; set; }
@@ -97,12 +100,14 @@ public class LanguageMain
     public string TrimmedXLines { get; set; }
     public string PastedXLinesOverSelectedLines { get; set; }
     public string PastedXOfYLinesOverSelectedLines { get; set; }
+    public string InsertedXLinesFromClipboard { get; set; }
     public string OpenOriginalDifferentNumberOfSubtitlesXY { get; set; }
     public string OriginalTextReadOnly { get; set; }
     public string OriginalTextEditMode { get; set; }
     public string OriginalIsReadOnlyNotSaved { get; set; }
     public string OriginalIsEmptyNotSaved { get; set; }
     public string OriginalIsReadOnlyReference { get; set; }
+    public string CloseTranslationQuestionXY { get; set; }
     public string AllowEditOfOriginalSubtitle { get; set; }
     public string ShowAllOriginalLinesX { get; set; }
     public string ShowAllOriginalLinesHint { get; set; }
@@ -137,6 +142,7 @@ public class LanguageMain
     public string FileExportedInFormatXToY { get; set; }
     public string FileExportedInFormatXToFileY { get; set; }
     public string FixedXLines { get; set; }
+    public string ToolXChangedYLines { get; set; }
     public string TranscriptionCompletedWithXLines { get; set; }
     public string OpenSubtitleFileX { get; set; }
     public string ReplacedXOccurrences { get; set; }
@@ -172,6 +178,9 @@ public class LanguageMain
         AutoBreakHint = "Auto-break selected lines";
         CharactersPerSecond = "Chars/second: {0}";
         ChooseColumn = "Choose column";
+        CommandPaletteTitle = "Command palette";
+        CommandPaletteSearchPlaceholder = "Type to search commands...";
+        CommandPaletteNoCommandsFound = "No matching commands";
         ColumnPaste = "Column paste";
         CreatedEmptyTranslation = "Created empty translation from current subtitle";
         DeleteText = "Delete text";
@@ -258,12 +267,14 @@ public class LanguageMain
         TrimmedXLines = "Trimmed {0} subtitle lines";
         PastedXLinesOverSelectedLines = "Pasted {0} line(s) over the selected lines";
         PastedXOfYLinesOverSelectedLines = "Pasted {0} of {1} line(s) over the selected lines - the rest did not fit the selection";
+        InsertedXLinesFromClipboard = "Inserted {0} line(s) from the clipboard";
         OpenOriginalDifferentNumberOfSubtitlesXY = "The original subtitle file does not have the same number of subtitles as the current subtitle file.\n\n• Original subtitles: {0}\n• Current subtitles: {1}";
         OriginalTextReadOnly = "Original text (read-only)";
         OriginalTextEditMode = "Original text (edit mode)";
         OriginalIsReadOnlyNotSaved = "The original subtitle is a read-only reference and was not saved";
         OriginalIsEmptyNotSaved = "The original subtitle has no text at all and was not saved";
         OriginalIsReadOnlyReference = "The original subtitle is open as a read-only reference";
+        CloseTranslationQuestionXY = "Close the translation \"{0}\"?\n\nThe original subtitle \"{1}\" becomes the subtitle you edit. The translation file itself is not changed.";
         AllowEditOfOriginalSubtitle = "Allow edit of original subtitle";
         ShowAllOriginalLinesX = "Show all original lines ({0} have no match here)";
         ShowAllOriginalLinesHint = "The lines with no match are shown as extra rows, so you can see what the translation is missing.";
@@ -298,6 +309,7 @@ public class LanguageMain
         FileExportedInFormatXToY = "File exported in format {0} to {1}";
         FileExportedInFormatXToFileY = "File exported in format \"{0}\" to file \"{1}\"";
         FixedXLines = "Fixed {0} lines";
+        ToolXChangedYLines = "{0}: {1} lines changed";
         TranscriptionCompletedWithXLines = "Transcription completed with {0} lines";
         OpenSubtitleFileX = "Open subtitle file \"{0}\"?";
         ReplacedXOccurrences = "Replaced {0} occurrences";

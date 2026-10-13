@@ -1,7 +1,28 @@
 ﻿using Nikse.SubtitleEdit.UiLogic.AutoTranslate;
 using Nikse.SubtitleEdit.UiLogic.BatchConvert;
+using System.Collections.Generic;
 
 namespace Nikse.SubtitleEdit.Logic.Config;
+
+/// <summary>A named batch convert setup: the function selection and settings, as SeBatchConvert JSON.</summary>
+public class SeBatchConvertPreset
+{
+    public string Name { get; set; } = string.Empty;
+    public string Settings { get; set; } = string.Empty;
+
+    // Batch convert edits these shared tool settings directly (not via SeBatchConvert), so a
+    // preset stores its own copies. Null for presets saved before they were included.
+    public SeMergeSameText? MergeSameText { get; set; }
+    public SeMergeSameTimeCode? MergeSameTimeCode { get; set; }
+    public SeBridgeGaps? BridgeGaps { get; set; }
+    public int? ApplyMinGapMilliseconds { get; set; }
+    public bool? SplitRebalanceLongLinesSplit { get; set; }
+    public bool? SplitRebalanceLongLinesRebalance { get; set; }
+    public bool? SplitRebalanceLongLinesRebalanceOnlyTooLong { get; set; }
+    public int? SplitRebalanceLongLinesSingleLineMaxLength { get; set; }
+    public int? SplitRebalanceLongLinesMaxNumberOfLines { get; set; }
+    public int? SplitRebalanceLongLinesUnbreakShorterThan { get; set; }
+}
 
 public class SeBatchConvert
 {
@@ -96,6 +117,8 @@ public class SeBatchConvert
     public string AutoTranslateEngine { get; set; }
     public string AutoTranslateSourceLanguage { get; set; }
     public string AutoTranslateTargetLanguage { get; set; }
+    /// <summary>Codes of the extra languages to translate into besides the "To" language, comma separated.</summary>
+    public string AutoTranslateExtraTargetLanguages { get; set; }
 
     /// <summary>
     /// Batch convert's own "use external server" switch for the llama.cpp engines - independent of
@@ -114,8 +137,24 @@ public class SeBatchConvert
     public bool AssaUseSourceStylesIfPossible { get; set; }
     public string AssaHeader { get; set; }
     public string AssaFooter { get; set; }
+    /// <summary>When the ASSA header template replaces a source file's header, keep the source's embedded fonts (footer).</summary>
+    public bool AssaKeepSourceEmbeddedFonts { get; set; }
 
     public bool AssaEmbedFontsTrim { get; set; }
+
+    /// <summary>The EBU STL header (GSI block) chosen in the EBU STL settings, empty = defaults.</summary>
+    public string EbuHeader { get; set; } = string.Empty;
+    public int EbuJustificationCode { get; set; } = 2;
+
+    // Cavena 890 header fields - batch convert's own, so a run never picks up the title of
+    // whatever file was last exported from the main window. An empty title = file name.
+    public string Cavena890TranslatedTitle { get; set; } = string.Empty;
+    public string Cavena890OriginalTitle { get; set; } = string.Empty;
+    public string Cavena890Translator { get; set; } = string.Empty;
+    public string Cavena890Comment { get; set; } = string.Empty;
+
+    /// <summary>Start of programme in milliseconds, 0 = the format's default (10:00:00:00).</summary>
+    public double Cavena890StartOfProgrammeMs { get; set; }
 
     public int MergeShortLinesMaxCharacters { get; set; }
     public int MergeShortLinesMaxMillisecondsBetweenLines { get; set; }
@@ -140,11 +179,40 @@ public class SeBatchConvert
     public bool ConvertColorsToDialogAddNewLines { get; set; }
     public bool ConvertColorsToDialogReBreakLines { get; set; }
 
+    public int RenumberStartNumber { get; set; }
+
+    public int MergeContinuationLinesMaxGapMs { get; set; }
+    public int MergeContinuationLinesMaxCharacters { get; set; }
+
+    public string ConvertActorsFromType { get; set; }
+    public string ConvertActorsToType { get; set; }
+    public bool ConvertActorsSetColor { get; set; }
+    public string ConvertActorsColor { get; set; }
+    public bool ConvertActorsChangeCasing { get; set; }
+    public int ConvertActorsCasingType { get; set; }
+    public bool ConvertActorsOnlyNames { get; set; }
+
+    /// <summary>Named function selections + settings. A preset's own stored copy has this list empty.</summary>
+    public List<SeBatchConvertPreset> Presets { get; set; } = new();
+
     /// <summary>
     /// "Add folder" (and dropping a folder on the file list) also picks up files in subfolders.
     /// Off by default - a recursive scan of a big tree or a network share can take a while.
     /// </summary>
     public bool ScanFolderRecursive { get; set; }
+
+    /// <summary>
+    /// What "Add folder" (and dropping a folder on the file list) does with video files
+    /// (.mkv/.mp4/.ts/...) it finds: <see cref="ScanFolderVideoFilesAsk"/> prompts each time,
+    /// <see cref="ScanFolderVideoFilesInclude"/> adds their embedded subtitle tracks,
+    /// <see cref="ScanFolderVideoFilesSkip"/> leaves them out like SE 4 did (#15742). Video files
+    /// added or dropped one by one are always added.
+    /// </summary>
+    public string ScanFolderVideoFiles { get; set; } = ScanFolderVideoFilesAsk;
+
+    public const string ScanFolderVideoFilesAsk = "Ask";
+    public const string ScanFolderVideoFilesInclude = "Include";
+    public const string ScanFolderVideoFilesSkip = "Skip";
 
     public bool ImageAdjustBrightnessOn { get; set; }
     public double ImageAdjustBrightness { get; set; }
@@ -233,6 +301,7 @@ public class SeBatchConvert
         AutoTranslateEngine = new OllamaTranslate().Name;
         AutoTranslateSourceLanguage = "auto";
         AutoTranslateTargetLanguage = "en";
+        AutoTranslateExtraTargetLanguages = string.Empty;
         ChangeCasingType = "Normal";
         NormalCasingFixNames = true;
         FixRtlMode = "ReverseStartEnd";
@@ -241,6 +310,7 @@ public class SeBatchConvert
         AssaUseSourceStylesIfPossible = true;
         AssaHeader = string.Empty;
         AssaFooter = string.Empty;
+        AssaKeepSourceEmbeddedFonts = false;
 
         MergeShortLinesMaxCharacters = 55;
         MergeShortLinesMaxMillisecondsBetweenLines = 250;
@@ -260,5 +330,14 @@ public class SeBatchConvert
         SnapTimeCodesToFramesFixedFrameRate = 23.976;
 
         ConvertColorsToDialogRemoveColorTags = true;
+
+        RenumberStartNumber = 1;
+
+        MergeContinuationLinesMaxGapMs = 250;
+        MergeContinuationLinesMaxCharacters = 0; // 0 = max line length x max number of lines
+
+        ConvertActorsFromType = "InlineSquareBrackets";
+        ConvertActorsToType = "Actor";
+        ConvertActorsColor = Avalonia.Media.Colors.Yellow.FromColorToHex();
     }
 }

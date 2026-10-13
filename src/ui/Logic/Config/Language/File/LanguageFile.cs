@@ -30,6 +30,8 @@ public class LanguageFile
     public string ShowOnlyDifferencesInText { get; set; }
     public string IgnoreNumbering { get; set; }
     public string IgnoreNumberingHint { get; set; }
+    public string IgnoreTimeDifferenceMs { get; set; }
+    public string IgnoreTimeDifferenceMsHint { get; set; }
     public string CompareDifferences { get; set; }
     public string CompareTextDifferences { get; set; }
     public string CompareCurrent { get; set; }
@@ -70,7 +72,9 @@ public class LanguageFile
     public string CompareSyncAlreadyPairedXY { get; set; }
     public string CompareSyncPointShiftedXYZW { get; set; }
     public string CompareChangeSyncShiftXYZ { get; set; }
+    public string CompareTimingDeltaHint { get; set; }
     public string LoadXFromFile { get; set; }
+    public string CompareLoadSavedFile { get; set; }
     public string SaveCompareHtmlTitle { get; set; }
     public string PickMatroskaTrackX { get; set; }
     public string PickTransportStreamTrackX { get; set; }
@@ -110,6 +114,8 @@ public class LanguageFile
         ShowOnlyDifferencesInText = "Only differences in text";
         IgnoreNumbering = "Ignore numbering";
         IgnoreNumberingHint = "Lines that differ only in their number do not count as different";
+        IgnoreTimeDifferenceMs = "Time tolerance (ms)";
+        IgnoreTimeDifferenceMsHint = "Start and end times that differ by this many milliseconds or less do not count as different";
         CompareDifferences = "Differences";
         CompareTextDifferences = "Text differences";
         CompareCurrent = "Current";
@@ -124,7 +130,7 @@ public class LanguageFile
         CompareTakeTiming = "Take timing";
         CompareEditLine = "Edit line";
         CompareEditHint = "Ctrl+Enter to save, Esc to cancel";
-        CompareEdited = "edited";
+        CompareEdited = "Edited";
         CompareOnePendingChange = "1 pending change";
         CompareXPendingChanges = "{0} pending changes";
         CompareDiscardXChanges = "Discard the {0} change(s) made in Compare?";
@@ -150,11 +156,13 @@ public class LanguageFile
         CompareSyncAlreadyPairedXY = "Current #{0} and reference #{1} are already shown as a pair with the same start - nothing to sync";
         CompareSyncPointShiftedXYZW = "Sync point set: current #{0}-#{1} shifted {2} to start with reference #{3}";
         CompareChangeSyncShiftXYZ = "#{0}-#{1} shifted {2} (sync point)";
+        CompareTimingDeltaHint = "How much later (+) or earlier (−) the reference starts and ends than the current line";
         IgnoreWhitespace = "Ignore whitespace";
         IgnoreWhitespaceHint = "Lines that differ only in spaces, tabs or line breaks do not count as different";
         IgnoreFormatting = "Ignore formatting";
         IgnoreFormattingHint = "Lines that differ only in formatting tags, like <i> or {\\an8}, do not count as different";
         LoadXFromFile = "Load \"{0}\" from file";
+        CompareLoadSavedFile = "Load saved file";
         SaveCompareHtmlTitle = "Save compare HTML file";
         PickMatroskaTrackX = "Pick Matroska track - {0}";
         PickTransportStreamTrackX = "Pick transport stream track - {0}";

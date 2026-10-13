@@ -10,6 +10,7 @@ using Nikse.SubtitleEdit.Logic.Se4Setup;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -104,6 +105,9 @@ public partial class SettingsImportExportViewModel : ObservableObject
     private string? _importSourceOs;
     private bool _importHasShortcutSlots;
     private bool _importHasCustomSearchSlots;
+    private bool _importHasSurroundOptions;
+    private bool _importHasCustomShortcuts;
+    private bool _importHasAllSections;
 
     // Set instead of _importData when the picked file is an SE 4 Settings.xml (#14309): SE 4 has
     // no Settings.json, so the only file a user migrating from 4.x can point at is the classic
@@ -120,6 +124,13 @@ public partial class SettingsImportExportViewModel : ObservableObject
     // defaults for those, so without the marker the importer must leave them alone
     // rather than reset the user's own to factory values.
     private const string ExportShortcutSlotsProperty = "exportIncludesShortcutSlots";
+
+    // Third marker: set when an "all settings" file carries the sections that were left out
+    // before #15944 (Edit with the Multiple Replace rules, Assa with the stored styles, Ocr, ...).
+    // Older exports serialized those as blocks of *defaults*, so importing them would wipe the
+    // user's own rules and styles - only a file with this marker, or a plain Settings.json
+    // backup (no export markers at all), is trusted for them.
+    private const string ExportAllSectionsProperty = "exportIncludesAllSections";
     public bool OkPressed { get; set; }
     public Window? Window { get; set; }
     private readonly IFileHelper _fileHelper;
@@ -192,7 +203,11 @@ public partial class SettingsImportExportViewModel : ObservableObject
 
             _importSourceOs = TryReadExportSourceOs(json);
             _importHasShortcutSlots = TryReadExportIncludesShortcutSlots(json);
-            _importHasCustomSearchSlots = TryReadHasCustomSearchSlots(json);
+            _importHasCustomSearchSlots = TryReadHasTopLevelProperty(json, nameof(Se.CustomSearch1Name));
+            _importHasSurroundOptions = TryReadHasTopLevelProperty(json, nameof(Se.Surround1Behavior));
+            _importHasCustomShortcuts = TryReadHasTopLevelProperty(json, nameof(Se.CustomShortcuts));
+            _importHasAllSections = TryReadHasTopLevelProperty(json, ExportAllSectionsProperty) ||
+                                    !TryReadHasTopLevelProperty(json, ExportSourceOsProperty);
 
             IsRulesEnabled = _importData.General != null;
             IsAppearanceEnabled = _importData.Appearance != null;
@@ -250,6 +265,9 @@ public partial class SettingsImportExportViewModel : ObservableObject
         _importSourceOs = null;
         _importHasShortcutSlots = false;
         _importHasCustomSearchSlots = false;
+        _importHasSurroundOptions = false;
+        _importHasCustomShortcuts = false;
+        _importHasAllSections = false;
 
         IsRulesEnabled = se4.HasRules;
         IsAppearanceEnabled = se4.HasAppearance;
@@ -374,6 +392,32 @@ public partial class SettingsImportExportViewModel : ObservableObject
         exportData.AutoTranslate = ExportImportAll || ExportImportAutoTranslate ? currentSettings.AutoTranslate : null!;
         exportData.SpellCheck = ExportImportAll ? currentSettings.SpellCheck : null!;
 
+        // These sections were never exported, so the Multiple Replace rules (Edit), the stored
+        // ASSA styles (Assa), the OCR options and the rest could not be backed up (#15944).
+        exportData.Edit = ExportImportAll ? currentSettings.Edit : null!;
+        exportData.Synchronization = ExportImportAll ? currentSettings.Synchronization : null!;
+        exportData.Assa = ExportImportAll ? currentSettings.Assa : null!;
+        exportData.Ssa = ExportImportAll ? currentSettings.Ssa : null!;
+        exportData.BeautifyTimeCodes = ExportImportAll ? currentSettings.BeautifyTimeCodes : null!;
+        exportData.Formats = ExportImportAll ? currentSettings.Formats : null!;
+        exportData.Ocr = ExportImportAll ? currentSettings.Ocr : null!;
+        exportData.Plugins = ExportImportAll ? currentSettings.Plugins : null!;
+        exportData.Providers = ExportImportAll ? currentSettings.Providers : null!;
+
+        // File holds the export options and custom text formats, but also the recent files -
+        // local paths that should not travel, same as the recent videos below.
+        exportData.File = null!;
+        if (ExportImportAll && currentSettings.File != null)
+        {
+            var fileJson = JsonSerializer.Serialize(currentSettings.File);
+            var fileExport = JsonSerializer.Deserialize<SeFile>(fileJson);
+            if (fileExport != null)
+            {
+                fileExport.RecentFiles.Clear();
+                exportData.File = fileExport;
+            }
+        }
+
         // Video was never assigned, so an "all settings" file carried a default Video block
         // that the importer applied - silently resetting the player choice, the mpv preview
         // style and the custom seek amounts. Exclude RecentFiles so local recent video paths are not exported.
@@ -393,7 +437,7 @@ public partial class SettingsImportExportViewModel : ObservableObject
         }
 
         var json = JsonSerializer.Serialize(exportData, new JsonSerializerOptions { WriteIndented = true });
-        var jsonWithSource = InjectExportMarkers(json, GetCurrentOsName(), exportShortcuts);
+        var jsonWithSource = InjectExportMarkers(json, GetCurrentOsName(), exportShortcuts, ExportImportAll);
         await File.WriteAllTextAsync(fileName, jsonWithSource);
     }
 
@@ -472,6 +516,11 @@ public partial class SettingsImportExportViewModel : ObservableObject
             {
                 Se.Settings.SpellCheck = importData.SpellCheck;
             }
+
+            if (_importHasAllSections)
+            {
+                ImportAllSections(importData, Se.Settings);
+            }
         }
 
         if (ExportImportAll || ExportImportAppearance)
@@ -492,7 +541,7 @@ public partial class SettingsImportExportViewModel : ObservableObject
 
             if (_importHasShortcutSlots)
             {
-                CopyShortcutSlots(importData, Se.Settings, _importHasCustomSearchSlots);
+                CopyShortcutSlots(importData, Se.Settings, _importHasCustomSearchSlots, _importHasSurroundOptions, _importHasCustomShortcuts);
             }
         }
 
@@ -505,6 +554,66 @@ public partial class SettingsImportExportViewModel : ObservableObject
         }
 
         Se.SaveSettings();
+    }
+
+    /// <summary>
+    /// The sections only an "all settings" import brings: the Multiple Replace rules (Edit), the
+    /// stored ASSA styles (Assa), the OCR options and the rest that never travelled before #15944.
+    /// The local recent files stay as they are.
+    /// </summary>
+    internal static void ImportAllSections(Se from, Se to)
+    {
+        if (from.Edit != null)
+        {
+            to.Edit = from.Edit;
+        }
+
+        if (from.Synchronization != null)
+        {
+            to.Synchronization = from.Synchronization;
+        }
+
+        if (from.Assa != null)
+        {
+            to.Assa = from.Assa;
+        }
+
+        if (from.Ssa != null)
+        {
+            to.Ssa = from.Ssa;
+        }
+
+        if (from.BeautifyTimeCodes != null)
+        {
+            to.BeautifyTimeCodes = from.BeautifyTimeCodes;
+        }
+
+        if (from.Formats != null)
+        {
+            to.Formats = from.Formats;
+        }
+
+        if (from.Ocr != null)
+        {
+            to.Ocr = from.Ocr;
+        }
+
+        if (from.Plugins != null)
+        {
+            to.Plugins = from.Plugins;
+        }
+
+        if (from.Providers != null)
+        {
+            to.Providers = from.Providers;
+        }
+
+        if (from.File != null)
+        {
+            var existingRecentFiles = to.File.RecentFiles;
+            to.File = from.File;
+            to.File.RecentFiles = existingRecentFiles;
+        }
     }
 
     // The SE 4 side of the import. Same checkboxes, but every category is copied field by field
@@ -651,7 +760,7 @@ public partial class SettingsImportExportViewModel : ObservableObject
     /// of its sections. A null <paramref name="from"/> clears them, so an export that leaves
     /// shortcuts out says so instead of shipping a block of defaults.
     /// </summary>
-    private static void CopyShortcutSlots(Se? from, Se to, bool includeCustomSearch = true)
+    private static void CopyShortcutSlots(Se? from, Se to, bool includeCustomSearch = true, bool includeSurroundOptions = true, bool includeCustomShortcuts = true)
     {
         to.Color1 = from?.Color1!;
         to.Color2 = from?.Color2!;
@@ -667,6 +776,16 @@ public partial class SettingsImportExportViewModel : ObservableObject
             to.SetSurround(slot, from?.GetSurroundLeft(slot)!, from?.GetSurroundRight(slot)!);
         }
 
+        // The surround behaviors and scopes (#15531) came later still - same reasoning as the "search via" slots below.
+        if (includeSurroundOptions)
+        {
+            for (var slot = 1; slot <= Se.SurroundWithSlotCount; slot++)
+            {
+                to.SetSurroundBehavior(slot, from?.GetSurroundBehavior(slot) ?? SurroundWithBehavior.Toggle);
+                to.SetSurroundScope(slot, from?.GetSurroundScope(slot) ?? SurroundWithScope.SelectionOrText);
+            }
+        }
+
         // The "search via" slots were added after the slot marker, so a file carrying the marker
         // may still predate them - deserializing then hands back the factory defaults, and
         // copying those would silently reset the user's own slots. Only copy what the file says.
@@ -677,11 +796,17 @@ public partial class SettingsImportExportViewModel : ObservableObject
                 to.SetCustomSearch(slot, from?.GetCustomSearchName(slot)!, from?.GetCustomSearchUrl(slot)!);
             }
         }
+
+        // User-built shortcuts (name + steps); their key bindings travel with the shortcuts list.
+        if (includeCustomShortcuts)
+        {
+            to.CustomShortcuts = from?.CustomShortcuts?.Select(p => p.Clone()).ToList() ?? new List<SeCustomShortcut>();
+        }
     }
 
     // Adds the top-level marker properties to the serialized JSON without touching the Se
     // type. Se has no such properties, so System.Text.Json silently ignores them on import.
-    private static string InjectExportMarkers(string json, string osName, bool includesShortcutSlots)
+    private static string InjectExportMarkers(string json, string osName, bool includesShortcutSlots, bool includesAllSections)
     {
         try
         {
@@ -699,6 +824,11 @@ public partial class SettingsImportExportViewModel : ObservableObject
                 if (includesShortcutSlots)
                 {
                     writer.WriteBoolean(ExportShortcutSlotsProperty, true);
+                }
+
+                if (includesAllSections)
+                {
+                    writer.WriteBoolean(ExportAllSectionsProperty, true);
                 }
 
                 foreach (var prop in doc.RootElement.EnumerateObject())
@@ -753,11 +883,11 @@ public partial class SettingsImportExportViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Whether the export file carries the "search via" slot values at all. They joined the
-    /// existing shortcut-slot marker later, so this is detected off the serialized property
-    /// itself: a file from a build without them lacks the key entirely.
+    /// Whether the export file carries a top-level value at all - used for slot values (like the
+    /// "search via" slots) that joined the existing shortcut-slot marker later, so they are detected
+    /// off the serialized property itself: a file from a build without them lacks the key entirely.
     /// </summary>
-    private static bool TryReadHasCustomSearchSlots(string json)
+    private static bool TryReadHasTopLevelProperty(string json, string propertyName)
     {
         try
         {
@@ -769,7 +899,7 @@ public partial class SettingsImportExportViewModel : ObservableObject
 
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
-                if (string.Equals(prop.Name, nameof(Se.CustomSearch1Name), StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(prop.Name, propertyName, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }

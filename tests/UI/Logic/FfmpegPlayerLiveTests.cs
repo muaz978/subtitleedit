@@ -461,7 +461,7 @@ public sealed class FfmpegPlayerLiveTests : IDisposable
         // A drag: seeks arrive faster than they land. The ones mid-burst may be served at a key
         // frame, but the last target must end up exact - and the position must never report the
         // key frame it passed through.
-        var targets = new[] { 14.0, 15.0, 16.0, 17.0, 18.0, 18.5, 18.7 };
+        var targets = new[] { 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 18.7 }; // steps of a second or more join a burst (ScrubSeekPolicy.MinBurstStepSeconds)
         foreach (var target in targets)
         {
             _player.Position = target;
@@ -503,7 +503,9 @@ public sealed class FfmpegPlayerLiveTests : IDisposable
         _player.Volume = 0;
         var random = new Random(12345);
         var start = Stopwatch.GetTimestamp();
-        while (Stopwatch.GetElapsedTime(start).TotalSeconds < 4)
+        // ~250 random operations at the average 6 ms pause: enough to interleave seeks, steps and
+        // play/pause in every order, and the slowest test in the suite when it ran for 4 s.
+        while (Stopwatch.GetElapsedTime(start).TotalSeconds < 1.5)
         {
             switch (random.Next(7))
             {

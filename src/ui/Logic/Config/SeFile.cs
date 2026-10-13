@@ -7,6 +7,7 @@ namespace Nikse.SubtitleEdit.Logic.Config;
 
 public class SeFile
 {
+    public bool ShowRecentFiles { get; set; } = true;
     public bool OpenLastFileOnStart { get; set; } = true;
     public int RecentFilesMaximum { get; set; } = 25;
     public List<RecentFile> RecentFiles { get; set; } = new();
@@ -19,6 +20,20 @@ public class SeFile
     public int ExportDvbTeletextPageNumber { get; set; } = 888;
     public string ExportDvbTeletextLanguageCode { get; set; } = "eng";
     public bool ExportDvbTeletextHearingImpaired { get; set; }
+
+    // Last used Export Cavena 890 values (the titles and comment are per file and not kept).
+    public string ExportCavena890Translator { get; set; } = string.Empty;
+    public string ExportCavena890Language { get; set; } = string.Empty;
+    public double ExportCavena890StartOfProgrammeMs { get; set; }
+
+    /// <summary>
+    /// Last PAC code page chosen in Export PAC - shared with Batch convert's PAC settings so both
+    /// write the same code page. 0 = Latin (see the Pac.CodePage* constants).
+    /// </summary>
+    public int ExportPacCodePage { get; set; }
+
+    /// <summary>Last PAC secondary code page (lines in another script), -1 = none.</summary>
+    public int ExportPacSecondaryCodePage { get; set; } = -1;
 
     public SeFile()
     {

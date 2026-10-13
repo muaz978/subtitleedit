@@ -87,7 +87,6 @@ public partial class AutoTranslateViewModel : ObservableObject
     [ObservableProperty] private bool _modelIsVisible;
     [ObservableProperty] private bool _modelBrowseIsVisible;
     [ObservableProperty] private string _modelText;
-    [ObservableProperty] private bool _buttonModelIsVisible;
     [ObservableProperty] private ObservableCollection<string> _modelPresets = new();
     [ObservableProperty] private bool _modelComboIsVisible;
     [ObservableProperty] private bool _modelTextBoxIsVisible;
@@ -123,6 +122,8 @@ public partial class AutoTranslateViewModel : ObservableObject
     private List<string> _apiUrls = new();
     private List<string> _apiModels = new();
     private bool _onlyCurrentLine;
+    private bool _autoStart;
+    private bool _translationFailed;
     private Subtitle _subtitle = new Subtitle();
     private int _translationProgressIndex;
     private bool _llamaCppUpdatePromptShown;
@@ -161,6 +162,7 @@ public partial class AutoTranslateViewModel : ObservableObject
             new ChatGptTranslate(),
             new OpenAiCompatibleTranslate(),
             new LmStudioTranslate(),
+            new LmStudioAdvancedTranslate(),
             new OllamaTranslate(),
             new OllamaAdvancedTranslate(),
             new LlamaCppTranslate(),
@@ -216,13 +218,23 @@ public partial class AutoTranslateViewModel : ObservableObject
         TranslateInPlace = Se.Settings.AutoTranslate.TranslateSelectedLinesInPlace;
     }
 
+    /// <summary>
+    /// For the "Auto-translate selected lines (no prompt)" shortcut (#15603): translate right away
+    /// with the last used engine and languages, and close with OK when done. On an error or cancel
+    /// the window stays open, so the user can fix the settings or retry.
+    /// </summary>
+    public void SetAutoStart()
+    {
+        _autoStart = true;
+    }
+
     private void LoadSettings()
     {
         Configuration.Settings.Tools.OllamaApiUrl = Se.Settings.AutoTranslate.OllamaUrl;
         Configuration.Settings.Tools.OllamaModel = Se.Settings.AutoTranslate.OllamaModel;
         Configuration.Settings.Tools.OllamaPrompt = Se.Settings.AutoTranslate.OllamaPrompt;
 
-        Configuration.Settings.Tools.OpenRouterApiKey = Se.Settings.AutoTranslate.OpenRouterApiKey;
+        Configuration.Settings.Tools.OpenRouterApiKey = Se.Settings.Providers.OpenRouterApiKey;
         Configuration.Settings.Tools.OpenRouterModel = Se.Settings.AutoTranslate.OpenRouterModel;
         Configuration.Settings.Tools.OpenRouterPrompt = Se.Settings.AutoTranslate.OpenRouterPrompt;
 
@@ -267,7 +279,6 @@ public partial class AutoTranslateViewModel : ObservableObject
         Configuration.Settings.Tools.AutoTranslateDeepLApiKey = Se.Settings.AutoTranslate.DeepLApiKey;
         Configuration.Settings.Tools.AutoTranslateDeepLUrl = Se.Settings.AutoTranslate.DeepLUrl;
         Configuration.Settings.Tools.AutoTranslateDeepLFormality = Se.Settings.AutoTranslate.DeepLFormality;
-        Configuration.Settings.Tools.AutoTranslateDeepLXUrl = Se.Settings.AutoTranslate.DeepLXUrl;
 
         Configuration.Settings.Tools.AutoTranslateLibreUrl = Se.Settings.AutoTranslate.LibreTranslateUrl;
 
@@ -289,24 +300,15 @@ public partial class AutoTranslateViewModel : ObservableObject
         Configuration.Settings.Tools.NvidiaModel = Se.Settings.AutoTranslate.NvidiaModel;
         Configuration.Settings.Tools.NvidiaPrompt = Se.Settings.AutoTranslate.NvidiaPrompt;
 
-        Configuration.Settings.Tools.AutoTranslateMistralApiKey = Se.Settings.AutoTranslate.MistralApiKey;
+        Configuration.Settings.Tools.AutoTranslateMistralApiKey = Se.Settings.Providers.MistralApiKey;
         Configuration.Settings.Tools.AutoTranslateMistralUrl = Se.Settings.AutoTranslate.MistralUrl;
         Configuration.Settings.Tools.AutoTranslateMistralModel = Se.Settings.AutoTranslate.MistralModel;
         Configuration.Settings.Tools.AutoTranslateMistralPrompt = Se.Settings.AutoTranslate.MistralPrompt;
-
-        Configuration.Settings.Tools.AvalAiApiKey = Se.Settings.AutoTranslate.AvalAiApiKey;
-        Configuration.Settings.Tools.AvalAiUrl = Se.Settings.AutoTranslate.AvalAiUrl;
-        Configuration.Settings.Tools.AvalAiModel = Se.Settings.AutoTranslate.AvalAiModel;
-        Configuration.Settings.Tools.AvalAiPrompt = Se.Settings.AutoTranslate.AvalAiPrompt;
 
         Configuration.Settings.Tools.PerplexityApiKey = Se.Settings.AutoTranslate.PerplexityApiKey;
         Configuration.Settings.Tools.PerplexityUrl = Se.Settings.AutoTranslate.PerplexityUrl;
         Configuration.Settings.Tools.PerplexityModel = Se.Settings.AutoTranslate.PerplexityModel;
         Configuration.Settings.Tools.PerplexityPrompt = Se.Settings.AutoTranslate.PerplexityPrompt;
-
-        Configuration.Settings.Tools.KoboldCppPrompt = Se.Settings.AutoTranslate.KoboldCppPrompt;
-        Configuration.Settings.Tools.KoboldCppUrl = Se.Settings.AutoTranslate.KoboldCppUrl;
-        Configuration.Settings.Tools.KoboldCppTemperature = Se.Settings.AutoTranslate.KoboldCppTemperature;
 
         Configuration.Settings.Tools.AnthropicApiKey = Se.Settings.AutoTranslate.AnthropicApiKey;
         Configuration.Settings.Tools.AnthropicApiModel = Se.Settings.AutoTranslate.AnthropicApiModel;
@@ -319,8 +321,6 @@ public partial class AutoTranslateViewModel : ObservableObject
         Configuration.Settings.Tools.GeminiModel = Se.Settings.AutoTranslate.GeminiModel;
         Configuration.Settings.Tools.GeminiProApiKey = Se.Settings.AutoTranslate.GeminiProApiKey;
         Configuration.Settings.Tools.GeminiPrompt = Se.Settings.AutoTranslate.GeminiPrompt;
-
-        Configuration.Settings.Tools.AutoTranslateSeamlessM4TUrl = Se.Settings.AutoTranslate.SeamlessM4TUrl;
 
         Configuration.Settings.Tools.AutoTranslateCrispAsrExe = Se.Settings.AutoTranslate.CrispAsrExe;
         Configuration.Settings.Tools.AutoTranslateCrispAsrModel = Se.Settings.AutoTranslate.CrispAsrModel;
@@ -440,6 +440,12 @@ public partial class AutoTranslateViewModel : ObservableObject
             Se.Settings.AutoTranslate.OllamaAdvancedModel = apiModel.Trim();
         }
 
+        if (engineType == typeof(LmStudioAdvancedTranslate))
+        {
+            Se.Settings.AutoTranslate.LmStudioAdvancedUrl = apiUrl.Trim();
+            Se.Settings.AutoTranslate.LmStudioAdvancedModel = apiModel.Trim();
+        }
+
         if (engineType == typeof(AnthropicTranslate))
         {
             Configuration.Settings.Tools.AnthropicApiKey = apiKey.Trim();
@@ -549,7 +555,7 @@ public partial class AutoTranslateViewModel : ObservableObject
         Se.Settings.AutoTranslate.OllamaModel = Configuration.Settings.Tools.OllamaModel;
         Se.Settings.AutoTranslate.OllamaPrompt = Configuration.Settings.Tools.OllamaPrompt;
 
-        Se.Settings.AutoTranslate.OpenRouterApiKey = Configuration.Settings.Tools.OpenRouterApiKey;
+        Se.Settings.Providers.OpenRouterApiKey = Configuration.Settings.Tools.OpenRouterApiKey;
         Se.Settings.AutoTranslate.OpenRouterModel = Configuration.Settings.Tools.OpenRouterModel;
         Se.Settings.AutoTranslate.OpenRouterPrompt = Configuration.Settings.Tools.OpenRouterPrompt;
 
@@ -585,7 +591,6 @@ public partial class AutoTranslateViewModel : ObservableObject
         Se.Settings.AutoTranslate.DeepLApiKey = Configuration.Settings.Tools.AutoTranslateDeepLApiKey;
         Se.Settings.AutoTranslate.DeepLUrl = Configuration.Settings.Tools.AutoTranslateDeepLUrl;
         Se.Settings.AutoTranslate.DeepLFormality = Configuration.Settings.Tools.AutoTranslateDeepLFormality;
-        Se.Settings.AutoTranslate.DeepLXUrl = Configuration.Settings.Tools.AutoTranslateDeepLXUrl;
 
         Se.Settings.AutoTranslate.LibreTranslateUrl = Configuration.Settings.Tools.AutoTranslateLibreUrl;
 
@@ -607,19 +612,10 @@ public partial class AutoTranslateViewModel : ObservableObject
         Se.Settings.AutoTranslate.NvidiaModel = Configuration.Settings.Tools.NvidiaModel;
         Se.Settings.AutoTranslate.NvidiaPrompt = Configuration.Settings.Tools.NvidiaPrompt;
 
-        Se.Settings.AutoTranslate.MistralApiKey = Configuration.Settings.Tools.AutoTranslateMistralApiKey;
+        Se.Settings.Providers.MistralApiKey = Configuration.Settings.Tools.AutoTranslateMistralApiKey;
         Se.Settings.AutoTranslate.MistralUrl = Configuration.Settings.Tools.AutoTranslateMistralUrl;
         Se.Settings.AutoTranslate.MistralModel = Configuration.Settings.Tools.AutoTranslateMistralModel;
         Se.Settings.AutoTranslate.MistralPrompt = Configuration.Settings.Tools.AutoTranslateMistralPrompt;
-
-        Se.Settings.AutoTranslate.AvalAiApiKey = Configuration.Settings.Tools.AvalAiApiKey;
-        Se.Settings.AutoTranslate.AvalAiUrl = Configuration.Settings.Tools.AvalAiUrl;
-        Se.Settings.AutoTranslate.AvalAiModel = Configuration.Settings.Tools.AvalAiModel;
-        Se.Settings.AutoTranslate.AvalAiPrompt = Configuration.Settings.Tools.AvalAiPrompt;
-
-        Se.Settings.AutoTranslate.KoboldCppPrompt = Configuration.Settings.Tools.KoboldCppPrompt;
-        Se.Settings.AutoTranslate.KoboldCppUrl = Configuration.Settings.Tools.KoboldCppUrl;
-        Se.Settings.AutoTranslate.KoboldCppTemperature = Configuration.Settings.Tools.KoboldCppTemperature;
 
         Se.Settings.AutoTranslate.AnthropicApiKey = Configuration.Settings.Tools.AnthropicApiKey;
         Se.Settings.AutoTranslate.AnthropicApiModel = Configuration.Settings.Tools.AnthropicApiModel;
@@ -632,8 +628,6 @@ public partial class AutoTranslateViewModel : ObservableObject
         Se.Settings.AutoTranslate.GeminiModel = Configuration.Settings.Tools.GeminiModel;
         Se.Settings.AutoTranslate.GeminiProApiKey = Configuration.Settings.Tools.GeminiProApiKey;
         Se.Settings.AutoTranslate.GeminiPrompt = Configuration.Settings.Tools.GeminiPrompt;
-
-        Se.Settings.AutoTranslate.SeamlessM4TUrl = Configuration.Settings.Tools.AutoTranslateSeamlessM4TUrl;
 
         Se.Settings.AutoTranslate.CrispAsrExe = Configuration.Settings.Tools.AutoTranslateCrispAsrExe;
         Se.Settings.AutoTranslate.CrispAsrModel = Configuration.Settings.Tools.AutoTranslateCrispAsrModel;
@@ -723,7 +717,9 @@ public partial class AutoTranslateViewModel : ObservableObject
             TargetLanguages,
             SelectedSourceLanguage,
             Se.Settings.AutoTranslate.AutoTranslateLastTarget,
-            Se.Language.CultureName);
+            Se.Language.CultureName,
+            Se.Settings.AutoTranslate.AutoTranslateLastSource,
+            System.Globalization.CultureInfo.CurrentUICulture.Name);
     }
 
     [RelayCommand]
@@ -845,9 +841,19 @@ public partial class AutoTranslateViewModel : ObservableObject
     [RelayCommand]
     private async Task BrowseModel()
     {
+        // OpenAI-compatible servers list their models at GET {base}/v1/models; Ollama uses /api/tags.
+        var isOpenAiStyle = SelectedAutoTranslator is OpenAiCompatibleTranslate or LmStudioTranslate or LmStudioAdvancedTranslate;
+        var apiKey = SelectedAutoTranslator is OpenAiCompatibleTranslate ? ApiKeyText : null;
         var result = await _windowService.ShowDialogAsync<PickOllamaModelWindow, PickOllamaModelViewModel>(Window!, vm =>
         {
-            vm.Initialize(Se.Language.General.PickOllamaModel, ModelText, ApiUrlText);
+            if (isOpenAiStyle)
+            {
+                vm.InitializeOpenAiCompatible(Se.Language.General.PickModel, ModelText, ApiUrlText, apiKey);
+            }
+            else
+            {
+                vm.Initialize(Se.Language.General.PickOllamaModel, ModelText, ApiUrlText);
+            }
         });
 
         if (result is { OkPressed: true, SelectedModel: not null })
@@ -1369,10 +1375,14 @@ public partial class AutoTranslateViewModel : ObservableObject
     private async Task<bool> StartTranslation(IAutoTranslator translator)
     {
         _abort = false;
+        _translationFailed = false;
         IsProgressEnabled = true;
         var engineType = translator.GetType();
 
-        if (ApiKeyIsVisible && string.IsNullOrWhiteSpace(ApiKeyText) && engineType != typeof(LibreTranslate))
+        // LibreTranslate and MyMemory keys are optional: MyMemory works without one (anonymous
+        // daily quota), the key only raises the limit, and MakeUrl leaves it out when empty.
+        if (ApiKeyIsVisible && string.IsNullOrWhiteSpace(ApiKeyText) &&
+            engineType != typeof(LibreTranslate) && engineType != typeof(MyMemoryApi))
         {
             IsProgressEnabled = false;
             await MessageBox.Show(
@@ -1647,6 +1657,7 @@ public partial class AutoTranslateViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _translationFailed = true;
             _ = Dispatcher.UIThread.Invoke(async () =>
             {
                 var details = new System.Text.StringBuilder();
@@ -1721,6 +1732,11 @@ public partial class AutoTranslateViewModel : ObservableObject
                 {
                     SelectAndScrollToRow(Rows.IndexOf(lastTranslatedRow));
                 }
+
+                if (_autoStart && !_abort && !_translationFailed && HasTranslatedSomething)
+                {
+                    Ok();
+                }
             });
         }
     }
@@ -1745,6 +1761,7 @@ public partial class AutoTranslateViewModel : ObservableObject
             LlamaCppTranslate => settings.LlamaCppApiUrl,
             LlamaCppAdvancedTranslate => settings.LlamaCppApiUrl,
             OllamaAdvancedTranslate => Se.Settings.AutoTranslate.OllamaAdvancedUrl,
+            LmStudioAdvancedTranslate => Se.Settings.AutoTranslate.LmStudioAdvancedUrl,
             AnthropicTranslate => settings.AnthropicApiUrl,
             GroqTranslate => settings.GroqUrl,
             OpenRouterTranslate => settings.OpenRouterUrl,
@@ -1922,7 +1939,6 @@ public partial class AutoTranslateViewModel : ObservableObject
         FormalityIsVisible = false;
         ModelIsVisible = false;
         ModelBrowseIsVisible = false;
-        ButtonModelIsVisible = false;
         ButtonDownloadIsVisible = false;
         CrispAsrModelComboIsVisible = false;
         EngineUpdateButtonIsVisible = false;
@@ -2116,9 +2132,10 @@ public partial class AutoTranslateViewModel : ObservableObject
             ApiKeyText = Configuration.Settings.Tools.OpenAiCompatibleTranslateApiKey;
             ApiKeyIsVisible = true;
 
-            // No model list to offer - the server decides which models exist, so the
-            // model stays a free-text field (and may be left empty for one-model servers).
+            // No fixed model list - the server decides which models exist, so the model stays a
+            // free-text field (may be left empty for one-model servers); "Browse" asks /v1/models.
             ModelIsVisible = true;
+            ModelBrowseIsVisible = true;
             ModelText = Configuration.Settings.Tools.OpenAiCompatibleTranslateModel;
 
             return;
@@ -2135,6 +2152,33 @@ public partial class AutoTranslateViewModel : ObservableObject
             {
                 Configuration.Settings.Tools.LmStudioApiUrl.TrimEnd('/'),
             });
+
+            // LM Studio serves whatever model is loaded - free-text field, may be left empty.
+            ModelIsVisible = true;
+            ModelBrowseIsVisible = true;
+            ModelText = Configuration.Settings.Tools.LmStudioModel;
+
+            return;
+        }
+
+        if (engineType == typeof(LmStudioAdvancedTranslate))
+        {
+            ModelBrowseIsVisible = true;
+            LlamaCppAdvancedButtonIsVisible = true;
+
+            if (string.IsNullOrEmpty(Se.Settings.AutoTranslate.LmStudioAdvancedUrl))
+            {
+                Se.Settings.AutoTranslate.LmStudioAdvancedUrl = LmStudioAdvancedTranslate.DefaultUrl;
+            }
+
+            FillUrls(new List<string>
+            {
+                Se.Settings.AutoTranslate.LmStudioAdvancedUrl.TrimEnd('/'),
+            });
+
+            // Empty model = whatever model LM Studio has loaded.
+            ModelIsVisible = true;
+            ModelText = Se.Settings.AutoTranslate.LmStudioAdvancedModel;
 
             return;
         }
@@ -2200,7 +2244,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = Se.Settings.AutoTranslate.OllamaModels.Split(',').ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = Se.Settings.AutoTranslate.OllamaModel;
 
             return;
@@ -2224,7 +2267,6 @@ public partial class AutoTranslateViewModel : ObservableObject
             // Same installed-model list as the classic Ollama engine - only the endpoint differs.
             _apiModels = Se.Settings.AutoTranslate.OllamaModels.Split(',').ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = Se.Settings.AutoTranslate.OllamaAdvancedModel;
 
             return;
@@ -2242,7 +2284,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = AnthropicTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = Configuration.Settings.Tools.AnthropicApiModel;
 
             return;
@@ -2266,7 +2307,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = PerplexityTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = Configuration.Settings.Tools.PerplexityModel;
 
             return;
@@ -2284,7 +2324,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = GroqTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = string.IsNullOrEmpty(Configuration.Settings.Tools.GroqModel) ? _apiModels[0] : Configuration.Settings.Tools.GroqModel;
 
             return;
@@ -2303,7 +2342,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = OpenRouterTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = string.IsNullOrEmpty(Configuration.Settings.Tools.OpenRouterModel) ? _apiModels[0] : Configuration.Settings.Tools.OpenRouterModel;
 
             return;
@@ -2321,7 +2359,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = ApiRouteTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = string.IsNullOrEmpty(Configuration.Settings.Tools.ApiRouteModel) ? _apiModels[0] : Configuration.Settings.Tools.ApiRouteModel;
 
             return;
@@ -2334,7 +2371,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = GeminiTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = string.IsNullOrEmpty(Configuration.Settings.Tools.GeminiModel) ? _apiModels[0] : Configuration.Settings.Tools.GeminiModel;
 
             return;
@@ -2352,7 +2388,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = NvidiaTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = string.IsNullOrEmpty(Configuration.Settings.Tools.NvidiaModel) ? _apiModels[0] : Configuration.Settings.Tools.NvidiaModel;
 
             return;
@@ -2370,7 +2405,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = MistralTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = string.IsNullOrEmpty(Configuration.Settings.Tools.AutoTranslateMistralModel) ? _apiModels[0] : Configuration.Settings.Tools.AutoTranslateMistralModel;
 
             return;
@@ -2388,7 +2422,6 @@ public partial class AutoTranslateViewModel : ObservableObject
 
             _apiModels = DeepSeekTranslate.Models.ToList();
             ModelIsVisible = true;
-            ButtonModelIsVisible = true;
             ModelText = string.IsNullOrEmpty(Configuration.Settings.Tools.DeepSeekModel) ? _apiModels[0] : Configuration.Settings.Tools.DeepSeekModel;
 
             return;
@@ -2473,7 +2506,10 @@ public partial class AutoTranslateViewModel : ObservableObject
 
     /// <summary>
     /// The target language a freshly built target combo starts on: the last target used, then the
-    /// UI language, then English - skipping any that is the source language (#14903).
+    /// last source if the last target is now the source (the reverse direction), then the UI
+    /// language, then the OS language, then English - skipping any that is the source language (#14903).
+    /// The OS language makes a Danish macOS with an English UI suggest Danish for an English
+    /// subtitle instead of the German fallback.
     ///
     /// The old default only matched on <see cref="TranslationPair.Code"/> and guessed the user's
     /// language from the region part of the OS culture ("US" in "en-US"). The LLM engines keep the
@@ -2484,19 +2520,24 @@ public partial class AutoTranslateViewModel : ObservableObject
         IList<TranslationPair> targetLanguages,
         TranslationPair? sourceLanguage,
         string? lastTarget,
-        string? uiCultureName)
+        string? uiCultureName,
+        string? lastSource = null,
+        string? osCultureName = null)
     {
         if (targetLanguages.Count == 0)
         {
             return null;
         }
 
-        var candidates = new List<string?> { lastTarget, uiCultureName };
-        if (!string.IsNullOrEmpty(uiCultureName) && uiCultureName.Contains('-'))
+        var candidates = new List<string?> { lastTarget };
+        var lastTargetLanguage = FindLanguage(targetLanguages, lastTarget);
+        if (lastTargetLanguage != null && IsSameLanguage(lastTargetLanguage, sourceLanguage))
         {
-            candidates.Add(uiCultureName.Substring(0, uiCultureName.IndexOf('-')));
+            candidates.Add(lastSource);
         }
 
+        AddCultureCandidates(candidates, uiCultureName);
+        AddCultureCandidates(candidates, osCultureName);
         candidates.Add("en");
         candidates.Add("de");
 
@@ -2510,6 +2551,20 @@ public partial class AutoTranslateViewModel : ObservableObject
         }
 
         return targetLanguages.FirstOrDefault(p => !IsSameLanguage(p, sourceLanguage)) ?? targetLanguages[0];
+    }
+
+    private static void AddCultureCandidates(List<string?> candidates, string? cultureName)
+    {
+        if (string.IsNullOrEmpty(cultureName))
+        {
+            return;
+        }
+
+        candidates.Add(cultureName);
+        if (cultureName.Contains('-'))
+        {
+            candidates.Add(cultureName.Substring(0, cultureName.IndexOf('-')));
+        }
     }
 
     /// <summary>
@@ -2662,6 +2717,12 @@ public partial class AutoTranslateViewModel : ObservableObject
                 {
                     SetAutoTranslatorEngine(autoTranslator);
                 }
+                else
+                {
+                    // The saved engine is gone (e.g. DeepLX was removed) - never auto-start with
+                    // the first engine in the list; open the dialog so the user picks one.
+                    _autoStart = false;
+                }
             }
 
             UpdateSourceLanguages(SelectedAutoTranslator);
@@ -2672,5 +2733,10 @@ public partial class AutoTranslateViewModel : ObservableObject
                 SelectedTranslateRow = Rows[0];
             }
         });
+
+        if (_autoStart)
+        {
+            Dispatcher.UIThread.Post(async () => await DoTranslate(onlyCurrentLine: false));
+        }
     }
 }

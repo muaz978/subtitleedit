@@ -32,7 +32,7 @@ public partial class DownloadFfmpegViewModel : ObservableObject, IClosingCleanup
     private readonly Timer _timer;
     private bool _done;
     private readonly CancellationTokenSource _cancellationTokenSource;
-    private readonly MemoryStream _downloadStream;
+    private MemoryStream _downloadStream;
 
     private readonly IZipUnpacker _zipUnpacker;
 
@@ -82,16 +82,42 @@ public partial class DownloadFfmpegViewModel : ObservableObject, IClosingCleanup
 
                 var ffmpegFileName = GetFfmpegFileName();
 
-                if (File.Exists(ffmpegFileName))
+                // Runs on the timer thread with _done already set, so an exception here (e.g.
+                // ffmpeg in use by a running burn-in/waveform job) would otherwise be swallowed
+                // and leave the window sitting at 100% forever.
+                try
                 {
-                    File.Delete(ffmpegFileName);
+                    if (File.Exists(ffmpegFileName))
+                    {
+                        try
+                        {
+                            File.Delete(ffmpegFileName);
+                        }
+                        catch (Exception deleteException)
+                        {
+                            Se.LogError(deleteException);
+                            ShowError(Se.Language.General.DownloadCompleteButCouldNotDeleteFile + Environment.NewLine +
+                                      deleteException.Message);
+                            return;
+                        }
+                    }
+
+                    UnpackFfmpeg(ffmpegFileName);
+
+                    if (File.Exists(ffmpegFileName) && OperatingSystem.IsMacOS())
+                    {
+                        MacHelper.MakeExecutable(ffmpegFileName);
+                    }
                 }
-
-                UnpackFfmpeg(ffmpegFileName);
-
-                if (File.Exists(ffmpegFileName) && OperatingSystem.IsMacOS())
+                catch (Exception exception)
                 {
-                    MacHelper.MakeExecutable(ffmpegFileName);
+                    Se.LogError(exception);
+                    ShowError(exception.Message);
+                    return;
+                }
+                finally
+                {
+                    _downloadStream.Dispose();
                 }
 
                 FfmpegFileName = ffmpegFileName;
@@ -114,6 +140,15 @@ public partial class DownloadFfmpegViewModel : ObservableObject, IClosingCleanup
                 }
             }
         }
+    }
+
+    private void ShowError(string error)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            StatusText = Se.Language.General.DownloadFailed;
+            Error = error;
+        });
     }
 
     private void UnpackFfmpeg(string newFileName)
@@ -191,6 +226,27 @@ public partial class DownloadFfmpegViewModel : ObservableObject, IClosingCleanup
         {
             Window?.Close();
         });
+    }
+
+    [RelayCommand]
+    private void Retry()
+    {
+        lock (_lockObj)
+        {
+            if (!_done || _cancellationTokenSource.IsCancellationRequested)
+            {
+                return;
+            }
+
+            _downloadStream.Dispose();
+            _downloadStream = new MemoryStream();
+            Error = string.Empty;
+            Progress = 0;
+            StatusText = Se.Language.General.StartingDotDotDot;
+            _done = false;
+            StartDownload();
+            _timer.Start();
+        }
     }
 
     [RelayCommand]

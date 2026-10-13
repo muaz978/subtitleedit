@@ -12,6 +12,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace Nikse.SubtitleEdit.Logic.Media;
 
@@ -297,6 +298,14 @@ public class FfmpegGenerator
             tuneParameter = $" -tune {tune}";
         }
 
+        // "+faststart" only means something to the MP4/QuickTime muxer. Edit lists are left to
+        // ffmpeg: "-use_editlist 0" shifted the video by the B-frame delay (two frames late
+        // against the audio), and with AAC's encoder delay it could also stretch the first
+        // video sample, which Adobe Audition plays back as black video (#15992).
+        var movFlags = Features.Video.BurnIn.OutputContainer.IsMp4Family(Path.GetExtension(outputVideoFileName))
+            ? " -movflags +faststart"
+            : string.Empty;
+
         outputVideoFileName = $"\"{outputVideoFileName}\"";
 
         var passSettings = string.Empty;
@@ -417,7 +426,7 @@ public class FfmpegGenerator
         // Without it ffmpeg hits "File ... already exists. Exiting." and writes nothing - and as
         // the old file is still there, the burn-in looked like it succeeded (issue #14210).
         return
-            $"-y{cutStart}-i \"{inputVideoFileName}\"{canvasInput}{imageSubtitleInput}{logoInput}{cutEnd} {filterParameter} -g 30 -bf 2 -s {width}x{height} {videoEncodingSettings} {passSettings} {presetSettings}{tuneParameter} {crfSettings} {pixelFormat} {audioSettings} -use_editlist 0 -movflags +faststart{shortestParameter} {outputVideoFileName}";
+            $"-y{cutStart}-i \"{inputVideoFileName}\"{canvasInput}{imageSubtitleInput}{logoInput}{cutEnd} {filterParameter} -g 30 -bf 2 -s {width}x{height} {videoEncodingSettings} {passSettings} {presetSettings}{tuneParameter} {crfSettings} {pixelFormat} {audioSettings}{movFlags}{shortestParameter} {outputVideoFileName}";
     }
 
     /// <summary>
@@ -662,6 +671,21 @@ public class FfmpegGenerator
         return timeCode;
     }
 
+    private static readonly Regex FadeTagRegex = new(@"\\fade?\s*\([^)]*\)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Removes ASSA \fad(...) and \fade(...) tags (and tag blocks left empty by that).
+    /// </summary>
+    internal static string RemoveFadeTags(string text)
+    {
+        if (string.IsNullOrEmpty(text) || !text.Contains("\\fad", StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        return FadeTagRegex.Replace(text, string.Empty).Replace("{}", string.Empty);
+    }
+
     internal static string? GetScreenShotWithSubtitle(Subtitle previewSubtitle, int width, int height)
     {
         previewSubtitle = new Subtitle(previewSubtitle);
@@ -672,6 +696,14 @@ public class FfmpegGenerator
         }
 
         first.StartTime.TotalMilliseconds = 0;
+
+        // Only the first frame (t=0) is rendered, where a fade-in is still fully transparent, so a
+        // line with \fad/\fade measured as nothing: Set position had no text to drag and Set
+        // background skipped the line (#15580). Callers only measure the text, so drop the fade.
+        foreach (var p in previewSubtitle.Paragraphs)
+        {
+            p.Text = RemoveFadeTags(p.Text);
+        }
 
         var advancedSubStationAlphaContent = previewSubtitle.ToText(new AdvancedSubStationAlpha());
 
@@ -1016,6 +1048,29 @@ public class FfmpegGenerator
             {
                 FileName = GetFfmpegLocation(),
                 Arguments = $"-nostdin -y -i \"{inputFileName}\" -vn -map 0:a:0 -ar 44100 -ac 2 \"{outputWaveFileName}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        SetupDataReceiveHandler(dataReceivedHandler, process);
+
+        return process;
+    }
+
+    /// <summary>
+    /// Sums separated stems back into one track, e.g. HTDemucs' drums, bass and other into the
+    /// background without the speech. Written as float so the sum cannot clip.
+    /// </summary>
+    public static Process MixStems(IReadOnlyList<string> stemFileNames, string outputWaveFileName, DataReceivedEventHandler? dataReceivedHandler = null)
+    {
+        var inputs = string.Join(" ", stemFileNames.Select(f => $"-i \"{f}\""));
+        var process = new Process
+        {
+            StartInfo =
+            {
+                FileName = GetFfmpegLocation(),
+                Arguments = $"-nostdin -y {inputs} -filter_complex \"amix=inputs={stemFileNames.Count}:duration=longest:normalize=0\" -c:a pcm_f32le \"{outputWaveFileName}\"",
                 UseShellExecute = false,
                 CreateNoWindow = true
             }

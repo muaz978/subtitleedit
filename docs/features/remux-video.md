@@ -5,7 +5,7 @@ Repackage the video with new audio tracks and optional soft subtitles into an MP
 - **Menu:** Video → More → Remux video...
 - **Shortcut:** None (menu only)
 
-<!-- Screenshot: Remux video window with the video, audio and subtitle sections (remux-video.png, not yet taken) -->
+![Remux Video](../screenshots/remux-video.png)
 
 Remuxing copies the streams into a new container, so it is quick and lossless. Use it to attach a dubbed or translated audio track (for example from [Text to Speech](text-to-speech.md)), to add subtitle tracks that can be switched on and off in the player, to embed CEA-608 closed captions, or to convert between MP4, MKV, MOV and MPG. To draw the subtitle into the picture instead, see [Burn-In Subtitles](burn-in.md).
 
@@ -26,15 +26,17 @@ The **More** submenu is shown while a video is loaded, and ffmpeg is required (y
 
 Accepted formats: `.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`, `.ts`, `.mpg`, `.mpeg`, `.vob`. The first video stream is copied as-is (for an MPG output it may have to be re-encoded, see below).
 
+When the video can't be stored in the chosen output format without re-encoding - for example VP8 video from an older `.webm`, which MP4 cannot hold - the output format switches to `.mkv` (unless a subtitle file needs MOV or MPG).
+
 ## Audio Files
 
-Accepted formats: `.mp3`, `.aac`, `.ac3`, `.wav`, `.mkv`, `.mka`, `.mp4`. At least one audio file is required.
+Accepted formats: `.mp3`, `.aac`, `.ac3`, `.m4a`, `.wav`, `.mka`, and every video format accepted as input video (its audio track is used). At least one audio file is required. A file that has no audio track is refused with a message.
 
 - Each file becomes one audio track, in list order - use **Move up** / **Move down** (Ctrl+Up / Ctrl+Down) to change the order, **Remove** (Delete) or **Clear** to drop entries
 - A file with several audio tracks asks which track to use when it is added; **Select audio track...** in the list's right-click menu changes it later
 - The video's own audio is included only while it is in the list - remove it to replace the original sound entirely
 - Each track gets a title (the file name, or the track name for multi-track files) and, when known, its language
-- For an `.mp4` or `.mov` output, `.wav` audio is encoded to AAC (192 kb/s); everything else is copied
+- For an `.mp4` or `.mov` output, audio the container cannot hold is encoded to AAC (192 kb/s): `.wav` files, other PCM audio in MP4, TrueHD and Vorbis in both, Opus and FLAC in MOV. Everything else is copied
 
 ## Subtitle Files
 
@@ -74,4 +76,4 @@ The window remembers its size and position.
 | Ctrl+Up / Ctrl+Down | Move the selected audio or subtitle file up / down |
 | Delete | Remove the selected file from its list |
 | Escape | Close (not while remuxing) |
-| F1 | Open help |
+| F1 | Show help (default key, [changeable](shortcuts.md#worth-knowing)) |

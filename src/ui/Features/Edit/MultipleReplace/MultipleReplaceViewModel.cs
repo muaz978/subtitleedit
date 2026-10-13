@@ -1177,7 +1177,7 @@ public partial class MultipleReplaceViewModel : ObservableObject
         else if (UiUtil.IsHelp(e))
         {
             e.Handled = true;
-            UiUtil.ShowHelp("features/edit");
+            UiUtil.ShowHelp("features/edit", "multiple-replace");
         }
     }
 
@@ -1585,10 +1585,7 @@ public partial class MultipleReplaceViewModel : ObservableObject
     private Regex GetWholeWordRegex(string findWhat, bool ignoreCase)
     {
         return _wholeWordRegexes.GetOrAdd((findWhat, ignoreCase), static key =>
-            new Regex(RegexUtils.BuildWholeWordPattern(key.FindWhat),
-                // CultureInvariant: case-insensitive matching must not depend on the machine (tr-TR "I").
-                key.IgnoreCase ? RegexOptions.IgnoreCase | RegexOptions.CultureInvariant : RegexOptions.CultureInvariant,
-                RegexUtils.UserPatternMatchTimeout));
+            ReplaceExpression.CreateWholeWordRegex(key.FindWhat, key.IgnoreCase));
     }
 
     /// <summary>

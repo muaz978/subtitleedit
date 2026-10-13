@@ -2132,7 +2132,8 @@ public partial class ReviewSpeechViewModel : ObservableObject
 
         Dispatcher.UIThread.PostSafe(async () =>
         {
-            if (engine is ElevenLabs && model == "eleven_v3")
+            // v4 / v4 Turbo honor the same audio tags as v3 ([whispers], [laughs], [pause]...)
+            if (engine is ElevenLabs && model is "eleven_v3" or "eleven_v4" or "eleven_v4_turbo")
             {
                 IsElevenLabsEngineV3Selected = true;
             }
@@ -2363,7 +2364,8 @@ public partial class ReviewSpeechViewModel : ObservableObject
 
         IsInstructionTextVisible =
             (engine is Qwen3TtsCpp && Qwen3TtsCpp.IsVoiceDesignModel(model))
-            || (engine is Qwen3TtsCrispAsr && Qwen3TtsCrispAsr.IsVoiceDesignModel(model));
+            || (engine is Qwen3TtsCrispAsr && Qwen3TtsCrispAsr.IsVoiceDesignModel(model))
+            || engine is BreezeTtsAudioCpp;
         IsInstructionPickerVisible = engine is OmniVoiceTtsCpp;
         HasInstruction = IsInstructionTextVisible || IsInstructionPickerVisible;
 
@@ -2379,6 +2381,7 @@ public partial class ReviewSpeechViewModel : ObservableObject
             Qwen3TtsCpp => Se.Settings.Video.TextToSpeech.Qwen3TtsCppInstruction ?? string.Empty,
             Qwen3TtsCrispAsr => Se.Settings.Video.TextToSpeech.Qwen3TtsCppInstruction ?? string.Empty,
             OmniVoiceTtsCpp => Se.Settings.Video.TextToSpeech.OmniVoiceTtsCppInstruction ?? string.Empty,
+            BreezeTtsAudioCpp => Se.Settings.Video.TextToSpeech.BreezeTtsAudioCppInstruction ?? string.Empty,
             _ => string.Empty,
         };
 

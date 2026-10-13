@@ -229,7 +229,9 @@ public class SecondsUpDown : TemplatedControl
         }
         else
         {
-            val = val.Add(TimeSpan.FromMilliseconds(10 * delta));
+            // Same step as the time code up/down's milliseconds part, so Show and Duration move alike
+            var step = Math.Max(1, Se.Settings.General.TimeCodeUpDownStepMs);
+            val = val.Add(TimeSpan.FromMilliseconds(delta * step));
         }
 
         Value = val;
@@ -260,6 +262,12 @@ public class SecondsUpDown : TemplatedControl
         if (string.IsNullOrWhiteSpace(text))
         {
             return TimeSpan.Zero;
+        }
+
+        if (Se.Settings.General.UseFrameNumbers)
+        {
+            // A frame count; a negative duration is clamped to zero like any other.
+            return FrameNumbers.TryParse(text, out var frameCount) ? frameCount : TimeSpan.Zero;
         }
 
         if (Se.Settings.General.UseFrameMode)
@@ -339,6 +347,11 @@ public class SecondsUpDown : TemplatedControl
 
     private static string FormatTime(TimeSpan ts)
     {
+        if (Se.Settings.General.UseFrameNumbers)
+        {
+            return FrameNumbers.Format(ts);
+        }
+
         if (Se.Settings.General.UseFrameMode)
         {
             var seconds = Math.Floor(ts.TotalSeconds);

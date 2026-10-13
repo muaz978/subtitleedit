@@ -215,18 +215,19 @@ public static class LlamaCppServerManager
         // Qwen 3.5's thinking template: without "--reasoning off" every line still came back, but at
         // ~4x the time (34 s vs 8 s for 24 lines EN->DA on the 2B). No PromptTemplate - its trained
         // prompt ("Translate the following text into {1}. Output the translation directly...") is
-        // already what SE's generic prompt asks for. There are no official GGUFs; the 2B quant is
-        // mradermacher's, the 9B a community Q4_K_M. Compared 2026-10-01 (seconv, 24 dialog lines
+        // already what SE's generic prompt asks for. Downloads come from IndexTeam's official GGUF
+        // repos (published 2026-10-02); the local file names are kept from the earlier community
+        // quants so existing downloads and saved selections still match. Compared 2026-10-01 (seconv, 24 dialog lines
         // EN->DA/DE/JA, b10840): the 9B was on par with TranslateGemma 12B (best in Japanese, never
         // left a line untranslated) and ahead of Gemma 4 E4B; the 2B is roughly TranslateGemma 4B
         // level at twice its speed. The 2B Q4_K_M is not offered - it made clearly worse slips than
         // the Q8_0 (e.g. "sweetie" -> the Danish insult "kærling"). Index-Homura (same family) is
         // left out: it needs a target syllable count per line, which the engines cannot supply.
         new LlamaCppModel("Index-Translate 2B (Q8_0) - 150 languages", "Index-Translate-2B.Q8_0.gguf", "2.1 GB",
-            "https://huggingface.co/mradermacher/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf",
+            "https://huggingface.co/IndexTeam/Index-Translate-2B-GGUF/resolve/main/Index-Translate-2B.Q8_0.gguf",
             Temperature: 0, NoThinking: true),
         new LlamaCppModel("Index-Translate 9B (Q4_K_M) - 150 languages", "index-translate-9b-q4_k_m.gguf", "5.8 GB",
-            "https://huggingface.co/datouge/Index-Translate-9B-Q4_K_M-GGUF/resolve/main/index-translate-9b-q4_k_m.gguf",
+            "https://huggingface.co/IndexTeam/Index-Translate-9B-GGUF/resolve/main/Index-Translate-9B.Q4_K_M.gguf",
             Temperature: 0, NoThinking: true),
 
         // Aya Expanse 8B (Cohere) - a dedicated multilingual model (23 languages), a good translation
@@ -294,6 +295,15 @@ public static class LlamaCppServerManager
             "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"),
         new LlamaCppModel("Phi-4 mini 3.8B (Q4_K_M)", "microsoft_Phi-4-mini-instruct-Q4_K_M.gguf", "2.5 GB",
             "https://huggingface.co/bartowski/microsoft_Phi-4-mini-instruct-GGUF/resolve/main/microsoft_Phi-4-mini-instruct-Q4_K_M.gguf"),
+
+        // PrismML Bonsai 27B, 1-bit (Q1_0, upstream llama.cpp - the ternary Q2_0/PQ2_0/PTQ1_0 files
+        // need PrismML's fork). English only: tested 2026-10-11 on b11425 with the review protocol it
+        // found 8/8 planted English errors with no false edits (Qwen 3.5 4B: 7/8), but only 2/6 in
+        // Danish, and its translations were poor - hence review only, not in TranslateModels.
+        // NoThinking is required: with thinking on a 15-line batch took ~400 s. ~12 tok/s on an M4.
+        new LlamaCppModel("Bonsai 27B 1-bit (Q1_0) - English only", "Bonsai-27B-Q1_0.gguf", "3.8 GB",
+            "https://huggingface.co/prism-ml/Bonsai-27B-gguf/resolve/main/Bonsai-27B-Q1_0.gguf",
+            NoThinking: true),
 
         // EuroLLM 2512 - all 24 official EU languages (incl. Danish/Swedish/Norwegian/Finnish, which
         // the Hy-MT2 family lacks entirely), so these are the best picks for proofreading European

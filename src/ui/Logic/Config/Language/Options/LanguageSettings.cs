@@ -99,9 +99,12 @@ public class LanguageSettings
     public string NewEmptyDefaultMs { get; set; }
     public string TimeCodeUpDownStepMs { get; set; }
     public string MoveSelectedLinesStepMs { get; set; }
+    public string MoveStartEndStepMs { get; set; }
     public string MoveLinesShortenNeighbor { get; set; }
     public string PromptBeforeDelete { get; set; }
     public string RememberPositionAndSize { get; set; }
+    public string TitleBarFullFileName { get; set; }
+    public string ShowRecentFiles { get; set; }
     public string OpenLastFileOnStart { get; set; }
     public string AutoSave { get; set; }
     public string AutoBackupOn { get; set; }
@@ -129,6 +132,7 @@ public class LanguageSettings
     public string WaveformUseSkiaRenderer { get; set; }
     public string WaveformCenterVideoPositionAlsoWhenPaused { get; set; }
     public string WaveformSelectCurrentSubtitleWhilePaused { get; set; }
+    public string WaveformRememberZoom { get; set; }
     public string WaveformShowToolbar { get; set; }
     public string WaveformShowToolbarEdit { get; set; }
     public string WaveformShowToolbarEditLabel { get; set; }
@@ -202,6 +206,7 @@ public class LanguageSettings
     public string AdjustAllTimesRememberLineSelectionChoice { get; set; }
     public string MergeKeepEndTime { get; set; }
     public string MergeKeepEndTimeOnlyAssa { get; set; }
+    public string MergeAutoBreak { get; set; }
     public string FilesAndLogs { get; set; }
     public string ShowErrorLogFile { get; set; }
     public string ShowToolsLogFile { get; set; }
@@ -239,10 +244,15 @@ public class LanguageSettings
     public string ResetSyntaxColoring { get; set; }
     public string ResetWaveform { get; set; }
     public string ResetRules { get; set; }
-    public string UseFrameMode { get; set; }
+    public string TimeCodeMode { get; set; }
+    public string TimeCodeModeTime { get; set; }
+    public string TimeCodeModeFrames { get; set; }
+    public string TimeCodeModeFrameNumbers { get; set; }
+    public string FrameModeSnapToVideoFrames { get; set; }
     public string TextBoxLimitNewLines { get; set; }
     public string MpvOpenGl { get; set; }
     public string MpvSoftwareRendering { get; set; }
+    public string MpvMetalRendering { get; set; }
     public string MpvWidRendering { get; set; }
     public string WaveFormsAndSpectrogramFoldersContainsX { get; set; }
     public string DeleteWaveformAndSpectrogramFoldersQuestion { get; set; }
@@ -329,12 +339,17 @@ public class LanguageSettings
     public string AllSettings { get; set; }
     public string UiScale { get; set; }
     public string FontScale { get; set; }
+    public string TextSelectionOpacity { get; set; }
     public string WaveformToolbarItems { get; set; }
     public string MatchIconColorToDarkTheme { get; set; }
     public string SubtitlePreviewProperties { get; set; }
     public string UsePositionFromSubtitleFile { get; set; }
     public string MarginIsPartOfSubtitleArea { get; set; }
     public string TextJustify { get; set; }
+    public string Deinterlace { get; set; }
+    public string DeinterlaceOff { get; set; }
+    public string DeinterlaceAuto { get; set; }
+    public string DeinterlaceAlways { get; set; }
     public string PixelWidthInfo { get; set; }
     public string SpellCheckEngineHunSpelll { get; set; }
     public string SpellCheckEngineMsWord { get; set; }
@@ -449,9 +464,12 @@ public class LanguageSettings
         NewEmptyDefaultMs = "Default new subtitle duration (ms)";
         TimeCodeUpDownStepMs = "Time up/down increment (ms)";
         MoveSelectedLinesStepMs = "Move selected lines shortcut step (ms)";
+        MoveStartEndStepMs = "Move start/end shortcut step (ms)";
         MoveLinesShortenNeighbor = "Move lines: shorten previous/next line instead of overlapping it";
         PromptBeforeDelete = "Prompt before delete";
         RememberPositionAndSize = "Remember window position and size";
+        TitleBarFullFileName = "Show full file path in title bar";
+        ShowRecentFiles = "Show recent files (for reopen)";
         OpenLastFileOnStart = "Open last recent file on start";
         AutoSave = "Auto-save (save the open file while editing)";
         AutoBackupOn = "Auto-backup";
@@ -480,6 +498,7 @@ public class LanguageSettings
         WaveformFocusOnMouseOver = "Focus on mouse over";
         WaveformCenterVideoPositionAlsoWhenPaused = "Center video position also while paused";
         WaveformSelectCurrentSubtitleWhilePaused = "Select current subtitle also while paused";
+        WaveformRememberZoom = "Remember zoom (horizontal and vertical)";
         WaveformShowToolbar = "Show toolbar";
         WaveformShowToolbarEdit = "Edit toolbar...";
         WaveformShowToolbarEditLabel = "Toolbar items";
@@ -545,6 +564,7 @@ public class LanguageSettings
         AdjustAllTimesRememberLineSelectionChoice = "Adjust all times, remember line selection choice";
         MergeKeepEndTime = "Merge lines: keep end time (allow overlap with next subtitle)";
         MergeKeepEndTimeOnlyAssa = "Merge lines: keep end time only for \"Advanced Sub Station Alpha\"";
+        MergeAutoBreak = "Merge lines: auto-break merged text (off keeps the lines' own line breaks)";
         DefaultFormat = "Default format";
         DefaultSaveAsFormat = "Default \"Save as\" format";
         FavoriteSubtitleFormats = "Favorite subtitle formats";
@@ -588,11 +608,16 @@ public class LanguageSettings
         ResetSyntaxColoring = "Reset syntax coloring";
         ResetWaveform = "Reset waveform";
         ResetRules = "Reset rules";
-        UseFrameMode = "Use frame mode (hh.mm.ss.ff)";
+        TimeCodeMode = "Time code mode";
+        TimeCodeModeTime = "Time (hh:mm:ss,zzz)";
+        TimeCodeModeFrames = "Frames (hh:mm:ss:ff)";
+        TimeCodeModeFrameNumbers = "Frame numbers";
+        FrameModeSnapToVideoFrames = "Store times on video frames (not frames within each second)";
         TextBoxLimitNewLines = "Limit number of lines in subtitle text box";
         MpvOpenGl = "libmpv - OpenGL";
         MpvWidRendering = "libmpv - Native Window ID rendering";
         MpvSoftwareRendering = "libmpv - Software rendering (slow)";
+        MpvMetalRendering = "libmpv - Metal (experimental, needs restart)";
         VlcWidRendering = "libVLC - Native Window ID rendering";
         FfmpegSoftwareRendering = "FFmpeg";
         DownloadFfmpegLibs = "Download FFmpeg libraries (for the FFmpeg video player)";
@@ -678,12 +703,17 @@ public class LanguageSettings
         AllSettings = "All settings";
         UiScale = "UI scale (%)";
         FontScale = "Font scale (%)";
+        TextSelectionOpacity = "Text selection opacity (%)";
         WaveformToolbarItems = "Waveform toolbar items";
         MatchIconColorToDarkTheme = "Match icon color to dark theme foreground color";
         SubtitlePreviewProperties = "Subtitle preview properties";
         UsePositionFromSubtitleFile = "Use position from subtitle file (TTML/PAC/EBU STL)";
         MarginIsPartOfSubtitleArea = "Margin is part of the subtitle area";
         TextJustify = "Justify lines";
+        Deinterlace = "Deinterlace video";
+        DeinterlaceOff = "Off";
+        DeinterlaceAuto = "Auto (interlaced frames only)";
+        DeinterlaceAlways = "Always";
         PixelWidthInfo = "Green lines = max-width limit   |   Red area = text exceeds limit";
         SpellCheckEngineHunSpelll = "Hunspell";
         SpellCheckEngineMsWord = "MS Word";

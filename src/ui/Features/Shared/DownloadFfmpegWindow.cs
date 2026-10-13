@@ -35,8 +35,12 @@ public class DownloadFfmpegWindow : Window
         var statusText = new TextBlock();
         statusText.Bind(TextBlock.TextProperty, new Binding(nameof(DownloadFfmpegViewModel.StatusText)));
 
+        // Download/unpack failures (no data, ffmpeg in use, ...) - otherwise the window just sits there.
+        var errorText = DownloadWindowUi.MakeErrorText();
+
         var buttonCancel = UiUtil.MakeButtonCancel(vm.CommandCancelCommand);
-        var buttonBar = UiUtil.MakeButtonBar(buttonCancel);
+        var buttonRetry = DownloadWindowUi.MakeButtonRetry(vm.RetryCommand);
+        var buttonBar = UiUtil.MakeButtonBar(buttonRetry, buttonCancel);
 
         Content = new StackPanel
         {
@@ -47,6 +51,7 @@ public class DownloadFfmpegWindow : Window
                 titleText,
                 progressBar,
                 statusText,
+                errorText,
                 buttonBar,
             }
         };

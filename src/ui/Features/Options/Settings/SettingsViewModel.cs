@@ -110,6 +110,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private AlignmentItem _mpvPreviewSelectedFontAlignment;
     [ObservableProperty] private ObservableCollection<MpvJustifyDisplay> _mpvPreviewJustifyItems;
     [ObservableProperty] private MpvJustifyDisplay _mpvPreviewSelectedJustify;
+    [ObservableProperty] private ObservableCollection<MpvDeinterlaceDisplay> _mpvDeinterlaceItems;
+    [ObservableProperty] private MpvDeinterlaceDisplay _mpvSelectedDeinterlace;
     [ObservableProperty] private int _mpvPreviewMargin;
     [ObservableProperty] private bool _mpvPreviewUsePositionFromFile;
     [ObservableProperty] private bool _mpvPreviewMarginIsPartOfSubtitleArea;
@@ -124,15 +126,34 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private int? _newEmptyDefaultMs;
     [ObservableProperty] private int? _timeCodeUpDownStepMs;
     [ObservableProperty] private int? _moveSelectedLinesStepMs;
+    [ObservableProperty] private int? _moveStartEndStepMs;
     [ObservableProperty] private bool _moveLinesShortenNeighbor;
     [ObservableProperty] private bool _promptBeforeDelete;
     [ObservableProperty] private bool _lockTimeCodes;
     [ObservableProperty] private bool _rememberPositionAndSize;
+    [ObservableProperty] private bool _titleBarFullFileName;
+    [ObservableProperty] private bool _showRecentFiles;
     [ObservableProperty] private bool _openLastFileOnStart;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsMsMode))]
     [NotifyPropertyChangedFor(nameof(MinGapLabel))]
     private bool _useFrameMode;
+
+    [ObservableProperty] private ObservableCollection<TimeCodeModeDisplay> _timeCodeModes;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFramesTimeCodeMode))]
+    private TimeCodeModeDisplay _selectedTimeCodeMode;
+
+    [ObservableProperty] private bool _frameModeSnapToVideoFrames;
+
+    public bool IsFramesTimeCodeMode => SelectedTimeCodeMode?.Mode == TimeCodeMode.Frames;
+
+    // Frames and frame numbers are both frame mode (frame stepping, snapping, min gap in frames);
+    // frame numbers only changes how a time code is shown and typed.
+    partial void OnSelectedTimeCodeModeChanged(TimeCodeModeDisplay value)
+    {
+        UseFrameMode = value != null && value.Mode != TimeCodeMode.Time;
+    }
 
     public bool IsMsMode => !UseFrameMode;
     public string MinGapLabel => UseFrameMode
@@ -199,6 +220,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _adjustAllTimesRememberLineSelectionChoice;
     [ObservableProperty] private bool _mergeKeepEndTime;
     [ObservableProperty] private bool _mergeKeepEndTimeOnlyAssa;
+    [ObservableProperty] private bool _mergeAutoBreak;
     [ObservableProperty] private ObservableCollection<string> _splitOddNumberOfLinesActions;
     [ObservableProperty] private string _selectedSplitOddNumberOfLinesAction;
     [ObservableProperty] private bool _ocrUseWordSplitList;
@@ -264,6 +286,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _waveformCenterVideoPosition;
     [ObservableProperty] private bool _waveformCenterVideoPositionAlsoWhenPaused;
     [ObservableProperty] private bool _waveformSelectCurrentSubtitleWhilePaused;
+    [ObservableProperty] private bool _waveformRememberZoom;
 
     [ObservableProperty] private ObservableCollection<string> _waveformDrawStyles;
     [ObservableProperty] private string _selectedWaveformDrawStyle;
@@ -380,6 +403,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _matchIconColorToDarkTheme;
     [ObservableProperty] private int _layoutScale;
     [ObservableProperty] private int _fontScale;
+    [ObservableProperty] private int _textSelectionOpacity;
     [ObservableProperty] private ObservableCollection<string> _fontNames;
     [ObservableProperty] private string _selectedFontName;
     [ObservableProperty] private double _subtitleGridFontSize;
@@ -450,6 +474,12 @@ public partial class SettingsViewModel : ObservableObject
     /// </summary>
     public string? AppliedSettingsSnapshot { get; private set; }
 
+    /// <summary>
+    /// True once an import has replaced (and saved) the settings. They are live from then on even
+    /// if the dialog is cancelled, so the main window still has to apply them (#15944).
+    /// </summary>
+    public bool SettingsImported { get; private set; }
+
     public Window? Window { get; internal set; }
     public ScrollViewer ScrollView { get; internal set; }
     public List<SettingsSection> Sections { get; internal set; }
@@ -478,18 +508,24 @@ public partial class SettingsViewModel : ObservableObject
         Profiles = new ObservableCollection<string>();
         SelectedProfile = "Default";
         DialogStyles = new ObservableCollection<DialogStyleDisplay>(DialogStyleDisplay.List());
+        TimeCodeModes = new ObservableCollection<TimeCodeModeDisplay>(TimeCodeModeDisplay.List());
+        SelectedTimeCodeMode = TimeCodeModes.First();
         ContinuationStyles = new ObservableCollection<ContinuationStyleDisplay>(ContinuationStyleDisplay.List());
         CpsLineLengthStrategies = new ObservableCollection<CpsLineLengthStrategyDisplay>(CpsLineLengthStrategyDisplay.List());
         SubtitleTextBoxAndGridFontName = "Default";
         DialogStyle = DialogStyles.First();
         ContinuationStyle = ContinuationStyles.First();
         CpsLineLengthStrategy = CpsLineLengthStrategies.First();
-        Fonts = new ObservableCollection<string>(FontHelper.GetSystemFonts());
+        // The video preview font is drawn by libass (mpv/VLC), which matches Win32 face names -
+        // list every face like SE4 did, so e.g. "Arial Light" is not folded into "Arial" (issue #15682).
+        Fonts = new ObservableCollection<string>(FontHelper.GetLibAssaFonts());
         MpvPreviewBorderTypes = new ObservableCollection<BorderStyleItem>(BorderStyleItem.List());
         MpvPreviewFontAlignments = new ObservableCollection<AlignmentItem>(AlignmentItem.Alignments);
         MpvPreviewSelectedFontAlignment = MpvPreviewFontAlignments[7];
         MpvPreviewJustifyItems = new ObservableCollection<MpvJustifyDisplay>(MpvJustifyDisplay.GetAll());
         MpvPreviewSelectedJustify = MpvPreviewJustifyItems[0];
+        MpvDeinterlaceItems = new ObservableCollection<MpvDeinterlaceDisplay>(MpvDeinterlaceDisplay.GetAll());
+        MpvSelectedDeinterlace = MpvDeinterlaceItems.First(p => p.Code == "auto");
         LibVlcStatus = string.Empty;
         FfmpegLibsStatus = string.Empty;
 
@@ -503,7 +539,11 @@ public partial class SettingsViewModel : ObservableObject
         Themes = [Se.Language.General.System, Se.Language.General.Light, Se.Language.General.Dark, Se.Language.General.Classic, "Pastel"];
         SelectedTheme = Themes[0];
 
-        var iconFolders = Directory.GetDirectories(Se.ThemesFolder).Select(p => Path.GetFileName(p)).ToList();
+        // Themes.zip is unpacked into the data folder at start-up; if that failed (or has not run)
+        // the folder is missing, which must not take the whole Settings window down with it.
+        var iconFolders = Directory.Exists(Se.ThemesFolder)
+            ? Directory.GetDirectories(Se.ThemesFolder).Select(p => Path.GetFileName(p)).ToList()
+            : new List<string>();
         iconFolders.Insert(0, Se.Language.General.Auto);
         IconThemes = new ObservableCollection<string>(iconFolders);
         SelectedIconTheme = IconThemes[0];
@@ -791,15 +831,22 @@ public partial class SettingsViewModel : ObservableObject
 
         // The persisted choice, not the effective value - EBU STL may have frame mode forced on
         // temporarily, and that must not stick just because the settings dialog was OK'ed.
-        UseFrameMode = general.UseFrameModePersisted;
+        var timeCodeMode = !general.UseFrameModePersisted
+            ? TimeCodeMode.Time
+            : general.UseFrameNumbersPersisted ? TimeCodeMode.FrameNumbers : TimeCodeMode.Frames;
+        SelectedTimeCodeMode = TimeCodeModes.First(p => p.Mode == timeCodeMode);
+        FrameModeSnapToVideoFrames = general.FrameModeSnapToVideoFrames;
         TextBoxLimitNewLines = general.SubtitleTextBoxLimitNewLines;
         NewEmptyDefaultMs = general.NewEmptyDefaultMs;
         TimeCodeUpDownStepMs = general.TimeCodeUpDownStepMs;
         MoveSelectedLinesStepMs = general.MoveSelectedLinesStepMs;
+        MoveStartEndStepMs = general.MoveStartEndStepMs;
         MoveLinesShortenNeighbor = general.MoveLinesShortenNeighbor;
         PromptBeforeDelete = general.PromptBeforeDelete;
         LockTimeCodes = general.LockTimeCodes;
         RememberPositionAndSize = general.RememberPositionAndSize;
+        TitleBarFullFileName = general.TitleBarFullFileName;
+        ShowRecentFiles = Se.Settings.File.ShowRecentFiles;
         OpenLastFileOnStart = Se.Settings.File.OpenLastFileOnStart;
         AutoSave = general.AutoSave;
         AutoBackupOn = general.AutoBackupOn;
@@ -875,6 +922,7 @@ public partial class SettingsViewModel : ObservableObject
         AdjustAllTimesRememberLineSelectionChoice = Se.Settings.Synchronization.AdjustAllTimesRememberLineSelectionChoice;
         MergeKeepEndTime = Se.Settings.Tools.MergeKeepEndTime;
         MergeKeepEndTimeOnlyAssa = Se.Settings.Tools.MergeKeepEndTimeOnlyAssa;
+        MergeAutoBreak = Se.Settings.Tools.MergeAutoBreak;
         SelectedSplitOddNumberOfLinesAction = MapFromSplitOddActionToLanguageCode(Se.Settings.Tools.SplitOddLinesAction);
         SelectedSpellCheckEngine = MapFromSpellCheckEngine(Se.Settings.SpellCheck.SpellCheckProvider);
         OcrUseWordSplitList = Se.Settings.Ocr.UseWordSplitList;
@@ -898,6 +946,7 @@ public partial class SettingsViewModel : ObservableObject
         MatchIconColorToDarkTheme = appearance.MatchIconColorToDarkTheme;
         LayoutScale = (int)Math.Round(appearance.LayoutScale * 100.0, MidpointRounding.AwayFromZero);
         FontScale = (int)Math.Round(appearance.FontScale * 100.0, MidpointRounding.AwayFromZero);
+        TextSelectionOpacity = appearance.TextSelectionOpacity;
         if (OperatingSystem.IsMacOS())
         {
             SelectedFontName = MapMacOsFontNameForDisplay(appearance.FontName, FontNames);
@@ -957,6 +1006,7 @@ public partial class SettingsViewModel : ObservableObject
         WaveformCenterVideoPosition = Se.Settings.Waveform.CenterVideoPosition;
         WaveformCenterVideoPositionAlsoWhenPaused = Se.Settings.Waveform.CenterVideoPositionAlsoWhenPaused;
         WaveformSelectCurrentSubtitleWhilePaused = Se.Settings.Waveform.SelectCurrentSubtitleWhilePaused;
+        WaveformRememberZoom = Se.Settings.Waveform.RememberZoom;
         WaveformShowToolbar = Se.Settings.Waveform.ShowToolbar;
         WaveformShowOriginalSubtitle = Se.Settings.Waveform.ShowOriginalSubtitle;
 
@@ -1089,6 +1139,14 @@ public partial class SettingsViewModel : ObservableObject
         ShowSecondarySubtitleDialog = video.SecondarySubtitleShowDialog;
         RememberSecondarySubtitleFile = video.SecondarySubtitleRememberFile;
 
+        if (!string.IsNullOrEmpty(video.MpvPreviewFontName) && !Fonts.Contains(video.MpvPreviewFontName) &&
+            FontHelper.GetSystemFonts().Contains(video.MpvPreviewFontName))
+        {
+            // An installed family saved before the list held face names (e.g. "Hiragino Sans" on
+            // macOS has no face of that name) - list it, so the combo box does not show blank.
+            Fonts.Insert(0, video.MpvPreviewFontName);
+        }
+
         MpvPreviewFontName = video.MpvPreviewFontName;
         MpvPreviewFontSize = video.MpvPreviewFontSize;
         MpvPreviewFontBold = video.MpvPreviewFontBold;
@@ -1097,6 +1155,7 @@ public partial class SettingsViewModel : ObservableObject
         MpvPreviewMarginIsPartOfSubtitleArea = video.MpvPreviewMarginIsPartOfSubtitleArea;
         MpvPreviewSelectedFontAlignment = MpvPreviewFontAlignments.FirstOrDefault(p => p.Code == video.MpvPreviewAlignment) ?? MpvPreviewFontAlignments[7];
         MpvPreviewSelectedJustify = MpvPreviewJustifyItems.FirstOrDefault(p => p.Code == video.MpvPreviewJustify) ?? MpvPreviewJustifyItems[0];
+        MpvSelectedDeinterlace = MpvDeinterlaceItems.FirstOrDefault(p => p.Code == video.MpvDeinterlace) ?? MpvDeinterlaceItems.First(p => p.Code == "auto");
         MpvPreviewOutlineWidth = video.MpvPreviewOutlineWidth;
         MpvPreviewShadowWidth = video.MpvPreviewShadowWidth;
         MpvPreviewColorPrimary = video.MpvPreviewColorPrimary.FromHexToColor();
@@ -1690,14 +1749,27 @@ public partial class SettingsViewModel : ObservableObject
         general.CpsLineLengthStrategy = CpsLineLengthStrategy.Code;
 
         general.UseFrameMode = UseFrameMode;
+        general.UseFrameNumbersPersisted = SelectedTimeCodeMode.Mode == TimeCodeMode.FrameNumbers;
+        general.FrameModeSnapToVideoFrames = FrameModeSnapToVideoFrames;
         general.SubtitleTextBoxLimitNewLines = TextBoxLimitNewLines;
         general.NewEmptyDefaultMs = NewEmptyDefaultMs ?? general.NewEmptyDefaultMs;
         general.TimeCodeUpDownStepMs = TimeCodeUpDownStepMs ?? general.TimeCodeUpDownStepMs;
         general.MoveSelectedLinesStepMs = MoveSelectedLinesStepMs ?? general.MoveSelectedLinesStepMs;
+        general.MoveStartEndStepMs = MoveStartEndStepMs ?? general.MoveStartEndStepMs;
         general.MoveLinesShortenNeighbor = MoveLinesShortenNeighbor;
         general.PromptBeforeDelete = PromptBeforeDelete;
         general.LockTimeCodes = LockTimeCodes;
         general.RememberPositionAndSize = RememberPositionAndSize;
+        general.TitleBarFullFileName = TitleBarFullFileName;
+        Se.Settings.File.ShowRecentFiles = ShowRecentFiles;
+        if (!ShowRecentFiles)
+        {
+            // Turning recent files off means "do not remember what I opened" - drop what is
+            // already stored too, not just stop adding to it.
+            Se.Settings.File.RecentFiles = new List<RecentFile>();
+            Se.Settings.Video.RecentFiles = new List<string>();
+        }
+
         Se.Settings.File.OpenLastFileOnStart = OpenLastFileOnStart;
         general.AutoSave = AutoSave;
         general.AutoBackupOn = AutoBackupOn;
@@ -1745,6 +1817,7 @@ public partial class SettingsViewModel : ObservableObject
         Se.Settings.Synchronization.AdjustAllTimesRememberLineSelectionChoice = AdjustAllTimesRememberLineSelectionChoice;
         Se.Settings.Tools.MergeKeepEndTime = MergeKeepEndTime;
         Se.Settings.Tools.MergeKeepEndTimeOnlyAssa = MergeKeepEndTimeOnlyAssa;
+        Se.Settings.Tools.MergeAutoBreak = MergeAutoBreak;
         Se.Settings.Tools.SplitOddLinesAction = MapFromSplitOddActionTranslationToCode(SelectedSplitOddNumberOfLinesAction);
         Se.Settings.SpellCheck.SpellCheckProvider = MapFromUISpellCheckEngineToCode(SelectedSpellCheckEngine);
         Se.Settings.Ocr.UseWordSplitList = OcrUseWordSplitList;
@@ -1769,6 +1842,7 @@ public partial class SettingsViewModel : ObservableObject
         appearance.MatchIconColorToDarkTheme = MatchIconColorToDarkTheme;
         appearance.LayoutScale = LayoutScale / 100.0;
         appearance.FontScale = FontScale / 100.0;
+        appearance.TextSelectionOpacity = Math.Clamp(TextSelectionOpacity, UiTheme.MinTextSelectionOpacity, 100);
         if (OperatingSystem.IsMacOS())
         {
             appearance.FontName = SelectedFontName == "System Font"
@@ -1832,6 +1906,7 @@ public partial class SettingsViewModel : ObservableObject
         Se.Settings.Waveform.CenterVideoPosition = WaveformCenterVideoPosition;
         Se.Settings.Waveform.CenterVideoPositionAlsoWhenPaused = WaveformCenterVideoPositionAlsoWhenPaused;
         Se.Settings.Waveform.SelectCurrentSubtitleWhilePaused = WaveformSelectCurrentSubtitleWhilePaused;
+        Se.Settings.Waveform.RememberZoom = WaveformRememberZoom;
         Se.Settings.Waveform.FocusTextBoxAfterInsertNew = WaveformFocusTextboxAfterInsertNew;
 
         if (SelectedWaveformDrawStyle == Se.Language.General.Classic)
@@ -1950,6 +2025,7 @@ public partial class SettingsViewModel : ObservableObject
         video.MpvPreviewOutlineWidth = MpvPreviewOutlineWidth;
         video.MpvPreviewAlignment = MpvPreviewSelectedFontAlignment.Code;
         video.MpvPreviewJustify = (MpvPreviewSelectedJustify ?? MpvPreviewJustifyItems[0]).Code;
+        video.MpvDeinterlace = (MpvSelectedDeinterlace ?? MpvDeinterlaceItems.First(p => p.Code == "auto")).Code;
         video.MpvPreviewShadowWidth = MpvPreviewShadowWidth;
         video.MpvPreviewColorPrimary = MpvPreviewColorPrimary.FromColorToHex();
         video.MpvPreviewColorOutline = MpvPreviewColorOutline.FromColorToHex();
@@ -2206,42 +2282,64 @@ public partial class SettingsViewModel : ObservableObject
     /// the focus move after it untested.
     /// </summary>
     internal static bool AnimateScrollToSection { get; set; } = true;
+    internal bool DeferSectionRefresh { get; private set; }
 
-    public async void ScrollElementIntoView(ScrollViewer scrollViewer, Control target, NavigationMethod? focusFirstControl = null)
+    private bool _isSectionTransitionRunning;
+    private (Func<Control?> RefreshContent, NavigationMethod? FocusMethod)? _pendingSectionTransition;
+
+    public async void ScrollElementIntoView(ScrollViewer scrollViewer, Func<Control?> refreshContent, NavigationMethod? focusFirstControl = null)
     {
-        await Dispatcher.UIThread.InvokeAsync(async () =>
+        // Keep only the latest request and run one fade/content transition at a time.
+        _pendingSectionTransition = (refreshContent, focusFirstControl);
+        if (_isSectionTransitionRunning)
         {
-            await Task.Yield(); // Ensures target has been laid out
+            return;
+        }
 
-            // Fade out
-            //await FadeToAsync(ScrollView, 0, TimeSpan.FromMilliseconds(100));
-            if (AnimateScrollToSection)
+        _isSectionTransitionRunning = true;
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(async () =>
             {
-                await RunFadeAnimation(ScrollView, from: 1, to: 0, TimeSpan.FromMilliseconds(100));
-            }
+                while (_pendingSectionTransition.HasValue)
+                {
+                    if (AnimateScrollToSection)
+                    {
+                        await RunFadeAnimation(ScrollView, from: 1, to: 0, TimeSpan.FromMilliseconds(100));
+                    }
 
+                    // Include any requests received during fade-out in this content swap.
+                    var request = _pendingSectionTransition.Value;
+                    _pendingSectionTransition = null;
+                    var target = request.RefreshContent();
+                    await Task.Yield(); // Ensures target has been laid out
+                    scrollViewer.ScrollToHome();
+                    await Task.Yield(); // Ensures target has been laid out
 
-            await Task.Yield(); // Ensures target has been laid out
-            scrollViewer.ScrollToHome();
-            await Task.Yield(); // Ensures target has been laid out
+                    var targetPosition = target?.TranslatePoint(new Point(0, 0), scrollViewer);
+                    if (targetPosition.HasValue)
+                    {
+                        scrollViewer.Offset = new Vector(scrollViewer.Offset.X, targetPosition.Value.Y);
+                    }
 
-            var targetPosition = target.TranslatePoint(new Point(0, 0), scrollViewer);
-            if (targetPosition.HasValue)
-            {
-                scrollViewer.Offset = new Vector(scrollViewer.Offset.X, targetPosition.Value.Y);
-            }
+                    if (target != null && request.FocusMethod.HasValue && !_pendingSectionTransition.HasValue)
+                    {
+                        FocusFirstTabStop(target, request.FocusMethod.Value);
+                    }
 
-            if (focusFirstControl.HasValue)
-            {
-                FocusFirstTabStop(target, focusFirstControl.Value);
-            }
-
-            await Task.Yield(); // Ensures target has been laid out
-            if (AnimateScrollToSection)
-            {
-                await RunFadeAnimation(ScrollView, from: 0, to: 1, TimeSpan.FromMilliseconds(200));
-            }
-        }, DispatcherPriority.Background);
+                    await Task.Yield(); // Ensures target has been laid out
+                    if (AnimateScrollToSection)
+                    {
+                        await RunFadeAnimation(ScrollView, from: 0, to: 1, TimeSpan.FromMilliseconds(200));
+                    }
+                    // Requests received during fade-in are coalesced into the next transition.
+                }
+            }, DispatcherPriority.Background);
+        }
+        finally
+        {
+            _isSectionTransitionRunning = false;
+        }
     }
 
     private static void FocusFirstTabStop(Control container, NavigationMethod navigationMethod)
@@ -2734,19 +2832,89 @@ public partial class SettingsViewModel : ObservableObject
         ShowSection(candidates[index], NavigationMethod.Tab);
     }
 
+    // Categories visited in this Settings session, browser style (#14999). Forgotten on close.
+    private readonly List<SettingsSection> _sectionBackHistory = new();
+    private readonly List<SettingsSection> _sectionForwardHistory = new();
+    private bool _isNavigatingSectionHistory;
+
+    partial void OnSelectedSectionChanged(SettingsSection? oldValue, SettingsSection? newValue)
+    {
+        if (_isNavigatingSectionHistory || oldValue == null || newValue == null || oldValue == newValue)
+        {
+            return;
+        }
+
+        _sectionBackHistory.Add(oldValue);
+        _sectionForwardHistory.Clear();
+    }
+
+    /// <summary>
+    /// Alt+Left / Alt+Right (Cmd+[ / Cmd+] on macOS) step back and forward through the
+    /// categories visited in this Settings session, like a web browser (#14999). Categories
+    /// hidden by the search filter are skipped.
+    /// </summary>
+    internal void NavigateSectionHistory(bool back)
+    {
+        var from = back ? _sectionBackHistory : _sectionForwardHistory;
+        var to = back ? _sectionForwardHistory : _sectionBackHistory;
+        while (from.Count > 0)
+        {
+            var section = from[^1];
+            from.RemoveAt(from.Count - 1);
+            if (!section.IsVisible || section == SelectedSection)
+            {
+                continue;
+            }
+
+            if (SelectedSection != null)
+            {
+                to.Add(SelectedSection);
+            }
+
+            _isNavigatingSectionHistory = true;
+            try
+            {
+                ShowSection(section, NavigationMethod.Tab);
+            }
+            finally
+            {
+                _isNavigatingSectionHistory = false;
+            }
+
+            return;
+        }
+    }
+
     private void ShowSection(SettingsSection section, NavigationMethod navigationMethod)
     {
-        SelectedSection = section; // the page rebuilds the content to this section
+        // Keep selection/history immediate; refresh the content after fade-out.
+        DeferSectionRefresh = AnimateScrollToSection && section.IsVisible;
+        try
+        {
+            SelectedSection = section;
+        }
+        finally
+        {
+            DeferSectionRefresh = false;
+        }
 
         // Hidden by the search filter (no matching settings) - nothing to scroll or focus.
-        if (section.Panel == null || !section.IsVisible)
+        if (!section.IsVisible)
         {
             return;
         }
 
         // Move focus into the section, not only the view - with focus left on the category
         // button, the categories did nothing for a screen reader or keyboard user (#12087).
-        ScrollElementIntoView(ScrollView, section.Panel, navigationMethod);
+        ScrollElementIntoView(ScrollView, () =>
+        {
+            if (AnimateScrollToSection && Window != null && UiTheme.GetUnscaledContent(Window) is SettingsPage page)
+            {
+                page.RefreshSections();
+            }
+
+            return SelectedSection?.Panel;
+        }, navigationMethod);
     }
 
     [RelayCommand]
@@ -3113,6 +3281,7 @@ public partial class SettingsViewModel : ObservableObject
         {
             // Reload the settings from disk since they were updated
             LoadSettings();
+            SettingsImported = true;
         }
     }
 
@@ -3155,6 +3324,23 @@ public partial class SettingsViewModel : ObservableObject
             e.Handled = true;
             SelectAdjacentSection(e.Key == Key.PageDown ? 1 : -1);
         }
+        else if (IsSectionHistoryKey(e, out var back))
+        {
+            e.Handled = true;
+            NavigateSectionHistory(back);
+        }
+    }
+
+    // Option+Left/Right moves by word in macOS text fields, so use the Safari/Firefox Cmd+[ / Cmd+] there.
+    private static bool IsSectionHistoryKey(KeyEventArgs e, out bool back)
+    {
+        back = e.Key is Key.Left or Key.OemOpenBrackets;
+        if (OperatingSystem.IsMacOS())
+        {
+            return e.KeyModifiers == KeyModifiers.Meta && e.Key is Key.OemOpenBrackets or Key.OemCloseBrackets;
+        }
+
+        return e.KeyModifiers == KeyModifiers.Alt && e.Key is Key.Left or Key.Right;
     }
 
     internal void Initialize(MainViewModel mainViewModel)

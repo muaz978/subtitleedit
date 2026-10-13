@@ -1,9 +1,10 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Features.Shared;
+using Nikse.SubtitleEdit.Features.Shared.PromptFileSaved;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Media;
@@ -160,10 +161,17 @@ public partial class ExportCustomTextFormatViewModel : ObservableObject
             return;
         }
 
-        var fileName = await _fileHelper.PickSaveFile(Window, SelectedCustomFormat.Extension, _title, Se.Language.General.SaveFileAsTitle);
+        var extension = SelectedCustomFormat.GetDottedExtension();
+        var fileName = await _fileHelper.PickSaveFile(Window, extension, _title, Se.Language.General.SaveFileAsTitle);
         if (string.IsNullOrWhiteSpace(fileName))
         {
             return;
+        }
+
+        // The macOS save panel does not apply the default extension itself (#15699).
+        if (extension.Length > 0 && !System.IO.Path.HasExtension(fileName))
+        {
+            fileName += extension;
         }
 
         // Resolve via the display name, not TextEncoding.Encoding: that property is plain
@@ -171,6 +179,16 @@ public partial class ExportCustomTextFormatViewModel : ObservableObject
         // so writing it directly would always add a BOM.
         var encoding = EncodingHelper.ResolveEncoding(SelectedEncoding?.DisplayName, null);
         await System.IO.File.WriteAllTextAsync(fileName, PreviewText, encoding);
+
+        await _windowService.ShowDialogAsync<PromptFileSavedWindow, PromptFileSavedViewModel>(Window, vm =>
+        {
+            vm.Initialize(
+                Se.Language.General.FileSaved,
+                string.Format(Se.Language.General.FileSavedToX, fileName),
+                fileName,
+                true,
+                true);
+        });
     }
 
     [RelayCommand]

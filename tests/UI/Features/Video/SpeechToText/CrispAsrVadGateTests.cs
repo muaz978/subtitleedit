@@ -25,6 +25,13 @@ public class CrispAsrVadGateTests
         Assert.True(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrMega(), null, vadSuppressed: false));
     }
 
+    /// <summary>Without Silero, Index-Echo falls back to fixed 60 s windows that cut sentences.</summary>
+    [Fact]
+    public void IndexEchoGetsVadByDefault()
+    {
+        Assert.True(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrIndexEcho(), string.Empty, vadSuppressed: false));
+    }
+
     [Fact]
     public void OtherBackendsAreLeftAlone()
     {
@@ -61,5 +68,39 @@ public class CrispAsrVadGateTests
     {
         Assert.False(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrCohere(), string.Empty, vadSuppressed: true));
         Assert.False(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrMega(), "--max-len 50", vadSuppressed: true));
+    }
+    /// <summary>A VAD picked in the "VAD" combo box is used by every Crisp ASR backend (#15563).</summary>
+    [Theory]
+    [InlineData(CrispAsrVadModel.Silero)]
+    [InlineData(CrispAsrVadModel.FireRed)]
+    [InlineData(CrispAsrVadModel.WebRtc)]
+    public void AChosenVadTurnsVadOnForAnyBackend(string vadChoice)
+    {
+        Assert.True(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrParakeet(), string.Empty, vadSuppressed: false, vadChoice));
+    }
+
+    [Theory]
+    [InlineData(CrispAsrVadModel.Automatic)]
+    [InlineData(null)]
+    [InlineData("ten-vad")]
+    public void AutoOrAnUnknownChoiceKeepsTheOldBehaviour(string? vadChoice)
+    {
+        Assert.False(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrParakeet(), string.Empty, vadSuppressed: false, vadChoice));
+        Assert.True(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrCohere(), string.Empty, vadSuppressed: false, vadChoice));
+    }
+
+    /// <summary>The user's own parameters and the empty-result retry still win over the combo box.</summary>
+    [Fact]
+    public void AChosenVadStillHonoursTheOptOuts()
+    {
+        Assert.False(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrParakeet(), "--chunk-seconds 30", vadSuppressed: false, CrispAsrVadModel.FireRed));
+        Assert.False(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrParakeet(), "-vm silero --vad", vadSuppressed: false, CrispAsrVadModel.FireRed));
+        Assert.False(SpeechToTextViewModel.ShouldForceCrispAsrVad(new CrispAsrParakeet(), string.Empty, vadSuppressed: true, CrispAsrVadModel.FireRed));
+    }
+
+    [Fact]
+    public void NonCrispAsrEnginesAreLeftAlone()
+    {
+        Assert.False(SpeechToTextViewModel.ShouldForceCrispAsrVad(new WhisperEngineCpp(), string.Empty, vadSuppressed: false, CrispAsrVadModel.FireRed));
     }
 }

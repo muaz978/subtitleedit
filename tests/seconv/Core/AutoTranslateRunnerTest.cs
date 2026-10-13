@@ -16,6 +16,12 @@ public class AutoTranslateRunnerTest : IDisposable
     private readonly string _defaultLlamaCppPrompt = Configuration.Settings.Tools.LlamaCppPrompt;
     private readonly string _defaultOllamaPrompt = Configuration.Settings.Tools.OllamaPrompt;
     private readonly string _defaultLmStudioPrompt = Configuration.Settings.Tools.LmStudioPrompt;
+    private readonly string _defaultOpenAiCompatibleUrl = Configuration.Settings.Tools.OpenAiCompatibleTranslateUrl;
+    private readonly string _defaultOpenAiCompatiblePrompt = Configuration.Settings.Tools.OpenAiCompatibleTranslatePrompt;
+    private readonly string _defaultOpenAiCompatibleApiKey = Configuration.Settings.Tools.OpenAiCompatibleTranslateApiKey;
+    private readonly string _defaultOpenAiCompatibleModel = Configuration.Settings.Tools.OpenAiCompatibleTranslateModel;
+    private readonly string _defaultDeepLUrl = Configuration.Settings.Tools.AutoTranslateDeepLUrl;
+    private readonly string _defaultDeepLApiKey = Configuration.Settings.Tools.AutoTranslateDeepLApiKey;
 
     public AutoTranslateRunnerTest()
     {
@@ -33,11 +39,17 @@ public class AutoTranslateRunnerTest : IDisposable
         Configuration.Settings.Tools.LlamaCppModelPrompt = string.Empty;
         Configuration.Settings.Tools.OllamaPrompt = _defaultOllamaPrompt;
         Configuration.Settings.Tools.LmStudioPrompt = _defaultLmStudioPrompt;
+        Configuration.Settings.Tools.OpenAiCompatibleTranslateUrl = _defaultOpenAiCompatibleUrl;
+        Configuration.Settings.Tools.OpenAiCompatibleTranslatePrompt = _defaultOpenAiCompatiblePrompt;
+        Configuration.Settings.Tools.OpenAiCompatibleTranslateApiKey = _defaultOpenAiCompatibleApiKey;
+        Configuration.Settings.Tools.OpenAiCompatibleTranslateModel = _defaultOpenAiCompatibleModel;
+        Configuration.Settings.Tools.AutoTranslateDeepLUrl = _defaultDeepLUrl;
+        Configuration.Settings.Tools.AutoTranslateDeepLApiKey = _defaultDeepLApiKey;
         if (Directory.Exists(_fakeLlamaFolder))
             Directory.Delete(_fakeLlamaFolder, recursive: true);
     }
 
-    private static ConversionOptions MakeOptions(string engine = "llamacpp", string? url = null, string? model = null, string to = "de", string? prompt = null)
+    private static ConversionOptions MakeOptions(string engine = "llamacpp", string? url = null, string? model = null, string to = "de", string? prompt = null, string? apiKey = null)
     {
         return new ConversionOptions
         {
@@ -48,6 +60,7 @@ public class AutoTranslateRunnerTest : IDisposable
             TranslateUrl = url,
             TranslateModel = model,
             TranslatePrompt = prompt,
+            TranslateApiKey = apiKey,
             Quiet = true,
         };
     }
@@ -259,7 +272,9 @@ public class AutoTranslateRunnerTest : IDisposable
     [InlineData("llama.cpp", true)]
     [InlineData("ollama", true)]
     [InlineData("lmstudio", true)]
+    [InlineData("openai-compatible", true)]
     [InlineData("libretranslate", false)]
+    [InlineData("deepl", false)]
     [InlineData("nllb-serve", false)]
     [InlineData("nllb-api", false)]
     public void SupportsPrompt_OnlyForLlmEngines(string? engine, bool expected)
@@ -386,6 +401,45 @@ public class AutoTranslateRunnerTest : IDisposable
     }
 
     [Fact]
+    public void Create_OpenAiCompatible_AppliesUrlKeyModelAndPrompt()
+    {
+        AutoTranslateRunner.Create(MakeOptions(engine: "openai-compatible", url: "https://api.example.com/v1", model: " my-model ", prompt: "Translate {0} to {1}:", apiKey: "sk-test"));
+
+        Assert.Equal("https://api.example.com/v1", Configuration.Settings.Tools.OpenAiCompatibleTranslateUrl);
+        Assert.Equal("sk-test", Configuration.Settings.Tools.OpenAiCompatibleTranslateApiKey);
+        Assert.Equal("my-model", Configuration.Settings.Tools.OpenAiCompatibleTranslateModel);
+        Assert.Equal("Translate {0} to {1}:", Configuration.Settings.Tools.OpenAiCompatibleTranslatePrompt);
+    }
+
+    [Fact]
+    public void Create_DeepL_AppliesUrlAndKey()
+    {
+        AutoTranslateRunner.Create(MakeOptions(engine: "deepl", url: "https://api.deepl.com/", apiKey: "abc"));
+
+        Assert.Equal("https://api.deepl.com/", Configuration.Settings.Tools.AutoTranslateDeepLUrl);
+        Assert.Equal("abc", Configuration.Settings.Tools.AutoTranslateDeepLApiKey);
+    }
+
+    [Fact]
+    public void Create_DeepL_NoApiKey_Throws()
+    {
+        Configuration.Settings.Tools.AutoTranslateDeepLApiKey = string.Empty;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => AutoTranslateRunner.Create(MakeOptions(engine: "deepl")));
+
+        Assert.Contains("--translate-api-key", ex.Message);
+    }
+
+    [Fact]
+    public void Create_ApiKeyWithEngineThatHasNone_Throws()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => AutoTranslateRunner.Create(MakeOptions(engine: "ollama", apiKey: "abc")));
+
+        Assert.Contains("--translate-api-key is not supported", ex.Message);
+    }
+
+    [Fact]
     public void Create_LlamaCppRemote_AppliesPrompt()
     {
         AutoTranslateRunner.Create(MakeOptions(url: "http://myhost:8080", prompt: "Translate {0} to {1}:"));
@@ -449,6 +503,8 @@ public class AutoTranslateRunnerTest : IDisposable
     // and come out as ".../v1/v1/chat/completions".
     [Theory]
     [InlineData("http://localhost:8080", "http://localhost:8080/v1/chat/completions")]
+    [InlineData("localhost:8080", "http://localhost:8080/v1/chat/completions")]
+    [InlineData("192.168.1.10:8000/v1", "http://192.168.1.10:8000/v1/chat/completions")]
     [InlineData("http://localhost:8080/", "http://localhost:8080/v1/chat/completions")]
     [InlineData("http://localhost:8080/v1", "http://localhost:8080/v1/chat/completions")]
     [InlineData("http://localhost:8080/v1/", "http://localhost:8080/v1/chat/completions")]

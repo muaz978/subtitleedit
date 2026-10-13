@@ -49,6 +49,7 @@ The layout applies to every video player, including the ones in dialogs like **S
 | 1 second back | Jump 1 second backward |
 | 1 second forward | Jump 1 second forward |
 | Custom back/forward | Configurable jump amounts |
+| Custom back/forward and pause | Same jump amounts, but pause playback first |
 
 > **Note:** Actual key bindings depend on your shortcut configuration. See **Options → Shortcuts**.
 
@@ -69,11 +70,11 @@ Jump to a specific time code position in the video.
 - **Shortcut:** Configurable
 - Toggle full-screen video playback
 
-## Undock / Redock
+## Undock / Dock
 
 You can undock the video player into a separate window for multi-monitor setups:
 - **Undock video controls**
-- **Redock video controls**
+- **Dock video controls**
 
 ## Secondary Subtitles
 
@@ -94,13 +95,15 @@ Configure the video player backend in **Options → Settings → Video player**:
 - **libmpv - Native Window ID rendering** — default on Windows (not available on macOS)
 - **libmpv - Software rendering (slow)**
 - **libVLC - Native Window ID rendering** — alternative backend (Windows and Linux only)
+- **FFmpeg** — plays video through FFmpeg, no libmpv/libVLC needed (all platforms)
+- **libmpv - Metal (experimental, needs restart)** — macOS only
 
 The same settings page also has:
 - **Video controls** — see [Video Controls](#video-controls)
 - **Hide video controls in full-screen**
 - **Auto-open video file when opening subtitle**
-- **Download mpv** / **Download VLC** — fetch the player library when it is not installed
 - **Subtitle preview properties** — how the subtitle is drawn on the video
+- **Download mpv** / **Download VLC** / **Download FFmpeg libraries** — fetch the player library when it is not installed
 
 ## Video Info
 

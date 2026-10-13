@@ -15,6 +15,7 @@ using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Voices;
 using Optris.Icons.Avalonia;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
+using Nikse.SubtitleEdit.Logic.Platform.Progress;
 
 namespace Nikse.SubtitleEdit.Features.Video.TextToSpeech;
 
@@ -200,6 +201,10 @@ public class TextToSpeechWindow : Window
                 return StatusDots.From(engine.IsInstalled(null).Result, FishTtsAudioCpp.GetEngineUpdateStatus());
             case FireRedTts3AudioCpp:
                 return StatusDots.From(engine.IsInstalled(null).Result, FireRedTts3AudioCpp.GetEngineUpdateStatus());
+            case BreezeTtsAudioCpp:
+                return StatusDots.From(engine.IsInstalled(null).Result, BreezeTtsAudioCpp.GetEngineUpdateStatus());
+            case KugelAudioAudioCpp:
+                return StatusDots.From(engine.IsInstalled(null).Result, KugelAudioAudioCpp.GetEngineUpdateStatus());
             case CosyVoice3CrispAsr:
                 return StatusDots.From(engine.IsInstalled(null).Result, CosyVoice3CrispAsr.GetEngineUpdateStatus());
             case F5TtsCrispAsr:
@@ -744,7 +749,7 @@ public class TextToSpeechWindow : Window
         return UiUtil.MakeBorderForControl(grid);
     }
 
-    private static Grid MakeProgressBarControls(TextToSpeechViewModel vm)
+    private Grid MakeProgressBarControls(TextToSpeechViewModel vm)
     {
         // Two rows so the status label and the progress bar stack vertically instead of
         // overlapping in the same cell. Two columns so the progress text can explicitly span
@@ -819,6 +824,7 @@ public class TextToSpeechWindow : Window
         var progressBar = UiUtil.MakeProgressBar();
         progressBar.HorizontalAlignment = HorizontalAlignment.Stretch;
         progressBar.Bind(ProgressBar.ValueProperty, new Binding(nameof(vm.ProgressValue)));
+        progressBar.WithPlatformProgress(this, nameof(vm.IsGenerating));
 
         // Both rows explicitly span the two columns so the bar and status text use the full
         // window width (matching the engine + settings panels above), and so the text doesn't

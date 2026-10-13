@@ -41,6 +41,7 @@ public partial class CompareViewModel : ObservableObject
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasPendingChanges), nameof(PendingChangesText), nameof(OkButtonText))] private int _pendingChangeCount;
     [ObservableProperty] private string _lastChangeText = string.Empty;
     [ObservableProperty] private bool _isReloadFromFileVisible;
+    [ObservableProperty] private int _ignoreTimeDifferenceMs;
     [ObservableProperty] private bool _isExportVisible;
     [ObservableProperty] private string _leftFileName = string.Empty;
     [ObservableProperty] private bool _leftFileNameHasChanges;
@@ -54,6 +55,9 @@ public partial class CompareViewModel : ObservableObject
     // The headers trim these to the space they have, keeping the start and the end (#15384).
     public string LeftFileNameDisplay => GetFileName(LeftFileName);
     public string RightFileNameDisplay => GetFileName(RightFileName);
+
+    // Follows the current file: Browse or a drop on the left changes what "Load saved file" loads.
+    public string ReloadFromFileHint => string.Format(Se.Language.File.LoadXFromFile, System.IO.Path.GetFileName(LeftFileName));
 
     public bool HasPendingChanges => PendingChangeCount > 0;
 
@@ -157,6 +161,7 @@ public partial class CompareViewModel : ObservableObject
         IgnoreWhiteSpace = settings.IgnoreWhitespace;
         IgnoreFormatting = settings.IgnoreFormatting;
         IgnoreNumbering = settings.IgnoreNumbering;
+        IgnoreTimeDifferenceMs = Math.Max(0, settings.IgnoreTimeDifferenceMs);
     }
 
     /// <summary>
@@ -170,6 +175,7 @@ public partial class CompareViewModel : ObservableObject
         settings.IgnoreWhitespace = IgnoreWhiteSpace;
         settings.IgnoreFormatting = IgnoreFormatting;
         settings.IgnoreNumbering = IgnoreNumbering;
+        settings.IgnoreTimeDifferenceMs = IgnoreTimeDifferenceMs;
     }
 
     internal void Initialize(
@@ -245,6 +251,8 @@ public partial class CompareViewModel : ObservableObject
             rows.Add(new CompareRow(left, right, GetRowKind(left, right), isEdited, IsLeftEditable)
             {
                 IsSyncPoint = IsSyncPoint(left, right),
+                StartDiffers = IsHighlighted(left.StartTimeBackgroundBrush),
+                EndDiffers = IsHighlighted(left.EndTimeBackgroundBrush),
             });
         }
 
@@ -345,8 +353,8 @@ public partial class CompareViewModel : ObservableObject
             }
             else
             {
-                var startMatch = IsTimeEqual(left.StartTime, right.StartTime);
-                var endMatch = IsTimeEqual(left.EndTime, right.EndTime);
+                var startMatch = IsTimeSame(left.StartTime, right.StartTime);
+                var endMatch = IsTimeSame(left.EndTime, right.EndTime);
                 var textsMatch = AreTextsEqual(left, right);
                 var numbersMatch = IgnoreNumbering || left.Number == right.Number;
                 isTextDifference = !textsMatch;
@@ -572,7 +580,7 @@ public partial class CompareViewModel : ObservableObject
         var pairs = CompareAligner.Align(
             leftItems.Select(ToAlignerLine).ToList(),
             rightItems.Select(ToAlignerLine).ToList(),
-            IsTimeEqual,
+            CreateAlignerTimeEquality(),
             GetSyncPointIndexes(leftItems, rightItems));
 
         _alignedPairs = new HashSet<(Guid Left, Guid Right)>();
@@ -662,6 +670,47 @@ public partial class CompareViewModel : ObservableObject
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Equal for the comparison: <see cref="IsTimeEqual"/>, or within the user's time tolerance (#15620).
+    /// The tolerance only ever widens the check - in HH:MM:SS:FF mode two times on the same frame
+    /// stay equal even when they are further apart than a small tolerance.
+    /// Edits and sync points keep the exact check - a 3 ms change is still a change.
+    /// </summary>
+    private bool IsTimeSame(TimeSpan t1, TimeSpan t2)
+    {
+        return IsTimeEqual(t1, t2) ||
+               (IgnoreTimeDifferenceMs > 0 && Math.Abs(t1.TotalMilliseconds - t2.TotalMilliseconds) <= IgnoreTimeDifferenceMs + 0.1);
+    }
+
+    /// <summary>
+    /// <see cref="IsTimeSame"/> for one alignment - the aligner asks for every pair of lines it
+    /// weighs (up to a quarter million), so with HH:MM:SS:FF the display string of each time is
+    /// built once instead of four <see cref="TimeCode"/> strings per pair.
+    /// </summary>
+    private Func<TimeSpan, TimeSpan, bool> CreateAlignerTimeEquality()
+    {
+        if (!Configuration.Settings.General.UseTimeFormatHHMMSSFF)
+        {
+            return IsTimeSame;
+        }
+
+        var displayStrings = new Dictionary<long, string>();
+        string GetDisplayString(TimeSpan t)
+        {
+            if (!displayStrings.TryGetValue(t.Ticks, out var s))
+            {
+                s = new TimeCode(t).ToDisplayString();
+                displayStrings.Add(t.Ticks, s);
+            }
+
+            return s;
+        }
+
+        var toleranceMs = IgnoreTimeDifferenceMs;
+        return (t1, t2) => GetDisplayString(t1) == GetDisplayString(t2) ||
+                           (toleranceMs > 0 && Math.Abs(t1.TotalMilliseconds - t2.TotalMilliseconds) <= toleranceMs + 0.1);
+    }
+
     private static bool IsTimeEqual(TimeSpan t1, TimeSpan t2)
     {
         if (Configuration.Settings.General.UseTimeFormatHHMMSSFF)
@@ -687,12 +736,64 @@ public partial class CompareViewModel : ObservableObject
             return;
         }
 
-        var subtitle = Subtitle.Parse(fileName);
+        var subtitle = await ParseOrShowErrorAsync(fileName);
+        if (subtitle != null)
+        {
+            SetLeftSubtitle(subtitle, fileName);
+        }
+    }
+
+    [RelayCommand]
+    private async Task PickRightSubtitleFile()
+    {
+        var fileName = await _fileHelper.PickOpenSubtitleFile(Window!, Se.Language.General.OpenSubtitleFileTitle);
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return;
+        }
+
+        await LoadRightFileAsync(fileName);
+    }
+
+    /// <summary>Loads a file as the current subtitle - after the discard prompt, and only when it can be read.</summary>
+    internal async Task LoadLeftFileAsync(string fileName)
+    {
+        // Read first: a file Compare can't read should not first ask to throw the edits away.
+        var subtitle = await ParseOrShowErrorAsync(fileName);
+        if (subtitle == null || !await ConfirmDiscardChangesAsync())
+        {
+            return;
+        }
+
+        SetLeftSubtitle(subtitle, fileName);
+    }
+
+    /// <summary>Loads a file as the reference, or says why it can't.</summary>
+    internal async Task LoadRightFileAsync(string fileName)
+    {
+        var subtitle = await ParseOrShowErrorAsync(fileName);
         if (subtitle == null)
         {
             return;
         }
 
+        ResetSyncPoints();
+
+        _rightLines.Clear();
+        foreach (var line in subtitle.Paragraphs)
+        {
+            _rightLines.Add(new SubtitleLineViewModel(line, subtitle.OriginalFormat));
+        }
+
+        RightFileName = fileName;
+        IsReloadFromFileVisible = false;
+
+        _languageDirty = true;
+        Dispatcher.UIThread.Post(CompareAndSelectFirst);
+    }
+
+    private void SetLeftSubtitle(Subtitle subtitle, string fileName)
+    {
         _leftLines.Clear();
         foreach (var line in subtitle.Paragraphs)
         {
@@ -711,38 +812,25 @@ public partial class CompareViewModel : ObservableObject
         Dispatcher.UIThread.Post(CompareAndSelectFirst);
     }
 
-    [RelayCommand]
-    private async Task PickRightSubtitleFile()
+    /// <summary>
+    /// Parses a subtitle file, telling the user when it is not a format Compare can read - a
+    /// dropped .sup or .sub used to do nothing at all, which looked like a hang (#15623).
+    /// </summary>
+    private async Task<Subtitle?> ParseOrShowErrorAsync(string fileName)
     {
-        var fileName = await _fileHelper.PickOpenSubtitleFile(Window!, Se.Language.General.OpenSubtitleFileTitle);
-        if (string.IsNullOrEmpty(fileName))
-        {
-            return;
-        }
-
         var subtitle = Subtitle.Parse(fileName);
-        if (subtitle == null)
+        if (subtitle == null && Window != null)
         {
-            return;
+            var message = Se.Language.General.UnknownSubtitleFormat + Environment.NewLine + Environment.NewLine + System.IO.Path.GetFileName(fileName);
+            await MessageBox.Show(Window, Se.Language.General.Error, message, MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
-        ResetSyncPoints();
-
-        _rightLines.Clear();
-        foreach (var line in subtitle.Paragraphs)
-        {
-            _rightLines.Add(new SubtitleLineViewModel(line, subtitle.OriginalFormat));
-        }
-
-        RightFileName = fileName;
-        IsReloadFromFileVisible = false;
-
-        _languageDirty = true;
-        Dispatcher.UIThread.Post(CompareAndSelectFirst);
+        return subtitle;
     }
 
+    /// <summary>"Load saved file": the current subtitle as saved on disk becomes the reference - or says why it can't.</summary>
     [RelayCommand]
-    private void ReloadRightFromFile()
+    private async Task ReloadRightFromFile()
     {
         var fileName = LeftFileName;
         if (string.IsNullOrEmpty(fileName))
@@ -750,25 +838,7 @@ public partial class CompareViewModel : ObservableObject
             return;
         }
 
-        var subtitle = Subtitle.Parse(fileName);
-        if (subtitle == null)
-        {
-            return;
-        }
-
-        ResetSyncPoints();
-
-        _rightLines.Clear();
-        foreach (var line in subtitle.Paragraphs)
-        {
-            _rightLines.Add(new SubtitleLineViewModel(line, subtitle.OriginalFormat));
-        }
-
-        RightFileName = fileName;
-        IsReloadFromFileVisible = false;
-
-        _languageDirty = true;
-        Dispatcher.UIThread.Post(CompareAndSelectFirst);
+        await LoadRightFileAsync(fileName);
     }
 
     /// <summary>Picks the row's current line as one half of a sync point; completes it when a reference line is waiting.</summary>
@@ -837,8 +907,9 @@ public partial class CompareViewModel : ObservableObject
             return;
         }
 
+        PushUndo();
         _syncPoints.RemoveAll(p => p.LeftId == row.Left.Line?.Id && p.RightId == row.Right.Line?.Id);
-        SyncPointCount = _syncPoints.Count;
+        UpdateSyncPointCount();
         CompareKeepingPlace(row.Left.Line?.Id, Rows.IndexOf(row));
     }
 
@@ -852,6 +923,7 @@ public partial class CompareViewModel : ObservableObject
         }
 
         var lineId = SelectedRow?.Left.Line?.Id;
+        PushUndo();
         ResetSyncPoints();
         CompareKeepingPlace(lineId);
     }
@@ -902,11 +974,8 @@ public partial class CompareViewModel : ObservableObject
             return;
         }
 
-        if (shiftTiming)
-        {
-            PushUndo();
-        }
-
+        // Every sync point change is undoable, as Undo restores the sync points with the lines.
+        PushUndo();
         _syncPoints.RemoveAll(p =>
         {
             var l = _leftLines.FindIndex(x => x.Id == p.LeftId);
@@ -914,7 +983,7 @@ public partial class CompareViewModel : ObservableObject
             return l < 0 || r < 0 || (long)(l - leftIndex) * (r - rightIndex) <= 0;
         });
         _syncPoints.Add(new SyncPoint(leftId, rightId));
-        SyncPointCount = _syncPoints.Count;
+        UpdateSyncPointCount();
 
         if (shiftTiming)
         {
@@ -989,6 +1058,21 @@ public partial class CompareViewModel : ObservableObject
         _pendingSyncRightId = null;
         SyncPointCount = 0;
         SyncPointHint = string.Empty;
+    }
+
+    /// <summary>Counts only the sync points whose two lines still exist.</summary>
+    private void UpdateSyncPointCount()
+    {
+        var count = 0;
+        foreach (var sp in _syncPoints)
+        {
+            if (_leftLines.Exists(p => p.Id == sp.LeftId) && _rightLines.Exists(p => p.Id == sp.RightId))
+            {
+                count++;
+            }
+        }
+
+        SyncPointCount = count;
     }
 
     private bool IsSyncPoint(CompareItem left, CompareItem right)
@@ -1140,6 +1224,11 @@ public partial class CompareViewModel : ObservableObject
         PushUndo();
         _leftLines.Remove(line);
         _editedIds.Remove(line.Id);
+        if (_syncPoints.RemoveAll(p => p.LeftId == line.Id) > 0)
+        {
+            UpdateSyncPointCount();
+        }
+
         Renumber();
         AddChange(string.Format(Se.Language.File.CompareChangeDeletedX, number));
         CompareKeepingPlace(null, rowIndex);
@@ -1173,6 +1262,7 @@ public partial class CompareViewModel : ObservableObject
             return;
         }
 
+        var anchor = GetScrollAnchor();
         row.IsEditing = false;
         var line = row.Left.Line;
         if (line == null)
@@ -1183,7 +1273,7 @@ public partial class CompareViewModel : ObservableObject
         var end = row.EditEnd < row.EditStart ? row.EditStart : row.EditEnd;
         if (line.Text == row.EditText && IsTimeEqual(line.StartTime, row.EditStart) && IsTimeEqual(line.EndTime, end))
         {
-            FocusRows();
+            FocusRows(anchor);
             return;
         }
 
@@ -1197,12 +1287,13 @@ public partial class CompareViewModel : ObservableObject
     [RelayCommand]
     private void CancelEdit(CompareRow? row)
     {
+        var anchor = GetScrollAnchor();
         if (row != null)
         {
             KeepRowInPlace(row, () => row.IsEditing = false);
         }
 
-        FocusRows();
+        FocusRows(anchor);
     }
 
     /// <summary>
@@ -1224,6 +1315,62 @@ public partial class CompareViewModel : ObservableObject
         if (GetRowTop(row, scrollViewer) is { } after && Math.Abs(after - before.Value) > 0.5)
         {
             scrollViewer.Offset = new Vector(scrollViewer.Offset.X, scrollViewer.Offset.Y + after - before.Value);
+        }
+    }
+
+    /// <summary>
+    /// Where the list is: the first row in view and how far its top sits from the top of the view.
+    /// Wheel scrolling leaves keyboard focus on a row that is now out of view, and the virtualizing
+    /// list keeps that row at an estimated position; when focus goes back to it (the window is
+    /// activated again, the line editor closes) the list scrolls to that estimate - dozens of rows
+    /// away from both the view and the selected row (#15843). The anchor puts the view back.
+    /// </summary>
+    internal (int Index, double Top)? GetScrollAnchor()
+    {
+        var scrollViewer = RowsView?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (scrollViewer == null)
+        {
+            return null;
+        }
+
+        (int Index, double Top)? anchor = null;
+        foreach (var container in RowsView!.GetRealizedContainers())
+        {
+            if (container.TranslatePoint(new Point(0, 0), scrollViewer) is not { } point ||
+                point.Y + container.Bounds.Height <= 0 ||
+                point.Y >= scrollViewer.Viewport.Height)
+            {
+                continue;
+            }
+
+            if (anchor == null || point.Y < anchor.Value.Top)
+            {
+                anchor = (RowsView.IndexFromContainer(container), point.Y);
+            }
+        }
+
+        return anchor is { Index: >= 0 } ? anchor : null;
+    }
+
+    internal void RestoreScrollAnchor((int Index, double Top)? anchor)
+    {
+        var scrollViewer = RowsView?.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (anchor is not { } a || scrollViewer == null || a.Index >= Rows.Count)
+        {
+            return;
+        }
+
+        if (RowsView!.ContainerFromIndex(a.Index) == null)
+        {
+            RowsView.ScrollIntoView(a.Index);
+            RowsView.UpdateLayout();
+        }
+
+        if (RowsView.ContainerFromIndex(a.Index) is Control container &&
+            container.TranslatePoint(new Point(0, 0), scrollViewer) is { } point &&
+            Math.Abs(point.Y - a.Top) > 0.5)
+        {
+            scrollViewer.Offset = new Vector(scrollViewer.Offset.X, scrollViewer.Offset.Y + point.Y - a.Top);
         }
     }
 
@@ -1251,7 +1398,7 @@ public partial class CompareViewModel : ObservableObject
         _changes = state.Changes;
         _syncPoints.Clear();
         _syncPoints.AddRange(state.SyncPoints);
-        SyncPointCount = _syncPoints.Count;
+        UpdateSyncPointCount();
         UpdatePendingChanges();
         CompareKeepingPlace(SelectedRow?.Left.Line?.Id, SelectedRow == null ? 0 : Rows.IndexOf(SelectedRow));
     }
@@ -1497,6 +1644,7 @@ public partial class CompareViewModel : ObservableObject
     partial void OnLeftFileNameChanged(string value)
     {
         OnPropertyChanged(nameof(LeftFileNameDisplay));
+        OnPropertyChanged(nameof(ReloadFromFileHint));
     }
 
     partial void OnRightFileNameChanged(string value)
@@ -1644,7 +1792,7 @@ public partial class CompareViewModel : ObservableObject
         }
     }
 
-    private void FocusRows()
+    private void FocusRows((int Index, double Top)? anchor = null)
     {
         Dispatcher.UIThread.Post(() =>
         {
@@ -1655,6 +1803,11 @@ public partial class CompareViewModel : ObservableObject
             else
             {
                 RowsView?.Focus();
+            }
+
+            if (anchor != null)
+            {
+                Dispatcher.UIThread.Post(() => RestoreScrollAnchor(anchor), DispatcherPriority.Background);
             }
         });
     }
@@ -1683,87 +1836,30 @@ public partial class CompareViewModel : ObservableObject
 
     internal void FileGridOnDropLeft(object? sender, DragEventArgs e)
     {
-        if (!e.DataTransfer.Contains(DataFormat.File))
+        var path = GetDroppedFile(e);
+        if (path != null)
         {
-            return;
-        }
-
-        var files = e.DataTransfer.TryGetFiles();
-        if (files != null)
-        {
-            Dispatcher.UIThread.Post(async () =>
-            {
-                if (!await ConfirmDiscardChangesAsync())
-                {
-                    return;
-                }
-
-                foreach (var file in files)
-                {
-                    var path = file.Path?.LocalPath;
-                    var subtitle = Subtitle.Parse(path);
-                    if (subtitle == null || path == null)
-                    {
-                        return;
-                    }
-
-                    _leftLines.Clear();
-                    foreach (var line in subtitle.Paragraphs)
-                    {
-                        _leftLines.Add(new SubtitleLineViewModel(line, subtitle.OriginalFormat));
-                    }
-
-                    LeftFileNameHasChanges = false;
-                    LeftFileName = path;
-                    IsLeftEditable = false;
-                    ResetEdits();
-                    ResetSyncPoints();
-
-                    _languageDirty = true;
-                    Dispatcher.UIThread.Post(CompareAndSelectFirst);
-                    break;
-                }
-            });
+            Dispatcher.UIThread.Post(async () => await LoadLeftFileAsync(path));
         }
     }
 
     internal void FileGridOnDropRight(object? sender, DragEventArgs e)
     {
+        var path = GetDroppedFile(e);
+        if (path != null)
+        {
+            Dispatcher.UIThread.Post(async () => await LoadRightFileAsync(path));
+        }
+    }
+
+    /// <summary>The first dropped file - a side shows one subtitle.</summary>
+    private static string? GetDroppedFile(DragEventArgs e)
+    {
         if (!e.DataTransfer.Contains(DataFormat.File))
         {
-            return;
+            return null;
         }
 
-        var files = e.DataTransfer.TryGetFiles();
-        if (files != null)
-        {
-            Dispatcher.UIThread.Post(() =>
-            {
-                foreach (var file in files)
-                {
-                    var path = file.Path?.LocalPath;
-                    var subtitle = Subtitle.Parse(path);
-                    if (subtitle == null || path == null)
-                    {
-                        return;
-                    }
-
-                    ResetSyncPoints();
-
-                    _rightLines.Clear();
-                    foreach (var line in subtitle.Paragraphs)
-                    {
-                        _rightLines.Add(new SubtitleLineViewModel(line, subtitle.OriginalFormat));
-                    }
-
-                    RightFileName = path;
-                    IsReloadFromFileVisible = false;
-
-                    _languageDirty = true;
-                    Dispatcher.UIThread.Post(CompareAndSelectFirst);
-                    break;
-                }
-            });
-        }
+        return e.DataTransfer.TryGetFiles()?.FirstOrDefault()?.Path?.LocalPath;
     }
 }

@@ -43,6 +43,11 @@ public static class TtsEngineCatalog
         // one 200 MB GGUF, and by far the fastest local engine here (RTF ~0.09 on an M4).
         engines.Add(new SupertonicCrispAsr());
 
+        // KugelAudio-0-Open (audio.cpp) — four preset voices and no cloning, 23 European
+        // languages (Danish, Swedish, Norwegian, Finnish, Polish...) from a 7B model. Slow
+        // (3-4x real time on an M4) and ~9 GB resident, but MIT-licensed.
+        engines.Add(new KugelAudioAudioCpp());
+
         // Zonos (CrispASR) — not a cloning engine: the zonos backend has no speaker encoder, so
         // it speaks with one fixed default voice (CrispASR v0.8.34 dropped its voice-cloning
         // cap). Move it back into CreateVoiceCloningEngines when upstream ports the encoder.
@@ -115,6 +120,11 @@ public static class TtsEngineCatalog
             // languages with inline prosody/emotion control. Same shared runtime; weights are
             // under the Fish Audio Research License (first-run accept window).
             new FishTtsAudioCpp(),
+
+            // Breeze TTS 2 (audio.cpp) — English and Chinese only, but voice design from a
+            // free-text description and cloning steered by the same instruction. Same shared
+            // runtime; weights and output are research / non-commercial (first-run accept window).
+            new BreezeTtsAudioCpp(),
 
             // FireRedTTS3-Base (audio.cpp) — cloning across 24 languages with the best published
             // speaker similarity of the open models (arXiv 2608.17492). Same shared runtime;

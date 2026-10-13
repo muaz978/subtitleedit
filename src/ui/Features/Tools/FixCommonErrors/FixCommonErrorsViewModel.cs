@@ -349,16 +349,22 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
     public void FixesSelectAll()
     {
         var selectAll = VisibleFixes.Any(f => !f.IsSelected);
+        SetFixesSelected(VisibleFixes, selectAll);
+    }
 
-        // Each IsSelected set raises PropertyChanged, whose handler re-runs the full
-        // summary/chip recount - O(visible x fixes) for one click. Suppress the per-item
-        // recounts during the loop and do a single one at the end.
+    /// <summary>
+    /// Ticks or unticks several fixes (Select all, Space on a multi-selection). Each IsSelected
+    /// set raises PropertyChanged, whose handler re-runs the full summary/chip recount -
+    /// O(items x fixes) - so the per-item recounts are suppressed and done once at the end.
+    /// </summary>
+    public void SetFixesSelected(IEnumerable<FixDisplayItem> fixes, bool isSelected)
+    {
         _suppressFixesSummaryUpdate = true;
         try
         {
-            foreach (var fix in VisibleFixes)
+            foreach (var fix in fixes)
             {
-                fix.IsSelected = selectAll;
+                fix.IsSelected = isSelected;
             }
         }
         finally
@@ -383,20 +389,37 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
         Color.FromRgb(0x9a, 0xa3, 0xad), // gray
     };
 
+    // Darker shades of ChipPalette for action text on the light theme - the pastels above are
+    // tuned for a dark background and are hard to read on white (#15768). Each one is at least
+    // 4.5:1 against its own tinted pill background.
+    private static readonly Color[] ChipPaletteLight =
+    {
+        Color.FromRgb(0x8a, 0x5a, 0x00), // amber
+        Color.FromRgb(0x6a, 0x3d, 0xb8), // violet
+        Color.FromRgb(0x00, 0x6b, 0x7d), // cyan
+        Color.FromRgb(0xa8, 0x2e, 0x66), // pink
+        Color.FromRgb(0x1e, 0x7a, 0x34), // green
+        Color.FromRgb(0x1a, 0x5f, 0xb4), // blue
+        Color.FromRgb(0xa8, 0x46, 0x10), // orange
+        Color.FromRgb(0x55, 0x5e, 0x68), // gray
+    };
+
     private readonly Dictionary<string, int> _actionPaletteIndex = new();
 
     public IBrush GetActionBrush(string actionDisplay)
     {
-        return new SolidColorBrush(GetActionColor(actionDisplay));
+        var index = GetActionPaletteIndex(actionDisplay);
+        var palette = UiTheme.IsDarkThemeEnabled() ? ChipPalette : ChipPaletteLight;
+        return new SolidColorBrush(palette[index]);
     }
 
     public IBrush GetActionBackgroundBrush(string actionDisplay)
     {
-        var c = GetActionColor(actionDisplay);
+        var c = ChipPalette[GetActionPaletteIndex(actionDisplay)];
         return new SolidColorBrush(Color.FromArgb(0x20, c.R, c.G, c.B));
     }
 
-    private Color GetActionColor(string actionDisplay)
+    private int GetActionPaletteIndex(string actionDisplay)
     {
         if (!_actionPaletteIndex.TryGetValue(actionDisplay, out var index))
         {
@@ -404,7 +427,7 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
             _actionPaletteIndex[actionDisplay] = index;
         }
 
-        return ChipPalette[index % ChipPalette.Length];
+        return index % ChipPalette.Length;
     }
 
     private void AddFix(FixDisplayItem item)
@@ -848,6 +871,8 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
 
         FixDoubleApostrophes.Language.FixDoubleApostrophes = language.FixDoubleApostrophes;
 
+        FixMisreadQuotes.Language.FixMisreadQuotes = language.FixMisreadQuotes;
+
         FixMusicNotation.Language.FixMusicNotation = language.FixMusicNotation;
 
         FixMissingPeriodsAtEndOfLine.Language.AddPeriods = language.AddPeriods;
@@ -907,6 +932,7 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
             new(language.RemoveLineBreaksAll, string.Empty, 1, true, nameof(FixShortLinesAll)),
             new(language.RemoveLineBreaksPixelWidth, string.Empty, 1, true, nameof(FixShortLinesPixelWidth)),
             new(language.FixDoubleApostrophes, language.FixDoubleApostrophesExample, 1, true, nameof(FixDoubleApostrophes)),
+            new(language.FixMisreadQuotes, language.FixMisreadQuotesExample, 1, true, nameof(FixMisreadQuotes)),
             new(language.FixMusicNotation, language.FixMusicNotationExample, 1, true, nameof(FixMusicNotation)),
             new(language.AddPeriods, language.AddPeriodsExample, 1, true, nameof(FixMissingPeriodsAtEndOfLine)),
             new(language.StartWithUppercaseLetterAfterParagraph, language.StartWithUppercaseLetterAfterParagraphExample, 1, true,

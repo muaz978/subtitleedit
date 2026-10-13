@@ -62,30 +62,12 @@ public partial class DownloadYtDlpViewModel : ObservableObject, IClosingCleanup
             {
                 _timer.Stop();
                 _done = true;
-
-                var fileName = YtDlpDownloadService.GetFullFileName();
-                if (File.Exists(fileName) && OperatingSystem.IsMacOS())
-                {
-                    MacHelper.MakeExecutable(fileName);
-                }
-                else if (File.Exists(fileName) && OperatingSystem.IsLinux())
-                {
-                    LinuxHelper.MakeExecutable(fileName);
-                }
-
                 Close();
             }
             else if (_downloadTask is { IsFaulted: true })
             {
-                try
-                {
-                    File.Delete(YtDlpDownloadService.GetFullFileName());
-                }
-                catch
-                {
-                    // ignore
-                }
-                
+                // The service already removed the partial download and left the installed
+                // yt-dlp in place - nothing to clean up here.
                 _timer.Stop();
                 _done = true;
                 var ex = _downloadTask.Exception?.InnerException ?? _downloadTask.Exception;
@@ -109,6 +91,25 @@ public partial class DownloadYtDlpViewModel : ObservableObject, IClosingCleanup
         {
             Window?.Close();
         });
+    }
+
+    [RelayCommand]
+    private void Retry()
+    {
+        lock (_lockObj)
+        {
+            if (!_done || _cancellationTokenSource.IsCancellationRequested)
+            {
+                return;
+            }
+
+            Error = string.Empty;
+            Progress = 0;
+            StatusText = Se.Language.General.StartingDotDotDot;
+            _done = false;
+            StartDownload();
+            _timer.Start();
+        }
     }
 
     [RelayCommand]
@@ -149,6 +150,11 @@ public partial class DownloadYtDlpViewModel : ObservableObject, IClosingCleanup
 
     internal void OnKeyDown(KeyEventArgs e)
     {
-        CommandCancel();
+        // Escape only, like the other download dialogs - any key cancelled the download,
+        // including Enter/Space on the Retry button.
+        if (e.Key == Key.Escape)
+        {
+            CommandCancel();
+        }
     }
 }

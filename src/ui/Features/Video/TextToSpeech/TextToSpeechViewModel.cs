@@ -17,6 +17,7 @@ using Nikse.SubtitleEdit.Features.Video.SpeechToText;
 using Nikse.SubtitleEdit.Features.Video.SpeechToText.Engines;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ActorVoices;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.AdvancedTtsSettings;
+using Nikse.SubtitleEdit.Features.Video.TextToSpeech.CloneReferenceCleaning;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.ChatterboxTtsSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.CosyVoice3CrispAsrSettings;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.DownloadTts;
@@ -174,6 +175,9 @@ public partial class TextToSpeechViewModel : ObservableObject
     private string _waveFolder;
     private CancellationTokenSource _cancellationTokenSource;
     private CancellationToken _cancellationToken;
+    // Held while generating, so a long run is not cut short by the machine idling into sleep
+    // (#15552). Driven by IsGenerating, which every end-of-run path resets.
+    private readonly SleepInhibitorScope _sleepInhibitor = new(Se.Language.Video.TextToSpeech.Title);
     private WavePeakData2? _wavePeakData;
     private FfmpegMediaInfo? _mediaInfo;
     private string _videoFileName = string.Empty;
@@ -304,7 +308,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
         else if (SelectedEngine is MistralSpeech)
         {
-            ApiKey = Se.Settings.Video.TextToSpeech.MistralApiKey;
+            ApiKey = Se.Settings.Providers.MistralApiKey;
         }
         else if (SelectedEngine is OpenAiCompatibleSpeech)
         {
@@ -344,7 +348,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
         else if (SelectedEngine is MistralSpeech)
         {
-            Se.Settings.Video.TextToSpeech.MistralApiKey = ApiKey;
+            Se.Settings.Providers.MistralApiKey = ApiKey;
             Se.Settings.Video.TextToSpeech.MistralModel = SelectedModel ?? "voxtral-mini-tts-2603";
         }
         else if (SelectedEngine is OpenAiCompatibleSpeech)
@@ -403,10 +407,23 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             Se.Settings.Video.TextToSpeech.FishTtsAudioCppModel = SelectedModel ?? FishTtsAudioCpp.DefaultModelKey;
         }
+        else if (SelectedEngine is BreezeTtsAudioCpp)
+        {
+            Se.Settings.Video.TextToSpeech.BreezeTtsAudioCppModel = SelectedModel ?? BreezeTtsAudioCpp.DefaultModelKey;
+            Se.Settings.Video.TextToSpeech.BreezeTtsAudioCppInstruction = (Instruction ?? string.Empty).Trim();
+        }
         else if (SelectedEngine is FireRedTts3AudioCpp)
         {
             Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppModel = SelectedModel ?? FireRedTts3AudioCpp.DefaultModelKey;
             Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppLanguage = SelectedLanguage?.Name ?? string.Empty;
+        }
+        else if (SelectedEngine is KugelAudioAudioCpp)
+        {
+            Se.Settings.Video.TextToSpeech.KugelAudioAudioCppModel = SelectedModel ?? KugelAudioAudioCpp.DefaultModelKey;
+            if (SelectedVoice?.EngineVoice is KugelAudioVoice kugelVoice && !string.IsNullOrEmpty(kugelVoice.Voice))
+            {
+                Se.Settings.Video.TextToSpeech.KugelAudioAudioCppVoice = kugelVoice.Voice;
+            }
         }
         else if (SelectedEngine is CosyVoice3CrispAsr)
         {
@@ -483,6 +500,7 @@ public partial class TextToSpeechViewModel : ObservableObject
         Qwen3TtsCpp => Se.Settings.Video.TextToSpeech.Qwen3TtsCppInstruction ?? string.Empty,
         Qwen3TtsCrispAsr => Se.Settings.Video.TextToSpeech.Qwen3TtsCppInstruction ?? string.Empty,
         OmniVoiceTtsCpp => Se.Settings.Video.TextToSpeech.OmniVoiceTtsCppInstruction ?? string.Empty,
+        BreezeTtsAudioCpp => Se.Settings.Video.TextToSpeech.BreezeTtsAudioCppInstruction ?? string.Empty,
         _ => string.Empty,
     };
 
@@ -503,12 +521,14 @@ public partial class TextToSpeechViewModel : ObservableObject
     }
 
     // Qwen3's free-text instruction only does anything on the VoiceDesign model - the 0.6B and
-    // 1.7B Base models are not instruction-tuned. OmniVoice always shows its keyword picker.
+    // 1.7B Base models are not instruction-tuned. Breeze TTS 2 always takes one (voice design
+    // for "Default", delivery direction for a clone). OmniVoice always shows its keyword picker.
     private void RefreshInstructionVisibility()
     {
         IsInstructionTextVisible =
             (SelectedEngine is Qwen3TtsCpp && Qwen3TtsCpp.IsVoiceDesignModel(SelectedModel))
-            || (SelectedEngine is Qwen3TtsCrispAsr && Qwen3TtsCrispAsr.IsVoiceDesignModel(SelectedModel));
+            || (SelectedEngine is Qwen3TtsCrispAsr && Qwen3TtsCrispAsr.IsVoiceDesignModel(SelectedModel))
+            || SelectedEngine is BreezeTtsAudioCpp;
         IsInstructionPickerVisible = SelectedEngine is OmniVoiceTtsCpp;
         HasInstruction = IsInstructionTextVisible || IsInstructionPickerVisible;
     }
@@ -1489,9 +1509,17 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             FishTtsAudioCpp.StopServer();
         }
+        if (keepAlive is not BreezeTtsAudioCpp)
+        {
+            BreezeTtsAudioCpp.StopServer();
+        }
         if (keepAlive is not FireRedTts3AudioCpp)
         {
             FireRedTts3AudioCpp.StopServer();
+        }
+        if (keepAlive is not KugelAudioAudioCpp)
+        {
+            KugelAudioAudioCpp.StopServer();
         }
         if (keepAlive is not CosyVoice3CrispAsr)
         {
@@ -1704,6 +1732,8 @@ public partial class TextToSpeechViewModel : ObservableObject
         }
     }
 
+    partial void OnIsGeneratingChanged(bool value) => _sleepInhibitor.SetActive(value);
+
     /// <summary>
     /// Returns the window from "generating" (buttons disabled, progress showing) to its idle state.
     /// </summary>
@@ -1817,8 +1847,14 @@ public partial class TextToSpeechViewModel : ObservableObject
             case FishTtsAudioCpp:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadFishTtsAudioCppModels(FishTtsAudioCpp.ResolveModelKey(SelectedModel)));
                 break;
+            case BreezeTtsAudioCpp:
+                await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadBreezeTtsAudioCppModels(BreezeTtsAudioCpp.ResolveModelKey(SelectedModel)));
+                break;
             case FireRedTts3AudioCpp:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadFireRedTts3AudioCppModels(FireRedTts3AudioCpp.ResolveModelKey(SelectedModel)));
+                break;
+            case KugelAudioAudioCpp:
+                await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadKugelAudioAudioCppModels(KugelAudioAudioCpp.ResolveModelKey(SelectedModel)));
                 break;
             case CosyVoice3CrispAsr:
                 await _windowService.ShowDialogAsync<DownloadTtsWindow, DownloadTtsViewModel>(Window!, vm => vm.StartDownloadCosyVoice3CrispAsrModels(CosyVoice3CrispAsr.ResolveModelKey(SelectedModel)));
@@ -1911,7 +1947,13 @@ public partial class TextToSpeechViewModel : ObservableObject
             FishTtsAudioCpp => FishTtsAudioCpp.AreModelsInstalled(modelKey)
                 ? DownloadDotStatus.UpToDate
                 : DownloadDotStatus.NotInstalled,
+            BreezeTtsAudioCpp => BreezeTtsAudioCpp.AreModelsInstalled(modelKey)
+                ? DownloadDotStatus.UpToDate
+                : DownloadDotStatus.NotInstalled,
             FireRedTts3AudioCpp => FireRedTts3AudioCpp.AreModelsInstalled(modelKey)
+                ? DownloadDotStatus.UpToDate
+                : DownloadDotStatus.NotInstalled,
+            KugelAudioAudioCpp => KugelAudioAudioCpp.AreModelsInstalled(modelKey)
                 ? DownloadDotStatus.UpToDate
                 : DownloadDotStatus.NotInstalled,
             CosyVoice3CrispAsr => CosyVoice3CrispAsr.AreModelsInstalled(modelKey)
@@ -2363,6 +2405,12 @@ public partial class TextToSpeechViewModel : ObservableObject
             return false;
         }
 
+        if (Se.Settings.Video.TextToSpeech.RemoveOriginalSpeechFast)
+        {
+            return await SpeechIsolationModelDownload.EnsureModelDownloadedAsync(
+                Window!, _windowService, new CrispAsrCohere(), HtDemucsModel.ToWhisperModel(), HtDemucsModel.DisplayName, featureName, "a source separation model");
+        }
+
         return await SpeechIsolationModelDownload.EnsureDownloadedAsync(Window!, _windowService, new CrispAsrCohere(), featureName);
     }
 
@@ -2372,9 +2420,10 @@ public partial class TextToSpeechViewModel : ObservableObject
     /// </summary>
     private async Task<string?> MakeSpeechFreeBackground(string workFolder, CancellationToken cancellationToken)
     {
+        var fast = Se.Settings.Video.TextToSpeech.RemoveOriginalSpeechFast;
         var crispAsr = new CrispAsrCohere();
         var executable = crispAsr.GetExecutable();
-        var modelFileName = crispAsr.GetModelForCmdLine(SpeechIsolationModel.FileName);
+        var modelFileName = crispAsr.GetModelForCmdLine(fast ? HtDemucsModel.FileName : SpeechIsolationModel.FileName);
         if (!File.Exists(executable) || !File.Exists(modelFileName))
         {
             return null;
@@ -2388,14 +2437,17 @@ public partial class TextToSpeechViewModel : ObservableObject
             return null;
         }
 
-        var arguments = SpeechIsolationModel.BuildSeparateArguments(modelFileName, originalAudioFileName, workFolder, SpeechIsolationModel.BackgroundStem);
+        var stems = fast ? HtDemucsModel.BackgroundStems : new[] { SpeechIsolationModel.BackgroundStem };
+        var arguments = SpeechIsolationModel.BuildSeparateArguments(modelFileName, originalAudioFileName, workFolder, string.Join(",", stems));
         Se.WriteToolsLog($"{executable} {arguments}");
 
         // The separator's per-chunk lines on stderr are the only measure of how far it is - and
         // on a machine without a GPU it is minutes per minute of video (#15176). They drive the
         // percentage and the time-left estimate; the GPU path prints none and is quick. The
         // output is also kept: when the separator fails it is the only clue to why.
-        var progress = new SpeechIsolationProgress(SpeechIsolationProgress.GetChunkCountFromWaveFile(originalAudioFileName));
+        var progress = new SpeechIsolationProgress(fast
+            ? SpeechIsolationProgress.GetChunkCountFromWaveFile(originalAudioFileName, HtDemucsModel.ChunkSamples, HtDemucsModel.StrideSamples)
+            : SpeechIsolationProgress.GetChunkCountFromWaveFile(originalAudioFileName));
         var separateLog = new StringBuilder();
         DataReceivedEventHandler onLine = (_, args) =>
         {
@@ -2426,14 +2478,28 @@ public partial class TextToSpeechViewModel : ObservableObject
         separateProcess.ErrorDataReceived += onLine;
         await separateProcess.StartAndWaitAsync(cancellationToken);
 
-        var backgroundFileName = SpeechIsolationModel.GetStemFileName(originalAudioFileName, workFolder, SpeechIsolationModel.BackgroundStem);
-        if (separateProcess.ExitCode != 0 || !File.Exists(backgroundFileName))
+        var stemFileNames = stems.Select(stem => SpeechIsolationModel.GetStemFileName(originalAudioFileName, workFolder, stem)).ToList();
+        if (separateProcess.ExitCode != 0 || !stemFileNames.All(File.Exists))
         {
             lock (separateLog)
             {
                 Se.WriteToolsLog($"TTS remove original speech: separation failed with exit code {separateProcess.ExitCode}:{Environment.NewLine}{separateLog}", true);
             }
 
+            return null;
+        }
+
+        if (stemFileNames.Count == 1)
+        {
+            return stemFileNames[0];
+        }
+
+        var backgroundFileName = Path.Combine(workFolder, "background.wav");
+        using var mixProcess = FfmpegGenerator.MixStems(stemFileNames, backgroundFileName);
+        await mixProcess.StartAndWaitAsync(cancellationToken);
+        if (mixProcess.ExitCode != 0 || !File.Exists(backgroundFileName))
+        {
+            Se.WriteToolsLog($"TTS remove original speech: ffmpeg could not mix the stems (exit code {mixProcess.ExitCode})", true);
             return null;
         }
 
@@ -3369,7 +3435,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             ProgressValue = 0;
             for (var index = 0; index < previousStepResult.Length; index++)
             {
-                ProgressText = $"Merging audio: segment {index + 1} of {previousStepResult.Length}";
+                ProgressText = string.Format(Se.Language.Video.TextToSpeech.MergingAudioSegmentXOfY, index + 1, previousStepResult.Length);
 
                 var item = previousStepResult[index];
 
@@ -3549,7 +3615,7 @@ public partial class TextToSpeechViewModel : ObservableObject
 
             for (var index = 0; index < _subtitle.Paragraphs.Count; index++)
             {
-                ProgressText = $"Generating speech: segment {index + 1} of {_subtitle.Paragraphs.Count}";
+                ProgressText = string.Format(Se.Language.Video.TextToSpeech.GeneratingSpeechSegmentXOfY, index + 1, _subtitle.Paragraphs.Count);
                 var paragraph = _subtitle.Paragraphs[index];
 
                 // A line the user chose to leave silent gets no step result at all - exactly like
@@ -4025,6 +4091,18 @@ public partial class TextToSpeechViewModel : ObservableObject
             progress: (done, total) => ProgressValue = total == 0 ? 0 : (double)done / total * 100.0,
             cancellationToken);
 
+        // Before speech-to-text, which also hears the speech better without the music under it.
+        if (_perLineCloneClips.Count > 0 && await EnsureCloneReferenceCleanerAsync())
+        {
+            ProgressText = Se.Language.Video.TextToSpeech.CleaningCloneReferencesDotDotDot;
+            ProgressValue = 0;
+            await CloneReferenceCleaner.CleanFolderAsync(
+                clipFolder,
+                PerLineVoiceClone.ReferenceSampleRate,
+                (done, total) => Dispatcher.UIThread.Post(() => ProgressValue = total == 0 ? 0 : (double)done / total * 100.0),
+                cancellationToken);
+        }
+
         if (transcribeClips && !await TranscribePerLineCloneClipsAsync())
         {
             return false;
@@ -4070,8 +4148,20 @@ public partial class TextToSpeechViewModel : ObservableObject
             audioTrackFfIndex: -1,
             cancellationToken);
 
+        if (clipFileName != null && await EnsureCloneReferenceCleanerAsync())
+        {
+            await CloneReferenceCleaner.CleanFileAsync(clipFileName, PerLineVoiceClone.ReferenceSampleRate, cancellationToken);
+        }
+
         return clipFileName == null ? null : PerLineVoiceClone.MakeVoiceForClip(engine, clipFileName);
     }
+
+    /// <summary>
+    /// True when "Clean voice-clone references" is on and Sidon is ready, asking for the runtime
+    /// update and the model download when needed. False means clone from the uncleaned clips.
+    /// </summary>
+    private async Task<bool> EnsureCloneReferenceCleanerAsync() =>
+        CloneReferenceCleaner.IsEnabled && await CloneReferenceCleaner.EnsureInstalledAsync(Window!, _windowService);
 
     /// <summary>
     /// Runs speech-to-text over the reference clips that have no transcript and writes what it
@@ -4142,12 +4232,20 @@ public partial class TextToSpeechViewModel : ObservableObject
         var startMs = (long)Math.Round(paragraph.StartTime.TotalMilliseconds);
         if (!_originalByStartMs.TryGetValue(startMs, out var best))
         {
-            best = _originalSubtitle.Paragraphs
-                .OrderBy(p => Math.Abs(p.StartTime.TotalMilliseconds - paragraph.StartTime.TotalMilliseconds))
-                .First();
+            // Closest start time, earliest line on a tie - one pass, not a sort per moved line.
+            var bestDistance = double.MaxValue;
+            foreach (var p in _originalSubtitle.Paragraphs)
+            {
+                var distance = Math.Abs(p.StartTime.TotalMilliseconds - paragraph.StartTime.TotalMilliseconds);
+                if (best == null || distance < bestDistance)
+                {
+                    best = p;
+                    bestDistance = distance;
+                }
+            }
         }
 
-        if (Math.Abs(best.StartTime.TotalMilliseconds - paragraph.StartTime.TotalMilliseconds) > 500)
+        if (best == null || Math.Abs(best.StartTime.TotalMilliseconds - paragraph.StartTime.TotalMilliseconds) > 500)
         {
             return null;
         }
@@ -4284,7 +4382,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             ProgressValue = 0;
             for (var index = 0; index < previousStepResult.Length; index++)
             {
-                ProgressText = $"Adjusting speed: segment {index + 1} of {_subtitle.Paragraphs.Count}";
+                ProgressText = string.Format(Se.Language.Video.TextToSpeech.AdjustingSpeedSegmentXOfY, index + 1, _subtitle.Paragraphs.Count);
                 ProgressValue = (double)index / _subtitle.Paragraphs.Count * 100;
 
                 var item = previousStepResult[index];
@@ -4544,7 +4642,7 @@ public partial class TextToSpeechViewModel : ObservableObject
 
             for (var index = 0; index < previousStepResult.Length; index++)
             {
-                ProgressText = $"Post-processing: segment {index + 1} of {previousStepResult.Length}";
+                ProgressText = string.Format(Se.Language.Video.TextToSpeech.PostProcessingSegmentXOfY, index + 1, previousStepResult.Length);
                 var item = previousStepResult[index];
 
                 if (string.IsNullOrEmpty(item.CurrentFileName) || !File.Exists(item.CurrentFileName))
@@ -4953,7 +5051,7 @@ public partial class TextToSpeechViewModel : ObservableObject
             }
             else if (SelectedEngine is MistralSpeech)
             {
-                ApiKey = Se.Settings.Video.TextToSpeech.MistralApiKey;
+                ApiKey = Se.Settings.Providers.MistralApiKey;
                 SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.MistralModel);
                 if (string.IsNullOrEmpty(SelectedModel))
                 {
@@ -5065,6 +5163,16 @@ public partial class TextToSpeechViewModel : ObservableObject
                 IsEngineSettingsVisible = true;
                 IsModelDownloadVisible = true;
             }
+            else if (SelectedEngine is BreezeTtsAudioCpp)
+            {
+                SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.BreezeTtsAudioCppModel);
+                if (string.IsNullOrEmpty(SelectedModel))
+                {
+                    SelectedModel = Models.FirstOrDefault();
+                }
+                IsEngineSettingsVisible = true;
+                IsModelDownloadVisible = true;
+            }
             else if (SelectedEngine is FireRedTts3AudioCpp)
             {
                 SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.FireRedTts3AudioCppModel);
@@ -5129,6 +5237,24 @@ public partial class TextToSpeechViewModel : ObservableObject
             {
                 // Minimal engine: single fixed quant (no model dropdown) and no settings
                 // dialog. Show only the model-download button so the user can fetch the GGUFs.
+                IsModelDownloadVisible = true;
+            }
+            else if (SelectedEngine is KugelAudioAudioCpp)
+            {
+                SelectedModel = Models.FirstOrDefault(p => p == Se.Settings.Video.TextToSpeech.KugelAudioAudioCppModel);
+                if (string.IsNullOrEmpty(SelectedModel))
+                {
+                    SelectedModel = Models.FirstOrDefault();
+                }
+
+                var savedVoice = Se.Settings.Video.TextToSpeech.KugelAudioAudioCppVoice;
+                var match = Voices.FirstOrDefault(v => v.EngineVoice is KugelAudioVoice kv && kv.Voice == savedVoice);
+                if (match != null)
+                {
+                    SelectedVoice = match;
+                }
+
+                IsEngineSettingsVisible = true;
                 IsModelDownloadVisible = true;
             }
             else if (SelectedEngine is SupertonicCrispAsr)
@@ -5236,6 +5362,9 @@ public partial class TextToSpeechViewModel : ObservableObject
         {
             SeLogger.Error(ex, "TTS window close: stopping the playback timer failed");
         }
+
+        // A close mid-run cancels the pipeline but does not always reach ResetGeneratingUiState.
+        _sleepInhibitor.Dispose();
 
         // Only present when Test voice played a clip, and normally already gone: OK disposes it
         // before the close starts. This covers the paths that close without OK (Cancel, Escape,

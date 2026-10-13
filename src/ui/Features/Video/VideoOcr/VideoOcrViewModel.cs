@@ -68,6 +68,9 @@ public partial class VideoOcrViewModel : ObservableObject
     [ObservableProperty] private LlamaCppModelDisplay? _selectedLlamaCppModel;
     [ObservableProperty] private string _llamaCppLanguage;
     [ObservableProperty] private string _llamaCppServerButtonText;
+    [ObservableProperty] private string _llamaCppUrl;
+    [ObservableProperty] private bool _isLlamaCppLocalVisible;
+    [ObservableProperty] private bool _isLlamaCppRemoteVisible;
     [ObservableProperty] private ObservableCollection<CrispEmbedBackend> _crispEmbedBackends;
     [ObservableProperty] private CrispEmbedBackend? _selectedCrispEmbedBackend;
     [ObservableProperty] private ObservableCollection<CrispEmbedModelDisplay> _crispEmbedModels;
@@ -106,6 +109,7 @@ public partial class VideoOcrViewModel : ObservableObject
     /// <summary>The video being OCR'ed - the window shows its file name in the title.</summary>
     public string VideoFileName => _videoFileName;
     private CancellationTokenSource _cancellationTokenSource = new();
+    private string _ocrStoppedEarlyError = string.Empty;
     private readonly ISpellCheckManager _spellCheckManager;
     private readonly IOcrFixEngine _ocrFixEngine;
     private Process? _ffmpegProcess;
@@ -148,6 +152,7 @@ public partial class VideoOcrViewModel : ObservableObject
         GlmLanguage = string.Empty;
         LlamaCppModels = new ObservableCollection<LlamaCppModelDisplay>();
         LlamaCppLanguage = string.Empty;
+        LlamaCppUrl = Se.Settings.Ocr.LlamaCppUrl ?? string.Empty;
         LlamaCppServerButtonText = Se.Language.General.StartServer;
         // For burned-in video, only the backends that measured well are offered, best first
         // (real-footage clips with burned real SRTs as ground truth, 2026-08-26): GLM-OCR
@@ -269,6 +274,7 @@ public partial class VideoOcrViewModel : ObservableObject
         IsOllamaEngine = value.EngineType == OcrEngineType.Ollama;
         IsGlmEngine = value.EngineType == OcrEngineType.Glm;
         IsLlamaCppEngine = value.EngineType == OcrEngineType.LlamaCpp;
+        UpdateLlamaCppModeVisibility();
         IsCrispEmbedEngine = value.EngineType == OcrEngineType.CrispEmbed;
         IsAppleVisionEngine = value.EngineType == OcrEngineType.AppleVision;
         SelectedEngineDescription = value.Description;
@@ -350,8 +356,14 @@ public partial class VideoOcrViewModel : ObservableObject
             case OcrEngineType.LlamaCpp:
                 // Same dialog as the image OCR window: server URL, request timeout, prompt and the
                 // engine build's update status. The settings are shared with image OCR.
-                await _windowService.ShowDialogAsync<LlamaCppOcrSettingsWindow, LlamaCppOcrSettingsViewModel>(
+                Se.Settings.Ocr.LlamaCppUrl = LlamaCppUrl;
+                var llamaCppResult = await _windowService.ShowDialogAsync<LlamaCppOcrSettingsWindow, LlamaCppOcrSettingsViewModel>(
                     Window, vm => vm.Initialize(UpdateLlamaCppEngineAsync));
+                if (llamaCppResult.OkPressed)
+                {
+                    LlamaCppUrl = Se.Settings.Ocr.LlamaCppUrl ?? string.Empty;
+                    UpdateLlamaCppModeVisibility();
+                }
                 break;
 
             default:
@@ -436,6 +448,13 @@ public partial class VideoOcrViewModel : ObservableObject
     // No OnSelectedLlamaCppModelChanged: it used to write Se.Settings.Video.VideoOcr.LlamaCppModel
     // straight away, so browsing the model list changed the saved choice even when the window was
     // cancelled. SaveSettings persists the selected model when the window is accepted.
+
+    // Local mode shows the model/download/server controls; remote mode only the server URL (#15854).
+    private void UpdateLlamaCppModeVisibility()
+    {
+        IsLlamaCppLocalVisible = IsLlamaCppEngine && !Se.Settings.Ocr.LlamaCppUseRemoteServer;
+        IsLlamaCppRemoteVisible = IsLlamaCppEngine && Se.Settings.Ocr.LlamaCppUseRemoteServer;
+    }
 
     private void UpdateLlamaCppServerButtonText()
     {
@@ -893,7 +912,16 @@ public partial class VideoOcrViewModel : ObservableObject
             ProgressValue = 0;
             ProgressText = string.Format(Se.Language.Video.VideoOcr.LinesFoundX, Lines.Count);
 
-            if (Lines.Count == 0)
+            if (!string.IsNullOrEmpty(_ocrStoppedEarlyError))
+            {
+                await MessageBox.Show(
+                    Window!,
+                    Se.Language.General.Error,
+                    string.Format(Se.Language.Video.VideoOcr.OcrStoppedEarlyMessage, Environment.NewLine, _ocrStoppedEarlyError),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            else if (Lines.Count == 0)
             {
                 await MessageBox.Show(
                     Window!,
@@ -1082,6 +1110,7 @@ public partial class VideoOcrViewModel : ObservableObject
             ProgressText = string.Format(Se.Language.Video.VideoOcr.RunningOcrXY, 0, ocrGroups.Count);
         });
 
+        _ocrStoppedEarlyError = string.Empty;
         await OcrGroups(ocrGroups, ReportOcrProgress, AddPreviewLine, cancellationToken);
     }
 
@@ -1150,9 +1179,15 @@ public partial class VideoOcrViewModel : ObservableObject
                 MinConfidencePercent = 75,
             };
             await paddleOcr.OcrBatch(engineType, batch, language, mode, progress, cancellationToken);
-            if (!string.IsNullOrEmpty(paddleOcr.Error) && ocrGroups.All(p => string.IsNullOrEmpty(p.Text)))
+            if (!string.IsNullOrEmpty(paddleOcr.Error))
             {
-                throw new Exception("Paddle OCR failed: " + paddleOcr.Error);
+                if (ocrGroups.All(p => string.IsNullOrEmpty(p.Text)))
+                {
+                    throw new Exception("Paddle OCR failed: " + paddleOcr.Error);
+                }
+
+                // Stopped part-way: keep the lines read so far, warn once the scan is done
+                _ocrStoppedEarlyError = paddleOcr.Error;
             }
         }
         else if (engineType == OcrEngineType.Ollama)
@@ -1172,11 +1207,15 @@ public partial class VideoOcrViewModel : ObservableObject
         else if (engineType == OcrEngineType.LlamaCpp)
         {
             using var llamaCppOcr = new LlamaCppOcr(Se.Settings.Ocr.LlamaCppOcrTimeoutMinutes);
-            var url = LlamaCppServerManager.ApiUrl;
-            var modelName = SelectedLlamaCppModel?.Model.FileName is { } fileName
+
+            // Remote mode: the user's own llama-server, whose model is unknown, so the generic prompt applies (#15854).
+            var useRemoteServer = Se.Settings.Ocr.LlamaCppUseRemoteServer;
+            var model = useRemoteServer ? null : SelectedLlamaCppModel?.Model;
+            var url = useRemoteServer ? LlamaCppOcr.CompleteRemoteUrl(LlamaCppUrl) : LlamaCppServerManager.ApiUrl;
+            var modelName = model?.FileName is { } fileName
                 ? Path.GetFileNameWithoutExtension(fileName)
                 : "glmocr";
-            var prompt = LlamaCppServerManager.ResolveOcrPrompt(SelectedLlamaCppModel?.Model, Se.Settings.Ocr.LlamaCppOcrPrompt);
+            var prompt = LlamaCppServerManager.ResolveOcrPrompt(model, Se.Settings.Ocr.LlamaCppOcrPrompt);
             await RunLlmOcr(ocrGroups, group => OcrWithBitmap(group, bitmap =>
                     llamaCppOcr.Ocr(bitmap, url, modelName, LlamaCppLanguage, prompt, cancellationToken)),
                 () => llamaCppOcr.Error, reportProgress, addPreviewLine, cancellationToken, CountUnknownWords);
@@ -1416,6 +1455,22 @@ public partial class VideoOcrViewModel : ObservableObject
 
         if (engineType == OcrEngineType.LlamaCpp)
         {
+            if (Se.Settings.Ocr.LlamaCppUseRemoteServer)
+            {
+                if (!string.IsNullOrWhiteSpace(LlamaCppUrl))
+                {
+                    return true;
+                }
+
+                await MessageBox.Show(
+                    Window!,
+                    Se.Language.General.Error,
+                    string.Format(Se.Language.General.XRequiresAValidUrl, Se.Language.Ocr.LlamaCppOcr),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return false;
+            }
+
             return await EnsureLlamaCppReady();
         }
 
@@ -1572,6 +1627,7 @@ public partial class VideoOcrViewModel : ObservableObject
             settings.LlamaCppModel = LlamaCppServerManager.GetModelPath(SelectedLlamaCppModel.Model.FileName);
         }
         settings.LlamaCppLanguage = LlamaCppLanguage;
+        Se.Settings.Ocr.LlamaCppUrl = (LlamaCppUrl ?? string.Empty).Trim();
         settings.CrispEmbedBackend = SelectedCrispEmbedBackend?.Name ?? settings.CrispEmbedBackend;
         settings.CrispEmbedModel = SelectedCrispEmbedModel?.Model.Name ?? settings.CrispEmbedModel;
         settings.FramesPerSecond = FramesPerSecond;

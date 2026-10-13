@@ -487,7 +487,7 @@ public static partial class MergeAndSplitHelper
         Action<Action> applyRowUpdate)
     {
         var translatedLines = mergedTranslation.SplitToLines();
-        if (translatedLines.Count != mergeResult.Text.SplitToLines().Count)
+        if (translatedLines.Count != mergeResult.Text.CountLines())
         {
             return 0;
         }
@@ -500,10 +500,16 @@ public static partial class MergeAndSplitHelper
         foreach (var mergeItem in mergeResult.MergeResultItems)
         {
             var numberOfParagraphs = mergeItem.EndIndex - mergeItem.StartIndex + 1;
-            var numberOfLines = mergeItem.Text.SplitToLines().Count;
+            var numberOfLines = mergeItem.Text.CountLines();
 
             var translatedText = BuildTranslatedText(translatedLines, ref translatedLinesIdx, numberOfLines);
-            var splitParts = TextSplit.SplitMulti(translatedText, numberOfParagraphs, target.TwoLetterIsoLanguageName);
+
+            // The rows of a sentence were sent as lines: deal the reply's lines back out to them
+            // instead of re-cutting the sentence by length, which moved words into the
+            // neighbouring row (#15602).
+            var splitParts = mergeResult.ContinuousRowsJoinedWithLineBreak && mergeItem.Continuous
+                ? SplitByPreservedLineBreaks(translatedText, mergeItem) ?? TextSplit.SplitMulti(translatedText, numberOfParagraphs, target.TwoLetterIsoLanguageName)
+                : TextSplit.SplitMulti(translatedText, numberOfParagraphs, target.TwoLetterIsoLanguageName);
 
             for (var i = 0; i < splitParts.Count && pending.Count < rows.Count - index; i++)
             {
@@ -1124,7 +1130,7 @@ public static partial class MergeAndSplitHelper
     private static List<string>? SplitByPreservedLineBreaks(string text, MergeResultItem item)
     {
         var replyLines = text.SplitToLines();
-        var lineCounts = item.Paragraphs.Select(p => p.Text.SplitToLines().Count).ToList();
+        var lineCounts = item.Paragraphs.Select(p => p.Text.CountLines()).ToList();
         if (replyLines.Count != lineCounts.Sum())
         {
             return null;

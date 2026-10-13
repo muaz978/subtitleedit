@@ -68,6 +68,7 @@ public class TimelineTracks : Control, IDisposable
 
     private readonly TimelineThumbnailCache _thumbnails = new();
     private readonly List<SubtitleLineViewModel> _paragraphs = new();
+    private readonly HashSet<SubtitleLineViewModel> _selectedRenderSet = new();
     private readonly Dictionary<SubtitleLineViewModel, (string Source, FormattedText Text)> _textCache = new();
     private readonly Dictionary<SubtitleLineViewModel, (string Source, FormattedText Text)> _originalTextCache = new();
     private readonly Dictionary<string, FormattedText> _labelCache = new();
@@ -138,7 +139,14 @@ public class TimelineTracks : Control, IDisposable
         // nothing announces. Looking twice a second is far cheaper than looking per frame, and
         // unlike Render it is allowed to change the control's height.
         _trackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _trackTimer.Tick += (_, _) => UpdateTracks();
+        _trackTimer.Tick += (_, _) =>
+        {
+            UpdateTracks();
+
+            // Nothing may be drawn right after playback stops, and the frames queued while it
+            // played should still come.
+            UpdateThumbnailsPaused();
+        };
 
         PointerEntered += (_, e) => Forward(e, e.GetPosition(this));
         PointerMoved += (_, e) => Forward(e, e.GetPosition(this));
@@ -269,6 +277,7 @@ public class TimelineTracks : Control, IDisposable
 
         _source.PropertyChanged += OnSourcePropertyChanged;
         _source.Rendered += OnSourceRendered;
+        _source.IsSameTrack = (a, b) => _grouping == TimelineTrackGrouping.None || GetGroupTrackIndex(a) == GetGroupTrackIndex(b);
         _hooked = true;
     }
 
@@ -282,6 +291,7 @@ public class TimelineTracks : Control, IDisposable
         _source.PropertyChanged -= OnSourcePropertyChanged;
         _source.Rendered -= OnSourceRendered;
         _source.HitTestFilter = null;
+        _source.IsSameTrack = null;
         _hooked = false;
     }
 
@@ -558,6 +568,10 @@ public class TimelineTracks : Control, IDisposable
         var tileWidth = step * pixelsPerSecond;
         var firstTile = Math.Max(0, (long)Math.Floor(startSeconds / step));
 
+        // A keyframe within half a tile is the right picture for it, and much cheaper to get
+        var toleranceMilliseconds = (long)Math.Round(step * 500.0);
+        var isPlaying = UpdateThumbnailsPaused();
+
         // No tiles past the end of the media (as far as the waveform knows it): there is no
         // picture there, only an ffmpeg run per tile to find that out.
         var lastTileSeconds = endSeconds;
@@ -566,13 +580,29 @@ public class TimelineTracks : Control, IDisposable
             lastTileSeconds = Math.Min(endSeconds, wavePeaks.LengthInSeconds);
         }
 
+        // While paused, the next screen is fetched too, so playback finds its frames there. It is
+        // asked for first: the newest request is served first, so the visible tiles go before it.
+        if (!isPlaying)
+        {
+            var aheadEndSeconds = endSeconds + (endSeconds - startSeconds);
+            if (source.WavePeaks is { LengthInSeconds: > 0 } peaks)
+            {
+                aheadEndSeconds = Math.Min(aheadEndSeconds, peaks.LengthInSeconds);
+            }
+
+            for (var tile = Math.Max(firstTile, (long)Math.Ceiling(endSeconds / step)); tile * step < aheadEndSeconds; tile++)
+            {
+                _thumbnails.Get(videoFileName, GetFilmstripFrameMilliseconds(tile, step), toleranceMilliseconds);
+            }
+        }
+
         for (var tile = firstTile; tile * step < lastTileSeconds; tile++)
         {
             var x = Math.Round((tile * step - startSeconds) * pixelsPerSecond);
             var tileRect = new Rect(x, row.Y, Math.Max(1, tileWidth - 1), row.Height);
             context.DrawRectangle(_tileBrush, null, tileRect);
 
-            var bitmap = _thumbnails.Get(videoFileName, GetFilmstripFrameMilliseconds(tile, step));
+            var bitmap = _thumbnails.Get(videoFileName, GetFilmstripFrameMilliseconds(tile, step), toleranceMilliseconds);
             if (bitmap == null || bitmap.Size.Height <= 0)
             {
                 continue;
@@ -597,11 +627,43 @@ public class TimelineTracks : Control, IDisposable
         }
     }
 
+    /// <summary>
+    /// No frames are extracted while the video plays (see <see cref="TimelineThumbnailCache"/>).
+    /// Returns whether it plays.
+    /// </summary>
+    private bool UpdateThumbnailsPaused()
+    {
+        var isPlaying = _source?.GetIsVideoPlaying?.Invoke() == true;
+        if (_thumbnails.Paused != isPlaying)
+        {
+            _thumbnails.Paused = isPlaying;
+        }
+
+        return isPlaying;
+    }
+
     private void DrawSubtitles(DrawingContext context, AudioVisualizer source, double width, double startSeconds, double pixelsPerSecond)
     {
         source.CopyDisplayableParagraphs(_paragraphs);
 
+        // List.Contains per visible block was O(selection) - millions of compares per frame after
+        // "select all" on a large subtitle. Probe a set of the selected blocks that are drawn
+        // (same visibility test as below), as AudioVisualizer.DrawParagraphs does.
+        _selectedRenderSet.Clear();
         var selected = source.AllSelectedParagraphs;
+        if (selected != null)
+        {
+            foreach (var paragraph in selected)
+            {
+                var x1 = (paragraph.StartTime.TotalSeconds - startSeconds) * pixelsPerSecond;
+                var x2 = (paragraph.EndTime.TotalSeconds - startSeconds) * pixelsPerSecond;
+                if (!(x2 < 0 || x1 > width))
+                {
+                    _selectedRenderSet.Add(paragraph);
+                }
+            }
+        }
+
         var originalTrack = _tracks.FindIndex(static t => t.IsOriginal);
         foreach (var paragraph in _paragraphs)
         {
@@ -612,7 +674,7 @@ public class TimelineTracks : Control, IDisposable
                 continue;
             }
 
-            var isSelected = selected.Contains(paragraph);
+            var isSelected = _selectedRenderSet.Contains(paragraph);
             DrawBlock(context, paragraph, GetTrackRect(GetGroupTrackIndex(paragraph), width), x1, x2, isSelected, false);
             if (originalTrack >= 0)
             {

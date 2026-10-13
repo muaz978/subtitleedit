@@ -14,8 +14,8 @@ The aligner looks for each line round its current position only, so on its own i
 
 - **Engine status + gear icon** — shows the installed Crisp ASR version. The gear opens the engine settings (backend, update / re-download), the same dialog as in Speech to text.
 - **Aligner** — the model that does the listening. The list is ordered best first for the language of the subtitle:
-  1. the *wav2vec2 aligner* for that language, when there is one (English, German, French, Spanish, Italian, Japanese, Chinese, Dutch, Portuguese, Arabic, Ukrainian, Czech) — the most precise, and its line ends stop where the speech stops;
-  2. the *Canary CTC aligner* — one model for 25 European languages, accurate to about 80 ms;
+  1. the *wav2vec2 aligner* for that language, when there is one (German, French, Spanish, Italian, Japanese, Chinese, Dutch, Portuguese, Arabic, Ukrainian, Czech) — the most precise;
+  2. the *Canary CTC aligner* — one model for 25 European languages, accurate to about 80 ms. For English it comes first, ahead of the English wav2vec2 aligner: it keeps its place better when the subtitle leaves out words that are said;
   3. the *Qwen3 forced aligner* — for the languages only it covers (e.g. Korean).
 
   A model that is not installed yet says how much will be downloaded; the download starts when you press **Align**.
@@ -39,7 +39,7 @@ The line being looked at is amber in both. Scrolling or zooming either waveform 
 Under the waveforms:
 
 - **Play / pause** (or **Space**, wherever the focus is) plays from the playhead. Click in either waveform to move the playhead.
-- **▶ Original** (**Shift+F5**) and **▶ Aligned** (**F5**) play just the selected line, with its old or its new time codes - the quickest way to hear whether a cue now starts and stops with the speech. Double-clicking a cue in a waveform plays it with that waveform's time codes; double-clicking a row plays the aligned version.
+- **▶ Aligned** (**F5**) plays just the selected line with its new time codes, and **Shift+F5** plays it with its old ones - the quickest way to hear whether a cue now starts and stops with the speech. Double-clicking a cue in a waveform plays it with that waveform's time codes; double-clicking a row plays the aligned version.
 - **▲ / ▼** (or **F7** / **F8**) step to the previous / next re-timed line, and *Change X of Y* shows where you are.
 - The summary on the right counts re-timed lines, lines that were kept, lines with no speech, and the mean shift - and, after a speech-to-text check, how many moves it confirmed and disputed.
 
@@ -56,7 +56,7 @@ One row per subtitle line, with the shift of its start and end in milliseconds a
 | Heard where it was | Speech-to-text heard the line where it already was, not where the aligner moved it. The aligner's time codes are offered **unticked**. |
 | Moved with the sync | The subtitle was synced first, and the aligner left this line where the sync put it - a line with no speech, one already in place after the sync, or one the aligner could not place. |
 | Already in place | The aligner agrees with the current time codes. |
-| No speech | Nothing to listen for - blank lines, `[sound descriptions]`, `(sighs)`, `♪`. These lines are never moved. |
+| No speech | Nothing to listen for - blank lines, `[sound descriptions]`, `(sighs)`, song lyrics (a line starting or ending with `♪`/`♫`, or wrapped in `#`), positioned signs (`{\pos}`/`{\move}`) and ASSA comments. These lines are never moved by the aligner. |
 | Kept - shift too large | The start would have moved more than *Max shift*, so the line was left alone. |
 | Kept - aligner failed | The aligner could not process this group of lines. |
 
@@ -106,6 +106,8 @@ If speech-to-text hears less than 30% of the subtitle's words, the status line a
 
 - The start is where the first word of the line begins.
 - The end is where the last word ends - but a line is never cut shorter than the minimum display time or the optimal reading speed from Settings → General, as long as that does not show it for longer than it used to be shown or run into the next line.
-- Overlaps that were in the subtitle on purpose are left alone; the tool never creates new ones.
+- A line is held long enough for the maximum reading speed (characters per second) from Settings → General, room permitting.
+- Overlaps that were in the subtitle on purpose - at least half a second and half of the shorter line, as with two speakers at once or a sign over dialogue - are left alone. Smaller overlaps are mistiming and are closed, keeping the minimum gap. The tool never creates new ones.
+- In frame mode (Settings → General) the moved lines are put on whole frames, keeping the minimum gap.
 
-Run [Beautify time codes](beautify-time-codes.md) afterwards to snap the result to frames and shot changes.
+Run [Beautify time codes](beautify-time-codes.md) afterwards to snap the result to shot changes.

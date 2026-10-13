@@ -17,7 +17,6 @@ public class DoubleToDisplayShortConverter : IValueConverter
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        var useFrameMode = Se.Settings.General.UseFrameMode;
         if (value is double ms)
         {
             if (ms == double.MaxValue || double.IsNaN(ms))
@@ -27,13 +26,15 @@ public class DoubleToDisplayShortConverter : IValueConverter
                 return string.Empty;
             }
 
-            _formattingTimeCode.TotalMilliseconds = ms;
-            return useFrameMode
-                ? _formattingTimeCode.ToShortStringHHMMSSFF()
-                : _formattingTimeCode.ToShortString();
+            return TimeCodeShortDisplay.Format(ms, _formattingTimeCode);
         }
 
-        return useFrameMode ? ZeroFrameMode : ZeroTime;
+        if (Se.Settings.General.UseFrameNumbers)
+        {
+            return "0";
+        }
+
+        return Se.Settings.General.UseFrameMode ? ZeroFrameMode : ZeroTime;
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

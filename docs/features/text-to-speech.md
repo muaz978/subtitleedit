@@ -26,8 +26,9 @@ By default **Add audio to video file** replaces the video's sound with the new s
 
 **Remove original speech (slow)** (also under **Advanced...**) gets rid of just the voices: it splits the video's sound into speech and everything else, throws the speech away, and mixes the new speech over the music and sound effects. That is what a dub normally sounds like.
 
-- The first use downloads the CrispASR runtime (if no CrispASR engine is installed yet) and a source separation model (Mel-Band RoFormer, 457 MB). Speech to text's **Isolate speech** uses the same model.
-- It is slow: about as long as the video itself on a GPU (Metal, CUDA, Vulkan), and many times longer on CPU only.
+- **Model** (below the checkbox) picks the separation model: **Best quality (Mel-Band RoFormer)** (default) keeps the most of the music and sound effects; **Fast (HTDemucs)** is about three times quicker, with a little more of the music lost.
+- The first use downloads the CrispASR runtime (if no CrispASR engine is installed yet) and the selected separation model (Mel-Band RoFormer 457 MB, HTDemucs 81 MB). Speech to text's **Isolate speech** uses the Mel-Band RoFormer model too.
+- It is slow: with **Best quality**, about as long as the video itself on a GPU (Metal, CUDA, Vulkan), and many times longer on CPU only.
 - The music and effects play at full volume. Turn on **Audio ducking** as well to lower them - its volume then applies to the music and effects.
 - The video's first audio track is used.
 - If the separation fails, the speech is added to the video the normal way and the tools log says why.
@@ -58,6 +59,42 @@ Sentences split across several subtitles are offered for merging, so the engine 
 
 Lines that contain only sounds or music — `♪`, `[door slams]`, `(sighs)`, or nothing once formatting tags are stripped — get read aloud or hallucinated into made-up words by TTS engines. Subtitle Edit offers to leave the checked lines silent: no audio is generated for them, and they are not counted as failures. A sound annotation followed by real speech (`[gunshot] Get down!`) is kept.
 
+## Speak From Current Line
+
+Listen to the subtitle instead of generating an audio file: **Speak from current line...** reads the lines aloud one after another, starting at the selected line. It is meant for proofreading by ear - typos, awkward phrasing and bad line breaks are often easier to hear than to see.
+
+- **Menu:** right-click the subtitle grid, or **Video → Speak from current line...**
+- **Shortcut:** Configurable (no default)
+
+1. Select the line to start from
+2. Choose **Speak from current line...**
+3. Pick an engine, a voice and (for Supertonic) a language, then click **OK** - a missing engine or voice is downloaded at this point
+
+Only the engines fast enough to keep up with speech are offered: **Supertonic** (the default), **Kokoro TTS**, **Edge TTS** and **Piper** (not on macOS). The choice is remembered for next time. The first line can take a few seconds while a local engine starts; after that the next line is generated while the current one plays, so the lines follow each other without gaps.
+
+While reading, the selected line, the video position and the waveform follow the line being spoken. Time codes are ignored - each line is simply read after the previous one. The video is paused when reading starts.
+
+- **Speed:** the **Speed** dropdown in the waveform toolbar sets how fast the lines are read, and a change is heard right away
+- **Stop:** press **Escape**, click another line, choose **Stop speaking** in the grid's right-click menu, or run the command (or shortcut) again
+
+## Play With Speech
+
+Watch a video with its subtitles spoken, like a live dub - handy for a course or a film in a language you do not speak, so you can watch the picture instead of reading. **Play with speech...** plays the video and speaks each line when the video reaches it. Nothing is saved; for an audio track to keep, use **Text to speech** above.
+
+- **Menu:** **Video → Play with speech...**
+- **Shortcut:** Configurable (no default)
+
+1. Open the video and the (translated) subtitle, and move the video to where you want to start
+2. Choose **Play with speech...**
+3. Pick an engine, a voice and (for Supertonic) a language - the same fast engines as **Speak from current line** - and the options below, then click **OK**
+
+- **Lower video volume while speaking:** the video's own sound is turned down while a line is spoken, and back up between lines
+- **Pause video when speech runs into the next line:** a spoken line that is longer than its subtitle is first sped up (up to 1.5x). If it still runs into the next line, the video waits for it to finish, so no line is cut off or skipped. With this off, the video keeps playing and a line the video has already passed is skipped
+
+The next few lines are generated ahead while the video plays. If the engine falls behind - for example while a local engine starts - the video waits for it. Pausing the video pauses the speech, seeking (clicking the waveform, a line or the position slider) continues from the new position, and the waveform toolbar's **Speed** applies to both the video and the speech. The subtitle is read as it was when you started - edits made while playing are spoken after a restart.
+
+- **Stop:** press **Escape**, choose **Stop speaking** in the grid's right-click menu, or run the command (or shortcut) again
+
 ## Supported Engines
 
 - **Piper** — Local, open-source TTS (Windows and Linux). Custom voice models are supported: any Piper voice is an `.onnx` model with an `.onnx.json` config beside it, and **Import voice...** in the voice settings dialog (the settings button next to **Test voice**) copies such a pair into the Piper folder (`TextToSpeech/Piper` in the data folder). It then appears in the voice list as *Custom - name*; a pair copied into the folder by hand is picked up the same way
@@ -70,6 +107,7 @@ Lines that contain only sounds or music — `♪`, `[door slams]`, `(sighs)`, or
 - **GoogleSpeech** — Google cloud TTS (requires key file)
 - **Kokoro TTS** — Local downloadable Kokoro TTS server and models
 - **Supertonic (CrispASR)** — Supertone Supertonic-3 via the CrispASR runtime: 31 languages and ten preset voices (five female, five male) from one 200 MB model, at 44.1 kHz. It does not clone, and it is by far the fastest local engine - a line takes a second or less
+- **KugelAudio (audio.cpp)** — KugelAudio-0-Open on the audio.cpp runtime: 23 European languages (including Danish, Swedish, Norwegian, Finnish and Polish) at 24 kHz, read from the text with no language pick. Four preset voices: two German female and two British (female and male). It does not clone. The voices keep their accent in other languages; for Danish the two German voices and the British male are clear, but the British female is not. It is a 7B model, so it is slow (several times slower than real time even on a fast GPU) and needs about 9 GB of memory with the default Q4_K model
 - **OmniVoice TTS** — Local CPU TTS with voice cloning and many languages
 - **Qwen3 TTS (CrispASR)** — Local Qwen3 TTS running through the CrispASR runtime (VoiceDesign, CustomVoice, and Voice clone 1.7B models)
 - **Chatterbox TTS (CrispASR)** — Chatterbox TTS via the CrispASR runtime, with voice cloning (multilingual Base or English-only Turbo model)
@@ -86,6 +124,7 @@ Lines that contain only sounds or music — `♪`, `[door slams]`, `(sighs)`, or
 - **Pocket TTS (CrispASR)** — Kyutai Pocket TTS 100M; the smallest and fastest cloning engine (one 124-365 MB GGUF per language, 6 languages), and the reference is sent per request
 - **Higgs Audio v3 (audio.cpp)** — Boson AI Higgs Audio v3 4B on the audio.cpp runtime; zero-shot cloning in 100+ languages, per-request reference so switching voice does not restart the server
 - **Fish Audio S2 Pro (audio.cpp)** — Fish Audio S2 Pro on the audio.cpp runtime; zero-shot cloning in 80+ languages at 44.1 kHz, per-request reference
+- **Breeze TTS 2 (audio.cpp)** — BreezeBlue's Breeze TTS 2 on the audio.cpp runtime; English and Chinese only, at 24 kHz. The **Default** voice is designed from the voice instruction (for example "A warm female narrator with calm pacing"). With a cloned voice, the instruction directs the delivery instead (tone, emotion, pace), and the reference needs its transcript. Per-request reference. The weights are licensed for research and non-commercial use only, and that also covers the audio it generates, so it shows a licence window before the first download
 - **FireRedTTS3 (audio.cpp)** — FireRedTTS3-Base on the audio.cpp runtime; zero-shot cloning in 24 languages at 24 kHz with the best published speaker similarity of the open models, per-request reference. Pick the language explicitly (there is no auto-detection); numbers and dates are only spelled out for English, Chinese and Cantonese. Every reference needs its transcript — without one the model produces noise, so a voice imported without a transcript is asked for it when picked, and [Clone from video](#clone-from-video-voice-of-each-line) needs the original subtitle loaded. It clones best when the reference and the text are in the same language; for dubbing a video into another language, Fish Audio S2 Pro or CosyVoice3 hold up much better
 
 Local downloadable engines are installed into the Subtitle Edit data folder when you accept the download prompt.
@@ -122,7 +161,7 @@ Notes on picking one:
 - **Highest output rate:** VoxCPM2 and dots.tts at 48 kHz, then Zonos and Supertonic at 44.1 kHz.
 - **MOSS-TTS is by far the largest** because its Qwen3-8B backbone needs a ~3.5 GB codec companion on top of the backbone quant. Check free disk space before selecting it.
 - Quantized engines follow the same rule as the speech-to-text models: `Q4_K` is the small fast default, `Q8_0` is close to full precision, and `F16` is rarely worth the extra gigabytes.
-- **Most of the CrispASR engines load their reference voice at server start**, so switching voice reloads the model. The exceptions are **Pocket TTS**, **VibeVoice**, **MOSS-TTS**, **CosyVoice3** and **VoxCPM2** (per-request reference) and **Qwen3 TTS** with the Voice clone model — those, the four audio.cpp engines (**IndexTTS 2.5**, **Higgs Audio v3**, **Fish Audio S2 Pro**, **FireRedTTS3**) and the standalone OmniVoice TTS engine are what [Clone From Video (Voice of Each Line)](#clone-from-video-voice-of-each-line) can use.
+- **Most of the CrispASR engines load their reference voice at server start**, so switching voice reloads the model. The exceptions are **Pocket TTS**, **VibeVoice**, **MOSS-TTS**, **CosyVoice3** and **VoxCPM2** (per-request reference) and **Qwen3 TTS** with the Voice clone model — those, the audio.cpp cloning engines (**IndexTTS 2.5**, **Higgs Audio v3**, **Fish Audio S2 Pro**, **Breeze TTS 2**, **FireRedTTS3**) and the standalone OmniVoice TTS engine are what [Clone From Video (Voice of Each Line)](#clone-from-video-voice-of-each-line) can use.
 
 ## Engine Settings
 
@@ -148,6 +187,10 @@ The points that matter:
 
 Declining just means "not now" — nothing is changed, the clone is refused, and you are asked again the next time. The answer is remembered per terms version, so you are asked again if the terms change.
 
+### Clean Voice-Clone References
+
+**Clean voice-clone references (Sidon)** under **Advanced...** removes music, noise and reverb from the audio a voice is cloned from before the engine sees it: clips taken from the video (**Clone voice to**, **Clone from video**, **Find voices in video and clone**) and recordings imported in the voice manager. It uses the Sidon speech restoration model on audio.cpp (940 MB download, asked for on first use). The cloned voice no longer copies the background, but very quiet or overlapping speech can come out muffled. If the download is declined or cleaning fails, the reference is used as it is.
+
 ### Renaming and Deleting Imported Voices
 
 Right-click the voice combo box for **Rename voice...** and **Delete voice...**. Both work on voices you imported or cloned - the engines list those straight from their `voices` folder, one reference recording per voice - and are disabled for engine presets, built-in speakers and the *Clone from video* entry.
@@ -155,7 +198,7 @@ Right-click the voice combo box for **Rename voice...** and **Delete voice...**.
 - **Rename voice...** moves the recording together with its sidecar files (the `.txt` transcript, engine JSON) and the cached prepared copy, so nothing is left behind as an orphan. Spaces are stored as underscores, which is what the engines show as spaces.
 - **Delete voice...** asks for confirmation, then removes the recording and its files from disk.
 
-Supported for every file-backed cloning voice: the CrispASR engines (Chatterbox, Confucius4-TTS, CosyVoice3, dots.tts, IndexTTS, MOSS-TTS, OmniVoice, Pocket TTS, Qwen3 TTS, VibeVoice, VoxCPM2), the standalone OmniVoice TTS, and the audio.cpp engines (IndexTTS 2.5, Higgs Audio v3, Fish Audio S2 Pro, FireRedTTS3).
+Supported for every file-backed cloning voice: the CrispASR engines (Chatterbox, Confucius4-TTS, CosyVoice3, dots.tts, IndexTTS, MOSS-TTS, OmniVoice, Pocket TTS, Qwen3 TTS, VibeVoice, VoxCPM2), the standalone OmniVoice TTS, and the audio.cpp engines (IndexTTS 2.5, Higgs Audio v3, Fish Audio S2 Pro, Breeze TTS 2, FireRedTTS3).
 
 ### Voice Manager
 
@@ -163,7 +206,7 @@ Click the voice-manager button (the head-and-microphone icon next to the voice c
 
 - **Engines** that support voice cloning are listed on the left; pick one to list its voices with type (cloned voice or built-in preset), duration, format and whether a transcript is present. Search filters the list.
 - **Play** (Space, or double-click) plays a cloned voice's reference recording; the waveform below shows the whole clip with a playhead, and clicking the waveform seeks.
-- **Transcript** - for engines that read the transcript of the reference recording (ref-text), the text is shown under the waveform and can be edited and saved, or filled in with **Use speech-to-text...**. The hint says whether the engine requires it (CosyVoice3, Fish Audio S2 Pro, Qwen3 TTS, OmniVoice TTS) or only benefits from it (F5-TTS, FireRedTTS3, Higgs Audio, MOSS-TTS, OmniVoice CrispASR, VoxCPM2). Engines that clone from a speaker embedding do not use one.
+- **Transcript** - for engines that read the transcript of the reference recording (ref-text), the text is shown under the waveform and can be edited and saved, or filled in with **Use speech-to-text...**. The hint says whether the engine requires it (CosyVoice3, Fish Audio S2 Pro, Breeze TTS 2, Qwen3 TTS, OmniVoice TTS) or only benefits from it (F5-TTS, FireRedTTS3, Higgs Audio, MOSS-TTS, OmniVoice CrispASR, VoxCPM2). Engines that clone from a speaker embedding do not use one.
 - **Rename** (F2) and **Delete** (Del) work as in the combo box menu.
 - **Copy voice to engine...** imports the recording and its transcript into another cloning engine, resampled to what that engine wants. A transcript is asked for when the target requires one and none is stored. Voices with the same name in the target are confirmed first.
 - **Import voice...** adds a recording (or, for Piper, a voice model) to the current engine, with the same transcript prompt as the voice settings dialog.
@@ -203,8 +246,8 @@ For dubbing a video with several speakers there is a faster way than cloning eac
 
 Before generating, Subtitle Edit cuts one short reference clip per line out of the video's audio. Lines shorter than about three seconds are grown into the silence around them, but never into the neighbouring line — a reference with two speakers in it would clone the wrong person.
 
-- **Supported engines:** OmniVoice TTS, Pocket TTS (CrispASR), VibeVoice (CrispASR), MOSS-TTS (CrispASR), CosyVoice3 (CrispASR), VoxCPM2 (CrispASR), Qwen3 TTS (CrispASR) with the Voice clone model, and the audio.cpp engines IndexTTS 2.5, Higgs Audio v3, Fish Audio S2 Pro and FireRedTTS3. The entry only appears for engines that accept a reference for each line; engines that load their reference when their server starts would have to reload the model for every line.
-- **Reference text:** if you have the original subtitle loaded next to the translation, its lines are used as the transcript of the clips — that is what the video actually says, and it makes cloning noticeably better. Without an original loaded the clips have no transcript (the translated line is never used as one, since telling the model the clip already says the target text makes it replay the clip instead of speaking the line). What happens then depends on the engine: CosyVoice3 transcribes the clip itself, IndexTTS 2.5, Higgs Audio v3 and Fish Audio S2 Pro clone from the audio alone, and Qwen3 TTS and FireRedTTS3 need the transcript — FireRedTTS3 refuses to start without an original subtitle loaded, and Qwen3 speaks such lines with the first ordinary voice.
+- **Supported engines:** OmniVoice TTS, Pocket TTS (CrispASR), VibeVoice (CrispASR), MOSS-TTS (CrispASR), CosyVoice3 (CrispASR), VoxCPM2 (CrispASR), Qwen3 TTS (CrispASR) with the Voice clone model, and the audio.cpp engines IndexTTS 2.5, Higgs Audio v3, Fish Audio S2 Pro, Breeze TTS 2 and FireRedTTS3. The entry only appears for engines that accept a reference for each line; engines that load their reference when their server starts would have to reload the model for every line.
+- **Reference text:** if you have the original subtitle loaded next to the translation, its lines are used as the transcript of the clips — that is what the video actually says, and it makes cloning noticeably better. Without an original loaded the clips have no transcript (the translated line is never used as one, since telling the model the clip already says the target text makes it replay the clip instead of speaking the line). What happens then depends on the engine: CosyVoice3 transcribes the clip itself, IndexTTS 2.5, Higgs Audio v3, Fish Audio S2 Pro and Breeze TTS 2 clone from the audio alone, and Qwen3 TTS and FireRedTTS3 need the transcript — FireRedTTS3 refuses to start without an original subtitle loaded, and Qwen3 speaks such lines with the first ordinary voice.
 - **Language:** the engines clone best when the voice in the video speaks the language you are generating. Fish Audio S2 Pro and CosyVoice3 handle a video in one language dubbed into another well; FireRedTTS3 does not (its single language tag covers both the clip's transcript and the text, and the result garbles or mixes the two languages).
 - **Test voice** previews the clone taken from the longest line of the subtitle.
 - Quality depends on the source audio. Loud music or two people talking over each other in a line makes that line's clone worse. Longer subtitle lines clone better than very short ones, so a subtitle segmented into full sentences gives the best result.
@@ -254,10 +297,11 @@ You can control pausing and pacing in ElevenLabs output directly from the subtit
 
 Subtitle Edit sends your text to ElevenLabs with **text normalization turned off**, so these pause cues are preserved instead of being collapsed or rewritten.
 
-Behavior depends on the selected model:
+The models offered are `eleven_v4_turbo` (the default), `eleven_v4`, `eleven_turbo_v2_5`, `eleven_v3` and `eleven_multilingual_v2`. Behavior depends on the selected model:
 
-- **Standard models** (`eleven_turbo_v2_5`, `eleven_multilingual_v2`, …) honor SSML `<break>` tags and punctuation pauses.
-- **Eleven v3** does not support SSML `<break>` tags. Subtitle Edit automatically converts each `<break time="Xs" />` into the nearest v3 audio pause tag — `[short pause]` (under 0.75 s), `[pause]` (up to 1.5 s), or `[long pause]` (longer) — so the same subtitle text keeps working when you switch to v3.
+- **Standard models** (`eleven_turbo_v2_5`, `eleven_multilingual_v2`) honor SSML `<break>` tags and punctuation pauses.
+- **Eleven v4, v4 Turbo and v3** do not support SSML `<break>` tags. Subtitle Edit automatically converts each `<break time="Xs" />` into the nearest audio pause tag — `[short pause]` (under 0.75 s), `[pause]` (up to 1.5 s), or `[long pause]` (longer) — so the same subtitle text keeps working when you switch model.
+- These three models also understand expressive audio tags such as `[whispers]` or `[laughs]`. With one of them selected, a help button next to the **Model** drop-down in the review window opens ElevenLabs' guide to audio tags.
 
 ## Review Audio Clips
 
@@ -333,4 +377,4 @@ From there you can play, edit text, regenerate single lines, and finish the sess
 | R / Ctrl+R | Regenerate selected line |
 | Space | Play / pause the selected line |
 | Escape | Close / Cancel |
-| F1 | Open help |
+| F1 | Show help (default key, [changeable](shortcuts.md#worth-knowing)) |

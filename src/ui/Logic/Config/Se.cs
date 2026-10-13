@@ -18,13 +18,14 @@ namespace Nikse.SubtitleEdit.Logic.Config;
 public class Se
 {
     internal const int CurrentMacOsFontMigrationVersion = 1;
-    internal const int CurrentShortcutsMigrationVersion = 5;
+    internal const int CurrentShortcutsMigrationVersion = 6;
     internal const int CurrentLayoutMigrationVersion = 2;
 
-    public static string Version { get; set; } = "v5.3.0-beta18";
+    public static string Version { get; set; } = "v5.3.0-rc4";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
+    public List<SeCustomShortcut> CustomShortcuts { get; set; } = new();
     public int? ShortcutsMigrationVersion { get; set; }
     public string Color1 { get; set; } = "#ffff00ff";
     public string Color2 { get; set; } = "#ff0000ff";
@@ -50,6 +51,22 @@ public class Se
     public string Surround7Right { get; set; } = string.Empty;
     public string Surround8Left { get; set; } = string.Empty;
     public string Surround8Right { get; set; } = string.Empty;
+    public string Surround1Behavior { get; set; } = nameof(SurroundWithBehavior.Toggle);
+    public string Surround2Behavior { get; set; } = nameof(SurroundWithBehavior.Toggle);
+    public string Surround3Behavior { get; set; } = nameof(SurroundWithBehavior.Toggle);
+    public string Surround4Behavior { get; set; } = nameof(SurroundWithBehavior.Toggle);
+    public string Surround5Behavior { get; set; } = nameof(SurroundWithBehavior.Toggle);
+    public string Surround6Behavior { get; set; } = nameof(SurroundWithBehavior.Toggle);
+    public string Surround7Behavior { get; set; } = nameof(SurroundWithBehavior.Toggle);
+    public string Surround8Behavior { get; set; } = nameof(SurroundWithBehavior.Toggle);
+    public string Surround1Scope { get; set; } = nameof(SurroundWithScope.SelectionOrText);
+    public string Surround2Scope { get; set; } = nameof(SurroundWithScope.SelectionOrText);
+    public string Surround3Scope { get; set; } = nameof(SurroundWithScope.SelectionOrText);
+    public string Surround4Scope { get; set; } = nameof(SurroundWithScope.SelectionOrText);
+    public string Surround5Scope { get; set; } = nameof(SurroundWithScope.SelectionOrText);
+    public string Surround6Scope { get; set; } = nameof(SurroundWithScope.SelectionOrText);
+    public string Surround7Scope { get; set; } = nameof(SurroundWithScope.SelectionOrText);
+    public string Surround8Scope { get; set; } = nameof(SurroundWithScope.SelectionOrText);
     public string CustomSearch1Name { get; set; } = "The Free Dictionary";
     public string CustomSearch1Url { get; set; } = "https://www.thefreedictionary.com/{0}";
     public string CustomSearch2Name { get; set; } = "Wikipedia";
@@ -76,6 +93,7 @@ public class Se
     public SeFormats Formats { get; set; } = new();
     public SeOcr Ocr { get; set; } = new();
     public SePlugins Plugins { get; set; } = new();
+    public SeProviders Providers { get; set; } = new();
     public static SeLanguage Language { get; set; } = new();
     public static Se Settings { get; set; } = new();
 
@@ -382,6 +400,115 @@ public class Se
     }
 
     /// <summary>
+    /// What a "surround with" slot does when fired: toggle (default), always add, or only remove.
+    /// Unknown or missing values fall back to toggle.
+    /// </summary>
+    public SurroundWithBehavior GetSurroundBehavior(int slotNumber)
+    {
+        var value = slotNumber switch
+        {
+            1 => Surround1Behavior,
+            2 => Surround2Behavior,
+            3 => Surround3Behavior,
+            4 => Surround4Behavior,
+            5 => Surround5Behavior,
+            6 => Surround6Behavior,
+            7 => Surround7Behavior,
+            8 => Surround8Behavior,
+            _ => null,
+        };
+
+        return Enum.TryParse<SurroundWithBehavior>(value, true, out var behavior) && Enum.IsDefined(behavior)
+            ? behavior
+            : SurroundWithBehavior.Toggle;
+    }
+
+    public void SetSurroundBehavior(int slotNumber, SurroundWithBehavior behavior)
+    {
+        var value = behavior.ToString();
+        switch (slotNumber)
+        {
+            case 1: Surround1Behavior = value; break;
+            case 2: Surround2Behavior = value; break;
+            case 3: Surround3Behavior = value; break;
+            case 4: Surround4Behavior = value; break;
+            case 5: Surround5Behavior = value; break;
+            case 6: Surround6Behavior = value; break;
+            case 7: Surround7Behavior = value; break;
+            case 8: Surround8Behavior = value; break;
+        }
+    }
+
+    /// <summary>
+    /// What text a "surround with" slot works on. Unknown or missing values fall back to
+    /// "selection, else whole text".
+    /// </summary>
+    public SurroundWithScope GetSurroundScope(int slotNumber)
+    {
+        var value = slotNumber switch
+        {
+            1 => Surround1Scope,
+            2 => Surround2Scope,
+            3 => Surround3Scope,
+            4 => Surround4Scope,
+            5 => Surround5Scope,
+            6 => Surround6Scope,
+            7 => Surround7Scope,
+            8 => Surround8Scope,
+            _ => null,
+        };
+
+        return Enum.TryParse<SurroundWithScope>(value, true, out var scope) && Enum.IsDefined(scope)
+            ? scope
+            : SurroundWithScope.SelectionOrText;
+    }
+
+    public void SetSurroundScope(int slotNumber, SurroundWithScope scope)
+    {
+        var value = scope.ToString();
+        switch (slotNumber)
+        {
+            case 1: Surround1Scope = value; break;
+            case 2: Surround2Scope = value; break;
+            case 3: Surround3Scope = value; break;
+            case 4: Surround4Scope = value; break;
+            case 5: Surround5Scope = value; break;
+            case 6: Surround6Scope = value; break;
+            case 7: Surround7Scope = value; break;
+            case 8: Surround8Scope = value; break;
+        }
+    }
+
+    /// <summary>
+    /// Number of custom shortcut slots ("Custom shortcut 1-8"), each a list of steps.
+    /// </summary>
+    public const int CustomShortcutSlotCount = 8;
+
+    public SeCustomShortcut GetCustomShortcut(int slotNumber)
+    {
+        var index = slotNumber - 1;
+        return CustomShortcuts != null && index >= 0 && index < CustomShortcuts.Count && CustomShortcuts[index] != null
+            ? CustomShortcuts[index]
+            : new SeCustomShortcut();
+    }
+
+    public void SetCustomShortcut(int slotNumber, SeCustomShortcut customShortcut)
+    {
+        if (slotNumber < 1 || slotNumber > CustomShortcutSlotCount)
+        {
+            return;
+        }
+
+        CustomShortcuts ??= new List<SeCustomShortcut>();
+        while (CustomShortcuts.Count < CustomShortcutSlotCount)
+        {
+            CustomShortcuts.Add(new SeCustomShortcut());
+        }
+
+        CustomShortcuts[slotNumber - 1] = customShortcut;
+    }
+
+    /// <summary>
     /// Number of configurable "search via" slots (name + URL, SE 4 parity). Slots are one-based;
     /// a slot without a URL is hidden from the text box context menu.
     /// </summary>
@@ -463,6 +590,11 @@ public class Se
     /// Version 5: v5.3.0 betas shipped Ctrl+Shift+V (Cmd+Shift+V on macOS) as the default for the
     /// voice manager, which "fill selected lines with clipboard text" already had (#15326). The
     /// voice manager has no default now, and bindings still on the stale default are cleared.
+    ///
+    /// Version 6 (Windows/Linux only): v5.0.0-beta20 - v5.2.0-beta16 shipped Shift+Backspace as the
+    /// default for "delete selection", later renamed to forward delete (version 2). The default is
+    /// macOS-only now, but the persisted copy stayed, so holding Shift while typing capitals made
+    /// Backspace delete the character after the caret - nothing at the end of the text (#15717).
     /// </summary>
     internal void MigrateShortcuts()
     {
@@ -530,6 +662,19 @@ public class Se
                 if (shortcut.ActionName == nameof(MainViewModel.ShowVideoVoiceManagerCommand) &&
                     shortcut.Keys != null &&
                     IsSameKeys([.. shortcut.Keys.Select(ShortcutManager.NormalizeKeyToken)], oldVoiceManagerKeys))
+                {
+                    shortcut.Keys.Clear();
+                }
+            }
+        }
+
+        if (fromVersion < 6 && !isMacOS)
+        {
+            foreach (var shortcut in Shortcuts)
+            {
+                if (shortcut.ActionName == nameof(MainViewModel.TextBoxDeleteForwardCommand) &&
+                    shortcut.Keys != null &&
+                    IsSameKeys([.. shortcut.Keys.Select(ShortcutManager.NormalizeKeyToken)], ["Shift", nameof(Avalonia.Input.Key.Back)]))
                 {
                     shortcut.Keys.Clear();
                 }
@@ -794,6 +939,47 @@ public class Se
     }
 
     /// <summary>
+    /// Version 1: Mistral and OpenRouter API keys used to be stored per feature (Translate, OCR,
+    /// speech-to-text, text-to-speech), so a user with one account had to paste the same key
+    /// several times. They now live in <see cref="SeProviders"/>; this copies the first
+    /// non-empty old key in, unless a shared key is already set. The old properties are left
+    /// as they are so a downgrade still finds its keys.
+    /// </summary>
+#pragma warning disable CS0618 // reading the legacy per-feature keys is the point here
+    internal static void MigrateProviderApiKeys(Se settings)
+    {
+        settings.Providers ??= new SeProviders();
+        var providers = settings.Providers;
+        if (providers.MigrationVersion.GetValueOrDefault() >= SeProviders.CurrentMigrationVersion)
+        {
+            return;
+        }
+
+        var tts = settings.Video?.TextToSpeech;
+        if (string.IsNullOrWhiteSpace(providers.MistralApiKey))
+        {
+            providers.MistralApiKey = FirstNonEmpty(
+                settings.AutoTranslate?.MistralApiKey,
+                settings.Ocr?.MistralApiKey,
+                tts?.MistralApiKey);
+        }
+
+        if (string.IsNullOrWhiteSpace(providers.OpenRouterApiKey))
+        {
+            providers.OpenRouterApiKey = FirstNonEmpty(
+                settings.AutoTranslate?.OpenRouterApiKey,
+                tts?.OpenRouterTtsApiKey,
+                settings.Tools?.OpenRouterSttApiKey);
+        }
+
+        providers.MigrationVersion = SeProviders.CurrentMigrationVersion;
+
+        static string FirstNonEmpty(params string?[] values)
+            => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim() ?? string.Empty;
+    }
+#pragma warning restore CS0618
+
+    /// <summary>
     /// Moves a settings file still holding the pre-#14221 llama.cpp OCR prompt onto the current
     /// default. That prompt asked the models to "preserve line breaks", which measurably merged
     /// two-line subtitles into one (see <see cref="SeOcrDefaults.LlamaCppOcrPrompt"/>), and the
@@ -895,13 +1081,24 @@ public class Se
     /// bar is constructed at startup and reads <see cref="Language"/> directly, so the translation
     /// has to be in place by then or the menu bar renders in English (issue #11505). English — or a
     /// missing/unreadable translation file — leaves the built-in English defaults untouched.
+    /// Returns true when <see cref="Language"/> changed.
     /// </summary>
-    public static void LoadLanguage()
+    public static bool LoadLanguage()
     {
         Settings.General.Language ??= "English";
         if (Settings.General.Language == "English")
         {
-            return;
+            // The built-in strings are English, but a translation loaded earlier in the session
+            // stays in place until dropped - a reset or an import back to English otherwise only
+            // took effect after a restart (#15944).
+            if (_loadedLanguage == null || _loadedLanguage == "English")
+            {
+                return false;
+            }
+
+            Language = new SeLanguage();
+            _loadedLanguage = null;
+            return true;
         }
 
         // MainView.Build() calls this again as a safety net for windows created via other entry
@@ -910,7 +1107,7 @@ public class Se
         // translation isn't already the requested one.
         if (_loadedLanguage == Settings.General.Language)
         {
-            return;
+            return false;
         }
 
         try
@@ -918,7 +1115,7 @@ public class Se
             var jsonFileName = Path.Combine(TranslationFolder, Settings.General.Language + ".json");
             if (!System.IO.File.Exists(jsonFileName))
             {
-                return;
+                return false;
             }
 
             using var stream = System.IO.File.OpenRead(jsonFileName);
@@ -927,13 +1124,19 @@ public class Se
             {
                 Language = language;
                 _loadedLanguage = Settings.General.Language;
+                return true;
             }
         }
         catch (Exception exception)
         {
             Se.LogError(exception, "Failed to load UI language");
         }
+
+        return false;
     }
+
+    /// <summary>The translation currently in <see cref="Language"/>; null means the built-in English.</summary>
+    public static string? LoadedLanguageName => _loadedLanguage;
 
     /// <summary>
     /// Loads a translation file chosen at runtime (Options > Language) into <see cref="Language"/>.
@@ -1070,6 +1273,16 @@ public class Se
         {
             Settings.Plugins = new SePlugins();
         }
+
+        if (Settings.Providers == null)
+        {
+            Settings.Providers = new SeProviders();
+        }
+
+        Settings.Tools.RemoveTextForHi ??= new();
+        Settings.Tools.RemoveTextForHi.MigrateFullInterjectionLists();
+
+        MigrateProviderApiKeys(Settings);
 
         if (Settings.Tools.FixCommonErrors.Profiles.Count == 0)
         {
@@ -1367,12 +1580,14 @@ public class Se
 
     public static void LogError(Exception exception)
     {
-        LogError(exception.Message + Environment.NewLine + exception.StackTrace);
+        // ToString() includes the inner exceptions - a window created via reflection otherwise
+        // only logs "Exception has been thrown by the target of an invocation" (#15562).
+        LogError(exception.ToString());
     }
 
     public static void LogError(Exception exception, string message)
     {
-        LogError(exception.Message + Environment.NewLine + message + Environment.NewLine + exception.StackTrace);
+        LogError(message + Environment.NewLine + exception);
     }
 
     private static readonly ErrorLogThrottle ErrorThrottle = new();

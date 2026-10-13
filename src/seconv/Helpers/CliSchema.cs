@@ -78,7 +78,7 @@ internal static class CliSchema
     private static readonly Dictionary<string, string[]> Choices = new(StringComparer.OrdinalIgnoreCase)
     {
         ["--ocr-engine"] = ["tesseract", "nocr", "binaryocr", "ollama", "llamacpp", "paddle", "applevision"],
-        ["--translate-engine"] = ["llamacpp", "ollama", "lmstudio", "libretranslate", "nllb-serve", "nllb-api"],
+        ["--translate-engine"] = ["llamacpp", "ollama", "lmstudio", "openai-compatible", "libretranslate", "nllb-serve", "nllb-api", "deepl"],
         ["--box-type"] = ["none", "one-box", "box-per-line"],
         ["--content-alignment"] = ["left", "center", "right", "from-alignment"],
         ["--alignment"] =
@@ -374,6 +374,7 @@ internal static class CliSchema
                 new { name = "dump-settings", json = true, description = "Print a full --settings JSON with libse defaults. Always JSON; redirect to a file." },
                 new { name = "info", json = true, description = "Print format / encoding / duration / language for one file. Usage: seconv info <file>" },
                 new { name = "lint", json = true, description = "Validate subtitles; exit 1 if any issues found. Usage: seconv lint <pattern>..." },
+                new { name = "optimize-nocr", json = true, description = "Remove nOCR database lines that don't tell characters apart from lookalikes (smaller, faster, usually more accurate). In place with a .bak backup unless --output:<path>. Usage: seconv optimize-nocr <database.nocr>" },
                 new { name = "--help-json", json = true, description = "Print this schema." },
                 new { name = "--version", json = false, description = "Print the seconv version and exit." },
             },

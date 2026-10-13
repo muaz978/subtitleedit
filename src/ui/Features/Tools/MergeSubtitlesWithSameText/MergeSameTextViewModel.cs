@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -18,7 +18,7 @@ public partial class MergeSameTextViewModel : ObservableObject, IClosingCleanup
 {
     [ObservableProperty] private ObservableCollection<MergeDisplayItem> _mergeItems;
     [ObservableProperty] private MergeDisplayItem? _selectedMergeItem;
-    [ObservableProperty] private int _maxMillisecondsBetweenLines;
+    [ObservableProperty] private int _maxMsOrFramesBetweenLines;
     [ObservableProperty] private bool _includeIncrementingLines;
     [ObservableProperty] private bool _includeRollUpCaptions;
     [ObservableProperty] private ObservableCollection<SubtitleLineViewModel> _mergeSubtitles;
@@ -26,6 +26,15 @@ public partial class MergeSameTextViewModel : ObservableObject, IClosingCleanup
     [ObservableProperty] private bool _isOkEnabled;
 
     public Window? Window { get; set; }
+
+    /// <summary>Frame mode: the box holds frames, like Bridge gaps and Apply min gap.</summary>
+    public bool IsFrameMode { get; }
+
+    public string MaxBetweenLinesLabel { get; }
+
+    // The saved milliseconds the box was filled from - kept on save when the frame count is
+    // unchanged, so a run in frame mode does not round the setting to whole frames.
+    private int _loadedMaxBetweenLinesMs;
 
     public bool OkPressed { get; private set; }
     public List<SubtitleLineViewModel> ResultSubtitles { get; set; }
@@ -38,6 +47,10 @@ public partial class MergeSameTextViewModel : ObservableObject, IClosingCleanup
 
     public MergeSameTextViewModel()
     {
+        IsFrameMode = Se.Settings.General.UseFrameMode;
+        MaxBetweenLinesLabel = IsFrameMode
+            ? Se.Language.Tools.MergeLinesWithSameText.MaxFramesBetweenLines
+            : Se.Language.Tools.MergeLinesWithSameText.MaxMsBetweenLines;
         MergeItems = new ObservableCollection<MergeDisplayItem>();
         MergeSubtitles = new ObservableCollection<SubtitleLineViewModel>();
         ResultSubtitles = new List<SubtitleLineViewModel>();
@@ -100,7 +113,9 @@ public partial class MergeSameTextViewModel : ObservableObject, IClosingCleanup
 
         var mergedIndexes = new List<int>();
         var removed = new HashSet<int>();
-        var maxMsBetween = MaxMillisecondsBetweenLines;
+        // In frame mode: the largest millisecond gap that is still at most N frames, so a gap of
+        // exactly N frames is not missed when its rounded milliseconds are one above N frames' ms.
+        var maxMsBetween = MsOrFrames.ToMaxGapMilliseconds(MaxMsOrFramesBetweenLines, IsFrameMode);
         var fixIncrementing = IncludeIncrementingLines;
         var numberOfMerges = 0;
         Paragraph? p = null;
@@ -109,6 +124,10 @@ public partial class MergeSameTextViewModel : ObservableObject, IClosingCleanup
         {
             AddRollUpMerges(maxMsBetween, removed);
         }
+
+        // Line numbers held by unchecked merge items. Every item added below starts checked, so
+        // the set stays valid for the whole pass (scanning all items per merge was quadratic).
+        var blockedNumbers = GetUncheckedLineNumbers();
 
         for (var i = 1; i < _subtitles.Count; i++)
         {
@@ -136,7 +155,7 @@ public partial class MergeSameTextViewModel : ObservableObject, IClosingCleanup
                     Number = nextS.Number,
                 };
                 var incrementText = string.Empty;
-                if ((MergeLinesSameTextUtils.QualifiesForMerge(p, next, maxMsBetween) || fixIncrementing && MergeLinesSameTextUtils.QualifiesForMergeIncrement(p, next, maxMsBetween, out incrementText)) && IsFixAllowed(p))
+                if ((MergeLinesSameTextUtils.QualifiesForMerge(p, next, maxMsBetween) || fixIncrementing && MergeLinesSameTextUtils.QualifiesForMergeIncrement(p, next, maxMsBetween, out incrementText)) && !blockedNumbers.Contains(p.Number))
                 {
                     p.Text = next.Text;
                     p.EndTime.TotalMilliseconds = next.EndTime.TotalMilliseconds;
@@ -220,32 +239,31 @@ public partial class MergeSameTextViewModel : ObservableObject, IClosingCleanup
         }
     }
 
-    private bool IsFixAllowed(Paragraph p)
+    private HashSet<int> GetUncheckedLineNumbers()
     {
+        var numbers = new HashSet<int>();
         foreach (var mi in MergeItems.Where(p => !p.Apply))
         {
             foreach (var line in mi.LinesToMerge)
             {
-                if (line.Number == p.Number)
-                {
-                    return false;
-                }
+                numbers.Add(line.Number);
             }
         }
 
-        return true;
+        return numbers;
     }
 
     private void LoadSettings()
     {
-        MaxMillisecondsBetweenLines = Se.Settings.Tools.MergeSameText.MaxMillisecondsBetweenLines;
+        _loadedMaxBetweenLinesMs = Se.Settings.Tools.MergeSameText.MaxMillisecondsBetweenLines;
+        MaxMsOrFramesBetweenLines = MsOrFrames.FromMilliseconds(_loadedMaxBetweenLinesMs, IsFrameMode);
         IncludeIncrementingLines = Se.Settings.Tools.MergeSameText.IncludeIncrementingLines;
         IncludeRollUpCaptions = Se.Settings.Tools.MergeSameText.IncludeRollUpCaptions;
     }
 
     private void SaveSettings()
     {
-        Se.Settings.Tools.MergeSameText.MaxMillisecondsBetweenLines = MaxMillisecondsBetweenLines;
+        Se.Settings.Tools.MergeSameText.MaxMillisecondsBetweenLines = MsOrFrames.ToMillisecondsForSave(MaxMsOrFramesBetweenLines, IsFrameMode, _loadedMaxBetweenLinesMs);
         Se.Settings.Tools.MergeSameText.IncludeIncrementingLines = IncludeIncrementingLines;
         Se.Settings.Tools.MergeSameText.IncludeRollUpCaptions = IncludeRollUpCaptions;
 

@@ -24,6 +24,7 @@ public class LanguageBatchConvert
     public string AddColor { get; set; }
     public string DeleteLinesWithSpecificActorsOrStyles { get; set; }
     public string UseSourceStylesIfPossible { get; set; }
+    public string KeepSourceEmbeddedFonts { get; set; }
     public string EditStyles { get; set; }
     public string EditProperties { get; set; }
     public string EditAttachments { get; set; }
@@ -58,6 +59,18 @@ public class LanguageBatchConvert
     public string AddFolderRecursiveDotDotDot { get; set; }
     public string SelectFolderToConvert { get; set; }
     public string IncludeSubfolders { get; set; }
+    public string VideoFilesWhenAddingFolder { get; set; }
+    public string VideoFilesAsk { get; set; }
+    public string VideoFilesInclude { get; set; }
+    public string VideoFilesSkip { get; set; }
+    public string FolderContainsXVideoFiles { get; set; }
+    public string AddVideoFiles { get; set; }
+    public string SkipVideoFiles { get; set; }
+    public string DoNotAskAgainVideoFiles { get; set; }
+    public string SettingsSectionOutput { get; set; }
+    public string SettingsSectionAddingFiles { get; set; }
+    public string SettingsSectionImageBasedSubtitles { get; set; }
+    public string SettingsSectionOther { get; set; }
     public string KeepSourceFileTimestamp { get; set; }
     public string PreventSleepWhileConverting { get; set; }
     public string ScanningFolderX { get; set; }
@@ -74,6 +87,19 @@ public class LanguageBatchConvert
     public string TransportStreamGetSizeFromVideo { get; set; }
     public string TwoLetterLanguageCodeUppercase { get; set; }
     public string ThreeLetterLanguageCodeUppercase { get; set; }
+    public string FormatContainsDotDotDot { get; set; }
+    public string ExtensionIsDotDotDot { get; set; }
+    public string StatusIsError { get; set; }
+    public string ForcedTracksOnly { get; set; }
+    public string XConvertedYFailedInZ { get; set; }
+    public string XNotProcessed { get; set; }
+    public string RemoveUnicodeControlCharactersTitle { get; set; }
+    public string RemoveUnicodeControlCharactersInfo { get; set; }
+    public string Preset { get; set; }
+    public string SavePresetDotDotDot { get; set; }
+    public string DeletePreset { get; set; }
+    public string PresetName { get; set; }
+    public string DeletePresetX { get; set; }
 
     public LanguageBatchConvert()
     {
@@ -94,7 +120,8 @@ public class LanguageBatchConvert
         AddAlignment = "Add alignment";
         AddColor = "Add color";
         DeleteLinesWithSpecificActorsOrStyles = "Delete lines with actors or styles (separate multiple by comma)";
-        UseSourceStylesIfPossible = "Use source styles if possible";
+        UseSourceStylesIfPossible = "Use source styles if possible (the header below is then only used for non-ASSA input)";
+        KeepSourceEmbeddedFonts = "Keep source embedded fonts (footer)";
         EditStyles = "Edit styles";
         EditProperties = "Edit properties";
         EditAttachments = "Edit attachments";
@@ -130,6 +157,18 @@ public class LanguageBatchConvert
         AddFolderRecursiveDotDotDot = "Add folder recursive...";
         SelectFolderToConvert = "Select folder with files to convert";
         IncludeSubfolders = "Include subfolders when adding a folder";
+        VideoFilesWhenAddingFolder = "Video files (mkv, mp4, ts...) when adding a folder";
+        VideoFilesAsk = "Ask";
+        VideoFilesInclude = "Add their subtitle tracks";
+        VideoFilesSkip = "Skip";
+        FolderContainsXVideoFiles = "The folder contains {0} video file(s) (mkv, mp4, ts...).\n\nAdd their embedded subtitle tracks too, or only the subtitle files?";
+        AddVideoFiles = "Add video files";
+        SkipVideoFiles = "Subtitle files only";
+        DoNotAskAgainVideoFiles = "Do not ask again (change in Batch convert settings)";
+        SettingsSectionOutput = "Output";
+        SettingsSectionAddingFiles = "Adding files";
+        SettingsSectionImageBasedSubtitles = "Image-based subtitles (OCR)";
+        SettingsSectionOther = "Other";
         KeepSourceFileTimestamp = "Keep source file date/time on output files";
         PreventSleepWhileConverting = "Prevent computer from sleeping while converting";
         ScanningFolderX = "Scanning {0}...";
@@ -146,5 +185,18 @@ public class LanguageBatchConvert
         TransportStreamGetSizeFromVideo = "Get size from video...";
         TwoLetterLanguageCodeUppercase = "Two-letter language code (uppercase)";
         ThreeLetterLanguageCodeUppercase = "Three-letter language code (uppercase)";
+        FormatContainsDotDotDot = "Format contains...";
+        ExtensionIsDotDotDot = "Extension is...";
+        StatusIsError = "Status is error";
+        ForcedTracksOnly = "Forced tracks only";
+        XConvertedYFailedInZ = "{0:#,###,##0} converted, {1:#,###,##0} failed in {2}";
+        XNotProcessed = "{0:#,###,##0} not processed";
+        RemoveUnicodeControlCharactersTitle = "Remove Unicode control characters";
+        RemoveUnicodeControlCharactersInfo = "Removes the invisible Unicode direction control characters (LRM, RLM, LRE, RLE, PDF, LRO and RLO) from the text, and replaces no-break spaces with normal spaces.";
+        Preset = "Preset";
+        SavePresetDotDotDot = "Save preset...";
+        DeletePreset = "Delete preset";
+        PresetName = "Preset name";
+        DeletePresetX = "Delete preset \"{0}\"?";
     }
 }

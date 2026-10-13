@@ -9,7 +9,7 @@
 - **380+ subtitle formats** — text, binary, and image-based.
 - **Container input** — Matroska (`.mkv` / `.mks`), MP4, MCC, MXF, AVI (`.avi` / `.divx`), transport stream teletext, Blu-Ray `.sup`.
 - **OCR for image-based sources** via seven engines (Tesseract subprocess, nOCR built-in, BinaryOCR built-in, Ollama HTTP, llama.cpp HTTP with automatic server start, PaddleOCR subprocess, Apple Vision built into macOS).
-- **Auto-translate** via local LLMs (llama.cpp with automatic server start, Ollama, LM Studio) or self-hosted services (LibreTranslate, NLLB).
+- **Auto-translate** via local LLMs (llama.cpp with automatic server start, Ollama, LM Studio), any OpenAI-compatible API, DeepL, or self-hosted services (LibreTranslate, NLLB).
 - **Image-based output** — Blu-Ray sup, BDN-XML, DOST, FCP (Final Cut Pro + image), D-Cinema interop / SMPTE 2014, images-with-time-code.
 - **Operations pipeline** — offset, fps change, change-speed, renumber, adjust-duration, fix-common-errors, merge/split, balance, redo casing, RTL fixes, multiple-replace, custom-text format, plain text.
 - **Cross-platform** — Windows, Linux, macOS. Only requires the .NET runtime; no display or GUI needed.
@@ -85,6 +85,7 @@ seconv list-rf-rules        # list remove-formatting rule IDs (alias: list-remov
 seconv dump-settings        # print a full --settings JSON with libse defaults (alias: default-settings)
 seconv info <file>          # print format/encoding/duration/language for a file
 seconv lint <pattern>       # validate subtitle(s); exit 1 if issues found
+seconv optimize-nocr <db>   # remove nOCR lines that don't tell characters apart (in place + .bak, or --output:<path>)
 seconv --help               # show help (same text as -h, /? and /help)
 seconv --help-json          # print the whole command-line schema as JSON
 seconv --version            # print version and exit
@@ -348,10 +349,11 @@ Translated output is named with the target language code — `way.srt --translat
 |---|---|
 | `--translate-to:<lang>` | Target language — enables translation |
 | `--translate-from:<lang>` | Source language (default: auto-detect per file) |
-| `--translate-engine:<engine>` | `llamacpp` (default) \| `ollama` \| `lmstudio` \| `libretranslate` \| `nllb-serve` \| `nllb-api` |
+| `--translate-engine:<engine>` | `llamacpp` (default) \| `ollama` \| `lmstudio` \| `openai-compatible` \| `libretranslate` \| `nllb-serve` \| `nllb-api` \| `deepl` |
 | `--translate-url:<url>` | Endpoint of an already-running translate server. For `llamacpp` this skips the local server auto-start; a bare `host:port` is completed to `/v1/chat/completions`. |
-| `--translate-model:<model>` | `ollama`/`lmstudio`: model name. `llamacpp`: a `.gguf` file name from the models folder or a full path (default: the first installed translate model). |
-| `--translate-prompt:<text\|file>` | Prompt for `llamacpp` / `ollama` / `lmstudio` — inline text or a path to a text file. See [Custom prompt](#custom-prompt) below. |
+| `--translate-model:<model>` | `ollama`/`lmstudio`/`openai-compatible`: model name. `llamacpp`: a `.gguf` file name from the models folder or a full path (default: the first installed translate model). |
+| `--translate-api-key:<key>` | API key for `openai-compatible` (sent as a Bearer token, optional) and `deepl` (required; a free-tier `:fx` key is routed to `api-free.deepl.com`, a Pro key to `api.deepl.com`). `--translate-url` overrides the DeepL endpoint (default `https://api-free.deepl.com/`) or the OpenAI-compatible endpoint (default `http://localhost:8000/v1/chat/completions`). |
+| `--translate-prompt:<text\|file>` | Prompt for `llamacpp` / `ollama` / `lmstudio` / `openai-compatible` — inline text or a path to a text file. See [Custom prompt](#custom-prompt) below. |
 
 **llama.cpp (default engine).** With no `--translate-url`, seconv runs a local `llama-server` for you: it looks for the binary in Subtitle Edit's data folder (`llama.cpp` next to `seconv`, then `%AppData%\Subtitle Edit\llama.cpp` / `~/Library/Application Support/Subtitle Edit/llama.cpp` / `~/.config/Subtitle Edit/llama.cpp`) and falls back to `llama-server` on `PATH`. The server is started on a free localhost port with the model's correct chat-template flags and stopped again when seconv exits. Models resolve against the data folder's `models` subfolder.
 
@@ -373,6 +375,12 @@ seconv movie.srt subrip --translate-to:de --translate-url:http://192.168.1.10:80
 
 # Ollama
 seconv movie.srt subrip --translate-to:da --translate-engine:ollama --translate-model:gemma2
+
+# Any OpenAI-compatible API (vLLM, Together, ...)
+seconv movie.srt subrip --translate-to:de --translate-engine:openai-compatible --translate-url:https://api.example.com/v1 --translate-api-key:<key> --translate-model:<model>
+
+# DeepL
+seconv movie.srt subrip --translate-to:de --translate-engine:deepl --translate-api-key:<key>
 
 # OCR a Blu-Ray sup and translate the result in one pass
 seconv movie.sup subrip --ocr-engine:tesseract --ocr-language:eng --translate-to:de
@@ -429,14 +437,14 @@ a no-op. `ollama` and `lmstudio` have no per-model template, so it is simply
 
 | Option | Description |
 |---|---|
-| `--multiple-replace:<path>` | Multiple-replace rules applied per paragraph after operations. Accepts the legacy SE *MultipleSearchAndReplaceGroups* XML **and** the file the SE5 GUI exports from *Tools → Multiple replace → export* — either `.template` (JSON) or `.csv`. Supports case-insensitive, `CaseSensitive`, and `RegularExpression` rules; only active rules are applied. The format is chosen by extension, then by content |
+| `--multiple-replace:<path>` | Multiple-replace rules applied per paragraph after operations. Accepts the legacy SE *MultipleSearchAndReplaceGroups* XML **and** the file the SE5 GUI exports from *Edit → Multiple replace → export* — either `.template` (JSON) or `.csv`. Supports case-insensitive, `CaseSensitive`, and `RegularExpression` rules; only active rules are applied. The format is chosen by extension, then by content |
 | `--custom-format:<path.xml>` | SE *CustomFormatItem* XML (use with `--format customtext`) |
 | `--settings:<path.json>` | JSON file overlaying `Configuration.Settings` (general / tools / removeTextForHearingImpaired) plus image-output styling (exportImages). Optional `profiles` map for named overlays. The `tools` section also carries the auto-translate prompts (`llamaCppPrompt`, `ollamaPrompt`, `lmStudioPrompt`), so a `profiles` entry can hold a per-target-language prompt. `tools.ocrUseWordSplitList: true` lets *Fix common OCR errors* split run-together words via the word split list (off by default, as in the GUI, because it also splits valid words missing from the dictionary) |
 | `--profile:<name>` | Selects a named overlay from the settings file's `profiles` map. Requires `--settings` |
 
 #### Multiple-replace rule files
 
-The quickest way to share rules between the GUI and `seconv`: in Subtitle Edit open **Tools → Multiple replace**, then **export** the rules as `.template` (JSON) or `.csv`, and pass that file to `--multiple-replace`. Both are read directly — no conversion needed.
+The quickest way to share rules between the GUI and `seconv`: in Subtitle Edit open **Edit → Multiple replace**, then **export** the rules as `.template` (JSON) or `.csv`, and pass that file to `--multiple-replace`. Both are read directly — no conversion needed.
 
 ```bash
 seconv *.srt subrip --multiple-replace:my-rules.csv       # exported from the GUI
@@ -678,6 +686,8 @@ The language is auto-detected from the content. To force it:
 
 **Rule selection is CLI-only.** The set of rules is chosen with `--fix-common-errors-rules`, not through the `--settings` JSON. The settings file shapes *how* the rules behave (line length, min gap, dialog/continuation style, CPS — see [Settings JSON](#settings-json)); it does not select which rules run.
 
+**Opt-in rules.** `FixMisreadQuotes` can change correct text (British-style `'quotes'` become `"quotes"`), so it is not part of `all` — neither the `--fix-common-errors` default, `all`, nor a negation-only spec runs it. Name it explicitly to use it, e.g. `--fix-common-errors-rules:all,FixMisreadQuotes`.
+
 `FixCommonOcrErrors` runs only when a dictionary folder is available — bundled for English, or supplied via `--dictionary-folder` for other languages (see [OCR options](#ocr)). Without one, that rule is skipped and every other rule still runs.
 
 #### Rule ID ↔ GUI equivalent
@@ -686,6 +696,7 @@ The CLI rule IDs match the check-box rules in the desktop app's *Fix Common Erro
 
 | Rule ID | GUI equivalent | Language gate |
 |---|---|---|
+| `FixMisreadQuotes` | Fix apostrophes misread as double quotes (OCR, English) | en only, opt-in |
 | `AddMissingQuotes` | Add missing quotes (") | — |
 | `Fix3PlusLines` | Fix subtitles with more than two lines | — |
 | `FixAloneLowercaseIToUppercaseI` | Fix alone lowercase 'i' to 'I' (English) | en only |

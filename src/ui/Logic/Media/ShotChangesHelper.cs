@@ -36,36 +36,31 @@ public class ShotChangesHelper
     }
 
     /// <summary>
-    /// Find shot changes file name
+    /// Find shot changes file name. The file written for <paramref name="audioTrackNumber"/> wins
+    /// (that is the name <see cref="SaveShotChanges"/> uses), then the track-less name, then any
+    /// file for the video.
     /// </summary>
     /// <param name="videoFileName">Video file name</param>
-    /// <returns>Return file name of existing shot changes, or null</returns>
-    private static string FindShotChangesFileName(string videoFileName)
+    /// <param name="audioTrackNumber">Audio track number, -1 if no track number</param>
+    /// <returns>Return file name of existing shot changes, or empty string</returns>
+    private static string FindShotChangesFileName(string videoFileName, int audioTrackNumber)
     {
-        var dir = Se.ShotChangesFolder;
-        if (!Directory.Exists(dir))
+        if (audioTrackNumber >= 0)
         {
-            Directory.CreateDirectory(dir);
+            var trackFileName = GetShotChangesFileName(videoFileName, audioTrackNumber);
+            if (File.Exists(trackFileName))
+            {
+                return trackFileName;
+            }
         }
 
-        var videoFileNameWithoutExtension = Path.GetFileNameWithoutExtension(videoFileName)
-            .Replace(".", string.Empty)
-            .Replace("_", string.Empty);
-        if (videoFileNameWithoutExtension.Length > 25)
-        {
-            videoFileNameWithoutExtension = videoFileNameWithoutExtension.Substring(0, 25);
-        }
-
-        var hash = MovieHasher.GenerateHash(videoFileName);
-
-        var newFileName = Path.Combine(dir, $"{hash}_{videoFileNameWithoutExtension}.shotchanges");
+        var newFileName = GetShotChangesFileName(videoFileName, -1);
         if (File.Exists(newFileName))
         {
             return newFileName;
         }
 
-        var searchFileName = $"{hash}*.shotchanges";
-        var files = Directory.GetFiles(dir, searchFileName);
+        var files = GetAllShotChangesFileNames(videoFileName);
         if (files.Length > 0)
         {
             return files[0];
@@ -74,12 +69,26 @@ public class ShotChangesHelper
         return string.Empty;
     }
 
+    // Every shot changes file for the video, whatever audio track it was written for - the set
+    // FindShotChangesFileName picks from.
+    private static string[] GetAllShotChangesFileNames(string videoFileName)
+    {
+        var dir = Se.ShotChangesFolder;
+        if (!Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        return Directory.GetFiles(dir, $"{MovieHasher.GenerateHash(videoFileName)}*.shotchanges");
+    }
+
     /// <summary>
     /// Load shot changes from file
     /// </summary>
     /// <param name="videoFileName">Video file name</param>
+    /// <param name="audioTrackNumber">Audio track number, -1 if no track number</param>
     /// <returns>List of shot changes in seconds</returns>
-    public static List<double> FromDisk(string videoFileName)
+    public static List<double> FromDisk(string videoFileName, int audioTrackNumber = -1)
     {
         var list = new List<double>();
 
@@ -88,7 +97,7 @@ public class ShotChangesHelper
             return list;
         }
 
-        var shotChangesFileName = FindShotChangesFileName(videoFileName);
+        var shotChangesFileName = FindShotChangesFileName(videoFileName, audioTrackNumber);
         if (string.IsNullOrEmpty(shotChangesFileName))
         {
             return list;
@@ -102,18 +111,47 @@ public class ShotChangesHelper
             }
         }
 
-        return list;
+        return EnsureSorted(list);
     }
 
     /// <summary>
-    /// Saves shot changes
+    /// Sorts shot changes (in place) when they are out of order. Consumers binary-search the list,
+    /// but an imported or hand-edited file keeps whatever order it was written in.
+    /// </summary>
+    public static List<double> EnsureSorted(List<double> shotChanges)
+    {
+        for (var i = 1; i < shotChanges.Count; i++)
+        {
+            if (shotChanges[i] < shotChanges[i - 1])
+            {
+                shotChanges.Sort();
+                break;
+            }
+        }
+
+        return shotChanges;
+    }
+
+    /// <summary>
+    /// Saves shot changes. Other shot changes files for the same video (another audio track, or
+    /// the track-less name) are removed, so every reader - whatever track it asks for - gets
+    /// this list rather than a stale one.
     /// </summary>
     /// <param name="videoFileName">Video file name</param>
     /// <param name="list">List of shot changes in seconds</param>
     /// <param name="audioTrackNumber">Audio track number, -1 if no track number</param>
     public static void SaveShotChanges(string videoFileName, List<double> list, int audioTrackNumber)
     {
-        File.WriteAllText(GetShotChangesFileName(videoFileName, audioTrackNumber), ToText(list));
+        var fileName = GetShotChangesFileName(videoFileName, audioTrackNumber);
+        foreach (var other in GetAllShotChangesFileNames(videoFileName))
+        {
+            if (!string.Equals(other, fileName, StringComparison.OrdinalIgnoreCase))
+            {
+                TryDelete(other);
+            }
+        }
+
+        File.WriteAllText(fileName, ToText(list));
     }
 
     /// <summary>
@@ -132,15 +170,29 @@ public class ShotChangesHelper
     }
 
     /// <summary>
-    /// Delete shot changes file associated with video file
+    /// Delete the shot changes associated with video file - every file <see cref="FromDisk"/>
+    /// could read for it, not just the one for <paramref name="audioTrackNumber"/>, or an older
+    /// file would bring the deleted shot changes back on reopen.
     /// </summary>
     /// <param name="videoFileName">Video file name</param>
+    /// <param name="audioTrackNumber">Audio track number, -1 if no track number</param>
     public static void DeleteShotChanges(string videoFileName, int audioTrackNumber)
     {
-        var shotChangesFileName = GetShotChangesFileName(videoFileName, audioTrackNumber);
-        if (File.Exists(shotChangesFileName))
+        foreach (var fileName in GetAllShotChangesFileNames(videoFileName))
         {
-            File.Delete(shotChangesFileName);
+            TryDelete(fileName);
+        }
+    }
+
+    private static void TryDelete(string fileName)
+    {
+        try
+        {
+            File.Delete(fileName);
+        }
+        catch
+        {
+            // ignore - a locked/read-only cache file is not worth failing the edit over
         }
     }
 
@@ -237,14 +289,19 @@ public class ShotChangesHelper
     /// one, or the line would span the cut it was supposed to stop at;</item>
     /// <item>it lands <paramref name="outCuesGapMs"/> before that cut (the beautify profile's out
     /// cues gap, so this command, the beautifier and the snap commands share one rule);</item>
-    /// <item>it only ever extends - a target at or before the current end means "already where it
-    /// should be", so nothing moves. Shortening a line is not what the user asked for.</item>
+    /// <item>a shot change never shortens the line - a cut at or before the current end means
+    /// "already where it should be", so nothing moves.</item>
     /// </list>
     /// <para>
     /// The next subtitle's start minus <paramref name="minGapMs"/> caps the result (and is the only
-    /// bound when no cut lies ahead - the "or next subtitle" half of the command), and a result
-    /// longer than <paramref name="maxDurationMs"/> is dropped rather than clamped: a clamped end
-    /// would sit in the middle of a shot, which is the opposite of the point.
+    /// bound when no cut lies ahead, or no shot changes are loaded - the "or next subtitle" half of
+    /// the command), and a result longer than <paramref name="maxDurationMs"/> is dropped rather than
+    /// clamped: a clamped end would sit in the middle of a shot, which is the opposite of the point.
+    /// </para>
+    /// <para>
+    /// The minimum gap is the one bound that may pull the end backwards: a line that overlaps the
+    /// next subtitle, or ends inside the minimum gap, is trimmed to the next start minus the gap
+    /// like SE4 does (issue #15719) - as long as a positive duration is left.
     /// </para>
     /// </summary>
     public static double? GetExtendedEndMs(
@@ -256,15 +313,37 @@ public class ShotChangesHelper
         double minGapMs,
         double maxDurationMs)
     {
-        double? newEndMs = null;
-        foreach (var shotChange in shotChanges)
+        if (nextStartMs.HasValue)
         {
-            var shotChangeMs = shotChange * 1000.0;
-            if (shotChangeMs >= endMs)
+            var limitMs = nextStartMs.Value - minGapMs;
+            if (limitMs < endMs)
             {
-                newEndMs = shotChangeMs - outCuesGapMs;
-                break;
+                return limitMs > startMs ? limitMs : null;
             }
+        }
+
+        // The first shot change at or after the end. The list is sorted, so binary search -
+        // the command runs once per selected line, and a scan from the start made a select-all
+        // cost lines x shot changes.
+        double? newEndMs = null;
+        var low = 0;
+        var high = shotChanges.Count;
+        while (low < high)
+        {
+            var middle = (low + high) >>> 1;
+            if (shotChanges[middle] * 1000.0 >= endMs)
+            {
+                high = middle;
+            }
+            else
+            {
+                low = middle + 1;
+            }
+        }
+
+        if (low < shotChanges.Count)
+        {
+            newEndMs = shotChanges[low] * 1000.0 - outCuesGapMs;
         }
 
         if (nextStartMs.HasValue)
@@ -292,7 +371,8 @@ public class ShotChangesHelper
     /// left alone - <see cref="GetExtendedEndMs"/> mirrored: the <b>last</b> shot change at or before
     /// the current start, plus the in cues gap so the line starts after the cut rather than on it,
     /// and only when that moves the start earlier. The previous subtitle's end plus
-    /// <paramref name="minGapMs"/> is the floor.
+    /// <paramref name="minGapMs"/> is the floor - and the one bound that may move the start later,
+    /// when the line overlaps the previous subtitle or starts inside the minimum gap (issue #15719).
     /// </summary>
     public static double? GetExtendedStartMs(
         IReadOnlyList<double> shotChanges,
@@ -303,15 +383,35 @@ public class ShotChangesHelper
         double minGapMs,
         double maxDurationMs)
     {
-        double? newStartMs = null;
-        for (var i = shotChanges.Count - 1; i >= 0; i--)
+        if (previousEndMs.HasValue)
         {
-            var shotChangeMs = shotChanges[i] * 1000.0;
-            if (shotChangeMs <= startMs)
+            var limitMs = previousEndMs.Value + minGapMs;
+            if (limitMs > startMs)
             {
-                newStartMs = shotChangeMs + inCuesGapMs;
-                break;
+                return limitMs < endMs ? limitMs : null;
             }
+        }
+
+        // The last shot change at or before the start, by binary search (see GetExtendedEndMs).
+        double? newStartMs = null;
+        var low = 0;
+        var high = shotChanges.Count;
+        while (low < high)
+        {
+            var middle = (low + high) >>> 1;
+            if (shotChanges[middle] * 1000.0 <= startMs)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        if (low > 0)
+        {
+            newStartMs = shotChanges[low - 1] * 1000.0 + inCuesGapMs;
         }
 
         if (previousEndMs.HasValue)

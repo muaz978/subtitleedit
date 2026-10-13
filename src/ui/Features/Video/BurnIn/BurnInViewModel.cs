@@ -140,6 +140,9 @@ public partial class BurnInViewModel : ObservableObject
     private readonly Timer _timerGenerate;
     private bool _doAbort;
     private bool _isClosing;
+    // Held while generating, so a long (batch) encode is not cut short by the machine idling into
+    // sleep (#15552). Driven by IsGenerating, which EndRun resets however a run ends.
+    private readonly SleepInhibitorScope _sleepInhibitor = new(Se.Language.Video.BurnIn.Title);
     private bool _ffmpegWritesOutputFile; // false for the two-pass analyze pass, which writes to the null device
     private string _passLogFilePrefix = string.Empty;
     private readonly Dictionary<string, int> _audioSizeInMbCache = new();
@@ -287,6 +290,24 @@ public partial class BurnInViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Burns only the given lines, with "Cut" set to the span from the first start to the last
+    /// end so a short clip comes out without typing the times (SE 4 "Generate video with
+    /// burned-in subtitles for selected lines", issue #15012).
+    /// </summary>
+    public void InitializeSelectedLines(string videoFileName, Subtitle subtitle, SubtitleFormat subtitleFormat)
+    {
+        Initialize(videoFileName, subtitle, subtitleFormat);
+        if (subtitle.Paragraphs.Count == 0)
+        {
+            return;
+        }
+
+        CutFrom = TimeSpan.FromMilliseconds(Math.Max(0, subtitle.Paragraphs.Min(p => p.StartTime.TotalMilliseconds)));
+        CutTo = TimeSpan.FromMilliseconds(subtitle.Paragraphs.Max(p => p.EndTime.TotalMilliseconds));
+        IsCutActive = CutTo > CutFrom;
+    }
+
+    /// <summary>
     /// Burns a Blu-ray sup into the video instead of text - the bitmaps as they are, overlapping
     /// lines included (issue #14456). Batch mode takes sup files the same way, per job.
     /// </summary>
@@ -363,11 +384,11 @@ public partial class BurnInViewModel : ObservableObject
 
             if (JobItems.Count == 1)
             {
-                ProgressText = $"Analyzing video... {percentage}%     {estimatedLeft}";
+                ProgressText = string.Format(Se.Language.Video.AnalyzingVideoX, percentage, estimatedLeft);
             }
             else
             {
-                ProgressText = $"Analyzing video {_jobItemIndex + 1}/{JobItems.Count}... {percentage}%     {estimatedLeft}";
+                ProgressText = string.Format(Se.Language.Video.AnalyzingVideoXofY, _jobItemIndex + 1, JobItems.Count, percentage, estimatedLeft);
             }
 
             return;
@@ -450,6 +471,8 @@ public partial class BurnInViewModel : ObservableObject
     /// returns, which is right after the first ffmpeg process was started: pass 2 and every
     /// batch file after the first were never prompted.
     /// </summary>
+    partial void OnIsGeneratingChanged(bool value) => _sleepInhibitor.SetActive(value);
+
     private void EndRun()
     {
         IsGenerating = false;
@@ -574,12 +597,11 @@ public partial class BurnInViewModel : ObservableObject
 
             if (JobItems.Count == 1)
             {
-                ProgressText = $"Generating video... {percentage}%     {estimatedLeft}";
+                ProgressText = string.Format(Se.Language.Video.ReEncodeGeneratingVideoX, percentage, estimatedLeft);
             }
             else
             {
-                ProgressText =
-                    $"Generating video {_jobItemIndex + 1}/{JobItems.Count}... {percentage}%     {estimatedLeft}";
+                ProgressText = string.Format(Se.Language.Video.ReEncodeGeneratingVideoXofY, _jobItemIndex + 1, JobItems.Count, percentage, estimatedLeft);
             }
 
             return;
@@ -3136,6 +3158,7 @@ public partial class BurnInViewModel : ObservableObject
 
         DeletePassLogFiles();
         CleanupPreview();
+        _sleepInhibitor.Dispose();
     }
 
     public void CleanupPreview()

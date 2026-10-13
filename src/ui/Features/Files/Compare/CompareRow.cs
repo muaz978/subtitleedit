@@ -39,6 +39,10 @@ public partial class CompareRow : ObservableObject
     /// <summary>The pair was forced together by the user's sync point (#15394).</summary>
     public bool IsSyncPoint { get; init; }
 
+    /// <summary>The start or end time counts as a difference in this comparison.</summary>
+    public bool StartDiffers { get; init; }
+    public bool EndDiffers { get; init; }
+
     /// <summary>The line on that side was picked as half of a sync point, waiting for the other half.</summary>
     [ObservableProperty] private bool _isLeftSyncPending;
     [ObservableProperty] private bool _isRightSyncPending;
@@ -68,6 +72,11 @@ public partial class CompareRow : ObservableObject
     public bool CanEdit => IsLeftEditable && HasLeft && Left.Line != null;
     public bool CanTakeFromPair => CanEdit && HasRight && Right.Line != null;
 
+    // The right-click menu offers only the takes that would change something (#15621).
+    public bool CanTakeText => CanTakeFromPair && Left.Text != Right.Text;
+    public bool CanTakeTiming => CanTakeFromPair && (Left.StartTime != Right.StartTime || Left.EndTime != Right.EndTime);
+    public bool HasTakeActions => CanTakeReference || CanTakeText || CanTakeTiming;
+
     public string TakeReferenceHint => Kind == CompareRowKind.OnlyRight
         ? Se.Language.File.CompareInsertFromReference
         : Se.Language.File.CompareTakeFromReference;
@@ -90,6 +99,16 @@ public partial class CompareRow : ObservableObject
     public string LeftDurationDisplay => FormatDuration(Left);
     public string RightDurationDisplay => FormatDuration(Right);
 
+    public bool HasTimingDelta => (StartDiffers || EndDiffers) && HasLeft && HasRight;
+
+    /// <summary>
+    /// How much later (+) or earlier (-) the reference starts and ends - shown instead of
+    /// marking the time cells, which looked like a text change (#15622).
+    /// </summary>
+    public string TimingDeltaDisplay => HasTimingDelta
+        ? "Δ " + FormatDelta(Right.StartTime - Left.StartTime) + " → " + FormatDelta(Right.EndTime - Left.EndTime)
+        : string.Empty;
+
     private IBrush GetCardBrush(bool hasLine)
     {
         return Kind switch
@@ -109,6 +128,16 @@ public partial class CompareRow : ObservableObject
         }
 
         return (item.EndTime - item.StartTime).TotalSeconds.ToString("0.00", CultureInfo.CurrentCulture) + "s";
+    }
+
+    internal static string FormatDelta(TimeSpan delta)
+    {
+        var milliseconds = Math.Round(delta.TotalMilliseconds);
+        var sign = milliseconds > 0 ? "+" : milliseconds < 0 ? "\u2212" : string.Empty;
+        var abs = Math.Abs(milliseconds);
+        return abs < 1000
+            ? sign + abs.ToString("0", CultureInfo.CurrentCulture) + "ms"
+            : sign + (abs / 1000).ToString("0.000", CultureInfo.CurrentCulture) + "s";
     }
 
     internal void BeginEdit()

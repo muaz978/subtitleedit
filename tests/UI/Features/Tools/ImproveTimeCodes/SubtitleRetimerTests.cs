@@ -1,3 +1,4 @@
+using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Features.Files.ImportPlainText;
 using Nikse.SubtitleEdit.Features.Tools.ImproveTimeCodes;
 using Nikse.SubtitleEdit.Features.Video.SpeechToText.OpenAiCompatible;
@@ -100,13 +101,27 @@ public class SubtitleRetimerTests : IDisposable
     [InlineData("[door slams]", "")]
     [InlineData("♪ ♪", "")]
     [InlineData("(sighs) Fine.", "Fine.")]
-    [InlineData("♪ Let it be ♪", "Let it be")]
+    [InlineData("♪ Let it be ♪", "")] // sung, timed to the music - not for a speech aligner
+    [InlineData("♪ Smelly cat, smelly cat", "")]
+    [InlineData("# Smelly cat #", "")]
+    [InlineData("{\\an8}{\\pos(320,40)}CENTRAL PERK", "")] // a sign on screen
+    [InlineData("{\\move(0,0,10,10)}Moving", "")]
+    [InlineData("#1 fan, that's me.", "1 fan, that's me.")]
     [InlineData("", "")]
     public void GetSpokenText_KeepsOnlyWhatIsSaid(string text, string expected)
         => Assert.Equal(expected, SubtitleRetimer.GetSpokenText(text));
 
+    [Theory]
+    [InlineData(10, 13, 12, 14, true)] // a second over, half the shorter line: two speakers at once
+    [InlineData(10, 20, 12, 14, true)] // a line inside a long one: a sign over dialogue
+    [InlineData(10, 12.2, 12, 14, false)] // 0.2 s: mistiming
+    [InlineData(10, 12.6, 12, 16, false)] // 0.6 s of a 2.6 s line: still mistiming
+    [InlineData(10, 12, 12.1, 14, false)]
+    public void OverlapsOnPurpose_OnlyALargeOverlapIsMeant(double aStart, double aEnd, double bStart, double bEnd, bool expected)
+        => Assert.Equal(expected, SubtitleRetimer.OverlapsOnPurpose(new("a", aStart, aEnd), new("b", bStart, bEnd)));
+
     [Fact]
-    public async Task Retime_MovesLinesOntoTheAlignedTimes_AndDiscardsSentinels()
+    public async Task Retime_MovesLinesOntoTheAlignedStarts_AndDiscardsSentinels()
     {
         var lines = MakeLines(12);
         var audio = new FakeAudio(_folder);
@@ -126,8 +141,49 @@ public class SubtitleRetimerTests : IDisposable
         {
             Assert.Equal(SubtitleRetimer.LineStatus.Retimed, results[i].Status);
             Assert.Equal(lines[i].StartSeconds + 0.3, results[i].StartSeconds, 2);
-            Assert.Equal(lines[i].EndSeconds - 0.2, results[i].EndSeconds, 2);
+            Assert.Equal(lines[i].EndSeconds + 0.3, results[i].EndSeconds, 2); // the end travels with the start
         }
+    }
+
+    [Fact]
+    public async Task Retime_AnEndIsNeverPulledInBeforeTheSpeechIsOver()
+    {
+        // A CTC aligner puts a word's end where its last letter was recognised, before the word
+        // has died away. Pulling ends in to that made lines stop too soon.
+        var lines = MakeLines(3);
+        var audio = new FakeAudio(_folder);
+        var runner = new OracleRunner(audio);
+        foreach (var l in lines)
+        {
+            runner.Truth[l.Text] = (l.StartSeconds, l.EndSeconds - 0.3);
+        }
+
+        var results = await new SubtitleRetimer(runner, audio).RetimeAsync(lines, null, TestContext.Current.CancellationToken);
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            Assert.Equal(lines[i].EndSeconds, results[i].EndSeconds, 2);
+        }
+    }
+
+    [Fact]
+    public async Task Retime_SpeechThatGoesOnPastTheEnd_HoldsTheLineUntilItIsOver()
+    {
+        var lines = MakeLines(3);
+        var audio = new FakeAudio(_folder);
+        var runner = new OracleRunner(audio);
+        foreach (var l in lines)
+        {
+            runner.Truth[l.Text] = (l.StartSeconds, l.EndSeconds);
+        }
+
+        // Line 1 is taken down 0.7 s before its speech is over.
+        runner.Truth[lines[1].Text] = (lines[1].StartSeconds, lines[1].EndSeconds + 0.7);
+
+        var results = await new SubtitleRetimer(runner, audio).RetimeAsync(lines, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(lines[1].EndSeconds + 0.7 + SubtitleRetimer.EndTailSeconds, results[1].EndSeconds, 2);
+        Assert.True(results[1].EndSeconds < results[2].StartSeconds);
     }
 
     [Fact]
@@ -221,9 +277,9 @@ public class SubtitleRetimerTests : IDisposable
         var options = new SubtitleRetimer.Options { MaxShiftSeconds = 3, ReadingCharsPerSecond = 20, MinDurationSeconds = 1.0, MinGapSeconds = 0.1 };
         var results = await new SubtitleRetimer(runner, audio, options).RetimeAsync(lines, null, TestContext.Current.CancellationToken);
 
-        // 45 chars at 20 cps wants 2.25 s, but the next line now starts at 12.5.
+        // The end travels with the start to 13.1, but the next line now starts at 12.5.
         Assert.Equal(10.1, results[0].StartSeconds, 2);
-        Assert.Equal(12.35, results[0].EndSeconds, 2);
+        Assert.Equal(12.4, results[0].EndSeconds, 2);
         Assert.Equal(12.5, results[1].StartSeconds, 2);
     }
 
@@ -275,8 +331,9 @@ public class SubtitleRetimerTests : IDisposable
     }
 
     [Fact]
-    public void Tidy_KeepsClearOfBothPositionsOfAnUnconfirmedLine()
+    public void Tidy_MakesRoomForWhereAnUnconfirmedLineStays_NotForItsProposal()
     {
+        // The proposal (12.9) is offered unticked; were it ticked, Settle would make room then.
         var lines = new List<SubtitleRetimer.Line> { new("First line", 10, 12), new("Second line", 12.1, 14) };
         var results = new[]
         {
@@ -286,7 +343,268 @@ public class SubtitleRetimerTests : IDisposable
 
         SubtitleRetimer.Tidy(lines, results, new SubtitleRetimer.Options { MinGapSeconds = 0.1 }, 0);
 
-        Assert.Equal(12.0, results[0].EndSeconds, 3); // the second line may yet stay at 12.1
+        Assert.Equal(12.0, results[0].EndSeconds, 3); // the second line stays at 12.1 unless ticked
+    }
+
+    [Fact]
+    public void Tidy_AnUnconfirmedProposal_DoesNotCutTheLineBeforeItShort()
+    {
+        var lines = new List<SubtitleRetimer.Line> { new("First line", 10, 12), new("Second line", 12.5, 14) };
+        var results = new[]
+        {
+            new SubtitleRetimer.LineResult(10.0, 12.2, SubtitleRetimer.LineStatus.Retimed),
+            new SubtitleRetimer.LineResult(11.6, 13.1, SubtitleRetimer.LineStatus.DisputedBySpeech),
+        };
+
+        SubtitleRetimer.Tidy(lines, results, new SubtitleRetimer.Options { MinGapSeconds = 0.1 }, 0);
+
+        Assert.Equal(12.2, results[0].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void Tidy_MaxCharactersPerSecond_HoldsALineLongerThanItUsedToBe_RoomPermitting()
+    {
+        // 50 characters in 1.5 s is 33 per second; at most 20 per second needs 2.5 s.
+        var lines = new List<SubtitleRetimer.Line>
+        {
+            new("This line is far too fast to read in the time it has", 10, 11.5),
+            new("Next", 20, 21),
+        };
+        var results = new[]
+        {
+            new SubtitleRetimer.LineResult(10.2, 11.7, SubtitleRetimer.LineStatus.Retimed),
+            new SubtitleRetimer.LineResult(20, 21, SubtitleRetimer.LineStatus.Unchanged),
+        };
+
+        SubtitleRetimer.Tidy(lines, results, new SubtitleRetimer.Options { MaxCharsPerSecond = 20 }, 0);
+
+        var characters = (double)lines[0].Text.CountCharacters(true);
+        Assert.Equal(10.2 + (characters / 20), results[0].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void Tidy_MaxCharactersPerSecond_NeverRunsIntoTheNextLine()
+    {
+        var lines = new List<SubtitleRetimer.Line>
+        {
+            new("This line is far too fast to read in the time it has", 10, 11.5),
+            new("Next", 12, 13),
+        };
+        var results = new[]
+        {
+            new SubtitleRetimer.LineResult(10.2, 11.7, SubtitleRetimer.LineStatus.Retimed),
+            new SubtitleRetimer.LineResult(12, 13, SubtitleRetimer.LineStatus.Unchanged),
+        };
+
+        SubtitleRetimer.Tidy(lines, results, new SubtitleRetimer.Options { MaxCharsPerSecond = 20, MinGapSeconds = 0.1 }, 0);
+
+        Assert.Equal(11.9, results[0].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void Tidy_HeardLastWord_HoldsTheLineUntilItWasSaid()
+    {
+        var lines = new List<SubtitleRetimer.Line> { new("Short", 10, 11), new("Next", 14, 15) };
+        var results = new[]
+        {
+            new SubtitleRetimer.LineResult(10.1, 11.1, SubtitleRetimer.LineStatus.Retimed) { HeardEndSeconds = 12.3 },
+            new SubtitleRetimer.LineResult(14, 15, SubtitleRetimer.LineStatus.Unchanged),
+        };
+
+        SubtitleRetimer.Tidy(lines, results, new SubtitleRetimer.Options(), 0);
+
+        Assert.Equal(12.3, results[0].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void Tidy_ReadingRules_NeverHoldALinePastTheMaximumDuration()
+    {
+        var lines = new List<SubtitleRetimer.Line> { new(new string('x', 120), 10, 13) };
+        var results = new[] { new SubtitleRetimer.LineResult(10.2, 13.2, SubtitleRetimer.LineStatus.Retimed) };
+
+        SubtitleRetimer.Tidy(lines, results, new SubtitleRetimer.Options { MaxCharsPerSecond = 10, MaxDurationSeconds = 5 }, 0);
+
+        Assert.Equal(15.2, results[0].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void Tidy_MaximumDuration_DoesNotCutOffTheHeardLastWord()
+    {
+        var lines = new List<SubtitleRetimer.Line> { new("Short", 10, 13), new("Next", 16, 17) };
+        var results = new[]
+        {
+            new SubtitleRetimer.LineResult(10.1, 12.5, SubtitleRetimer.LineStatus.Retimed) { HeardEndSeconds = 13.6 },
+            new SubtitleRetimer.LineResult(16, 17, SubtitleRetimer.LineStatus.Unchanged),
+        };
+
+        SubtitleRetimer.Tidy(lines, results, new SubtitleRetimer.Options { MaxDurationSeconds = 3 }, 0);
+
+        Assert.Equal(13.6, results[0].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void Tidy_MaximumDuration_DoesNotCutOffTheAlignedSpeech()
+    {
+        var lines = new List<SubtitleRetimer.Line> { new("Short", 10, 12) };
+        var results = new[] { new SubtitleRetimer.LineResult(10.1, 13.6, SubtitleRetimer.LineStatus.Retimed) };
+
+        SubtitleRetimer.Tidy(lines, results, new SubtitleRetimer.Options { MaxDurationSeconds = 3 }, 0);
+
+        Assert.Equal(13.6, results[0].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void Settle_AnAppliedLine_GivesWayToALineThatStaysPut()
+    {
+        var original = new List<SubtitleRetimer.Line> { new("a", 10, 12), new("b", 12.5, 14), new("c", 14.5, 16) };
+        var placements = new[]
+        {
+            new SubtitleRetimer.Placement(10.2, 12.8, true), // moved, runs into b's old place
+            new SubtitleRetimer.Placement(12.5, 14, false), // unticked - stays
+            new SubtitleRetimer.Placement(13.9, 15.8, true), // moved earlier, into b
+        };
+
+        SubtitleRetimer.Settle(original, placements, 0.1);
+
+        Assert.Equal(12.4, placements[0].EndSeconds, 3);
+        Assert.Equal(12.5, placements[1].StartSeconds, 3);
+        Assert.Equal(14.0, placements[1].EndSeconds, 3);
+        Assert.Equal(14.1, placements[2].StartSeconds, 3);
+        Assert.Equal(15.8, placements[2].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void Settle_LeavesOverlapsTheSubtitleCameInWith()
+    {
+        var original = new List<SubtitleRetimer.Line> { new("a", 10, 13), new("b", 12, 14) };
+        var placements = new[] { new SubtitleRetimer.Placement(10.1, 13.1, true), new SubtitleRetimer.Placement(12.1, 14.1, true) };
+
+        SubtitleRetimer.Settle(original, placements, 0.1);
+
+        Assert.Equal(13.1, placements[0].EndSeconds, 3);
+        Assert.Equal(12.1, placements[1].StartSeconds, 3);
+    }
+
+    [Fact]
+    public void Settle_ClosesASmallOverlapTheSubtitleCameInWith()
+    {
+        // Mistimed on the way in: b started 0.3 s before a ended. Both moved; the overlap is not kept.
+        var original = new List<SubtitleRetimer.Line> { new("a", 10, 12.3), new("b", 12, 14) };
+        var placements = new[] { new SubtitleRetimer.Placement(10.2, 12.5, true), new SubtitleRetimer.Placement(12.3, 14.2, true) };
+
+        SubtitleRetimer.Settle(original, placements, 0.1);
+
+        Assert.Equal(12.2, placements[0].EndSeconds, 3);
+        Assert.Equal(12.3, placements[1].StartSeconds, 3);
+    }
+
+    [Fact]
+    public async Task Retime_ClosesASmallOverlapTheSubtitleCameInWith()
+    {
+        // Chained lines; line 4 came in starting 0.3 s before line 3 ended. Its speech starts
+        // where it should, so the overlap was mistiming and must not survive the re-time.
+        var lines = MakeLines(8, spacing: 2.0, duration: 2.0);
+        lines[4] = lines[4] with { StartSeconds = lines[4].StartSeconds - 0.3 };
+        var audio = new FakeAudio(_folder);
+        var runner = new OracleRunner(audio);
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var start = 10.0 + (i * 2.0) + 0.1;
+            runner.Truth[lines[i].Text] = (start, start + 1.7);
+        }
+
+        var results = await new SubtitleRetimer(runner, audio, new SubtitleRetimer.Options { MinGapSeconds = 0.1 })
+            .RetimeAsync(lines, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(18.1, results[4].StartSeconds, 2);
+        Assert.True(results[4].StartSeconds - results[3].EndSeconds >= 0.099, $"line 3 ends {results[3].EndSeconds}, line 4 starts {results[4].StartSeconds}");
+    }
+
+    [Fact]
+    public void SnapToFrames_PutsMovedLinesOnFrames_AndKeepsTheGap()
+    {
+        // 25 fps, gap two frames (80 ms). Rounded on its own, a's end would land one frame from b.
+        var original = new List<SubtitleRetimer.Line> { new("a", 10, 12), new("b", 12.5, 14), new("c", 20, 22) };
+        var placements = new[]
+        {
+            new SubtitleRetimer.Placement(10.21, 12.299, true),
+            new SubtitleRetimer.Placement(12.379, 14.03, true),
+            new SubtitleRetimer.Placement(20, 22, false), // not moved - left as it is
+        };
+
+        SubtitleRetimer.SnapToFrames(original, placements, 25, 0.08);
+
+        Assert.Equal(10.2, placements[0].StartSeconds, 6);
+        Assert.Equal(12.28, placements[0].EndSeconds, 6);
+        Assert.Equal(12.36, placements[1].StartSeconds, 6);
+        Assert.Equal(14.04, placements[1].EndSeconds, 6);
+        Assert.Equal(20.0, placements[2].StartSeconds, 6);
+    }
+
+    [Fact]
+    public void SnapToFrames_NextToALineLeftOffTheFrames_RoundsAwayFromIt()
+    {
+        // 25 fps, no minimum gap. a and c were not moved and sit between frames; rounding b to the
+        // nearest frame would start it 10 ms inside a and end it 5 ms inside c.
+        var original = new List<SubtitleRetimer.Line> { new("a", 8, 10.05), new("b", 10.2, 11), new("c", 11.035, 13) };
+        var placements = new[]
+        {
+            new SubtitleRetimer.Placement(8, 10.05, false),
+            new SubtitleRetimer.Placement(10.055, 11.03, true),
+            new SubtitleRetimer.Placement(11.035, 13, false),
+        };
+
+        SubtitleRetimer.SnapToFrames(original, placements, 25, 0);
+
+        Assert.Equal(10.08, placements[1].StartSeconds, 6);
+        Assert.Equal(11.0, placements[1].EndSeconds, 6);
+        Assert.True(placements[1].StartSeconds >= placements[0].EndSeconds);
+        Assert.True(placements[1].EndSeconds <= placements[2].StartSeconds);
+    }
+
+    [Fact]
+    public void Settle_TwoLinesThatMayNotMove_AreLeftAlone()
+    {
+        var original = new List<SubtitleRetimer.Line> { new("a", 10, 12), new("b", 12.5, 14) };
+        var placements = new[] { new SubtitleRetimer.Placement(10, 12.6, false), new SubtitleRetimer.Placement(12.5, 14, false) };
+
+        SubtitleRetimer.Settle(original, placements, 0.1);
+
+        Assert.Equal(12.6, placements[0].EndSeconds, 3);
+        Assert.Equal(12.5, placements[1].StartSeconds, 3);
+    }
+
+    [Fact]
+    public void Settle_ALinePlacedByHandRightAfterTheStartOfTheLineBefore_DoesNotSquashIt()
+    {
+        var original = new List<SubtitleRetimer.Line> { new("a", 10, 12), new("b", 12.5, 14) };
+        var placements = new[]
+        {
+            new SubtitleRetimer.Placement(10, 12, true),
+            new SubtitleRetimer.Placement(10.05, 11.5, false), // dragged by hand into a
+        };
+
+        SubtitleRetimer.Settle(original, placements, 0.024);
+
+        Assert.Equal(10.0, placements[0].StartSeconds, 3);
+        Assert.Equal(12.0, placements[0].EndSeconds, 3);
+        Assert.Equal(10.05, placements[1].StartSeconds, 3);
+    }
+
+    [Fact]
+    public void Settle_ALinePlacedByHand_StillCutsTheLineBeforeWhenThereIsRoom()
+    {
+        var original = new List<SubtitleRetimer.Line> { new("a", 10, 12), new("b", 12.5, 14) };
+        var placements = new[]
+        {
+            new SubtitleRetimer.Placement(10, 12, true),
+            new SubtitleRetimer.Placement(11, 13, false),
+        };
+
+        SubtitleRetimer.Settle(original, placements, 0.1);
+
+        Assert.Equal(10.9, placements[0].EndSeconds, 3);
+        Assert.Equal(11.0, placements[1].StartSeconds, 3);
     }
 
     [Fact]

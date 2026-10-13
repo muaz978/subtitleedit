@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
@@ -9,7 +10,10 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Threading;
 using Avalonia.Media;
+using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using Nikse.SubtitleEdit.Controls;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
@@ -278,11 +282,14 @@ public class BatchConvertWindow : Window
         };
 
         var labelFilter = UiUtil.MakeLabel(Se.Language.General.Filter);
+        // Not while converting: rows mid-OCR ("OCR...", "OCR x%") would be filtered as errors.
         var comboBoxFilter = UiUtil.MakeComboBox(vm.FilterItems, vm, nameof(vm.SelectedFilterItem))
-            .WithMarginRight(3);
+            .WithMarginRight(3)
+            .WithBindEnabled(nameof(vm.AreControlsEnabled));
         comboBoxFilter.SelectionChanged += (_, _) => vm.FilterComboBoxChanged();
         var textBoxFilter = UiUtil.MakeTextBox(200, vm, nameof(vm.FilterText))
             .WithBindIsVisible(nameof(vm.IsFilterTextVisible))
+            .WithBindEnabled(nameof(vm.AreControlsEnabled))
             .WithSearchAndClearIcons();
         textBoxFilter.TextChanged += (_, _) => vm.FilterTextChanged();
         var panelFilter = new StackPanel
@@ -480,7 +487,39 @@ public class BatchConvertWindow : Window
         return grid;
     }
 
-    private static Border MakeFunctionsListView(BatchConvertViewModel vm)
+    private static Control MakeFunctionsListView(BatchConvertViewModel vm)
+    {
+        var comboBoxPreset = UiUtil.MakeComboBox(vm.PresetNames, vm, nameof(vm.SelectedPresetName));
+        comboBoxPreset.Width = 150;
+        comboBoxPreset.PlaceholderText = Se.Language.Tools.BatchConvert.Preset;
+        comboBoxPreset.WithAccessibleName(Se.Language.Tools.BatchConvert.Preset);
+        var buttonSavePreset = UiUtil.MakeButton(Se.Language.Tools.BatchConvert.SavePresetDotDotDot, vm.SavePresetCommand);
+        var buttonDeletePreset = UiUtil.MakeButton(Se.Language.General.Delete, vm.DeletePresetCommand);
+        var panelPresets = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Margin = new Thickness(0, 0, 0, 5),
+            Children =
+            {
+                comboBoxPreset,
+                buttonSavePreset,
+                buttonDeletePreset,
+            }
+        };
+
+        return new StackPanel
+        {
+            Orientation = Orientation.Vertical,
+            Children =
+            {
+                panelPresets,
+                MakeFunctionsList(vm),
+            }
+        };
+    }
+
+    private static Border MakeFunctionsList(BatchConvertViewModel vm)
     {
         // The DataGrid this replaces hid its header row (HeadersVisibility.None);
         // TableView has no such switch, so the two columns now show headers. No
@@ -490,8 +529,11 @@ public class BatchConvertWindow : Window
         // Fixed width: this grid sits in an Auto-sized outer column, and a TableView
         // with a star column measured without a width constraint demands more than
         // the whole window (star columns have no content-based size).
-        dataGrid.Width = 360;
+        dataGrid.Width = FunctionsListMinWidth;
         dataGrid.Height = 300;
+        // Widen to the longest function name once the effective font is known - 360 fits English,
+        // but Russian/Bulgarian/French names are cut off (#15901).
+        dataGrid.Loaded += (_, _) => dataGrid.Width = GetFunctionsListWidth(dataGrid, vm.BatchFunctions.Select(f => f.Name));
         dataGrid.DataContext = vm;
         dataGrid.ItemsSource = vm.BatchFunctions;
         dataGrid.ContextFlyout = new MenuFlyout()
@@ -552,6 +594,29 @@ public class BatchConvertWindow : Window
         UiUtil.AttachMacContextFlyoutHandler(dataGrid);
 
         return UiUtil.MakeBorderForControl(dataGrid);
+    }
+
+    private const double FunctionsListMinWidth = 360;
+    private const double FunctionsListMaxWidth = 560;
+
+    internal static double GetFunctionsListWidth(Control list, IEnumerable<string> names)
+    {
+        var maxNameWidth = 0.0;
+        foreach (var name in names)
+        {
+            var textBlock = new TextBlock
+            {
+                Text = name,
+                FontFamily = list.GetValue(TextElement.FontFamilyProperty),
+                FontSize = list.GetValue(TextElement.FontSizeProperty),
+            };
+            textBlock.Measure(Size.Infinity);
+            maxNameWidth = Math.Max(maxNameWidth, textBlock.DesiredSize.Width);
+        }
+
+        // Enabled column (80) + name cell padding + vertical scroll bar + border, with some slack.
+        const double chrome = 120;
+        return Math.Clamp(Math.Ceiling(maxNameWidth + chrome), FunctionsListMinWidth, FunctionsListMaxWidth);
     }
 
     private static CheckBox MakeSelectedCheckBox(BatchConvertViewModel vm)

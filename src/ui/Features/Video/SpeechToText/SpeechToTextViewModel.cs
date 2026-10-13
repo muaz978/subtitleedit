@@ -85,6 +85,9 @@ public partial class SpeechToTextViewModel : ObservableObject
     [ObservableProperty] private bool _doIsolateSpeech;
     [ObservableProperty] private bool _doDetectSpeakers;
     [ObservableProperty] private bool _isDetectSpeakersVisible;
+    [ObservableProperty] private bool _isVadVisible;
+    [ObservableProperty] private ObservableCollection<CrispAsrVadOption> _vadOptions;
+    [ObservableProperty] private CrispAsrVadOption _selectedVadOption;
     [ObservableProperty] private ObservableCollection<ForcedAlignerOption> _forcedAligners;
     [ObservableProperty] private ForcedAlignerOption? _selectedForcedAligner;
     [ObservableProperty] private double _progressOpacity;
@@ -206,6 +209,10 @@ public partial class SpeechToTextViewModel : ObservableObject
 
     private readonly Regex _pctWhisper = new(@"^\d+%\|", RegexOptions.Compiled);
 
+    // whisper.cpp --print-progress; the function-name prefix differs between versions (#15836).
+    private static readonly Regex WhisperCppProgressRegex =
+        new(@"^\s*whisper_\w+:\s*progress\s*=\s*(\d+(?:\.\d+)?)\s*%", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     // WhisperX (verbose, its default) prints one "Transcript: [1101.31 --> 1130.774]  text" line
     // per VAD chunk as it is decoded, with plain seconds rather than a time code.
     private static readonly Regex WhisperXTranscriptRegex =
@@ -221,6 +228,9 @@ public partial class SpeechToTextViewModel : ObservableObject
     private Process? _audioExtractProcess;
     private readonly System.Timers.Timer _timerAudioExtract = new();
     private volatile bool _windowClosing;
+    // Held while a transcription runs, so a long (batch) run is not cut short by the machine
+    // idling into sleep (#15552). Driven by IsTranscribeEnabled, which every end-of-run path resets.
+    private readonly SleepInhibitorScope _sleepInhibitor = new(Se.Language.Video.AudioToText.Title);
     private Stopwatch _sw = new();
     private StringBuilder _ffmpegLog = new();
     private readonly Lock _lockObj = new();
@@ -229,6 +239,9 @@ public partial class SpeechToTextViewModel : ObservableObject
     private string _error;
     private List<AudioClip>? _audioClips;
     private bool _audioClipsAutoStart;
+    // "Retry failed" for audio clips (#15497): the next batch run only takes the clips that
+    // did not get a transcription, so the ones that did are neither redone nor lost.
+    private bool _retryFailedClipsOnly;
     private string _qwen3AsrOutputJsonPath = string.Empty;
     private int? _engineExitCode;
 
@@ -335,6 +348,8 @@ public partial class SpeechToTextViewModel : ObservableObject
         WhisperCppBackends = new ObservableCollection<ISpeechToTextEngine>();
         CrispAsrBackends = new ObservableCollection<CrispAsrEngineBase>();
         ForcedAligners = new ObservableCollection<ForcedAlignerOption>();
+        VadOptions = new ObservableCollection<CrispAsrVadOption>(CrispAsrVadModel.Options);
+        SelectedVadOption = CrispAsrVadModel.Get(Se.Settings.Tools.AudioToText.CrispAsrVad);
 
         ResultAudioClips = new List<AudioClip>();
 
@@ -389,7 +404,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         var savedFormat = Se.Settings.Tools.OpenAiCompatibleSttAudioFormat;
         OpenAiCompatibleSttAudioFormat = OpenAiCompatibleSttAudioFormats.Contains(savedFormat) ? savedFormat : "mp3";
 
-        OpenRouterSttApiKey = Se.Settings.Tools.OpenRouterSttApiKey;
+        OpenRouterSttApiKey = Se.Settings.Providers.OpenRouterApiKey;
         OpenRouterSttModel = Se.Settings.Tools.OpenRouterSttModel;
         OpenRouterSttLanguage = Se.Settings.Tools.OpenRouterSttLanguage;
         OpenRouterSttTemperature = Se.Settings.Tools.OpenRouterSttTemperature;
@@ -443,6 +458,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         Se.Settings.Tools.AudioToText.WhisperAutoAdjustTimings = DoAdjustTimings;
         Se.Settings.Tools.AudioToText.PostProcessing = DoPostProcessing;
         Se.Settings.Tools.AudioToText.CrispAsrIsolateSpeech = DoIsolateSpeech;
+        Se.Settings.Tools.AudioToText.CrispAsrVad = SelectedVadOption.Choice;
         if (!_keepDetectSpeakersSetting)
         {
             Se.Settings.Tools.AudioToText.CrispAsrDetectSpeakers = DoDetectSpeakers;
@@ -484,7 +500,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         Se.Settings.Tools.OpenAiCompatibleSttStream = OpenAiCompatibleSttStream;
         Se.Settings.Tools.OpenAiCompatibleSttAudioFormat = OpenAiCompatibleSttAudioFormat ?? "mp3";
 
-        Se.Settings.Tools.OpenRouterSttApiKey = OpenRouterSttApiKey ?? string.Empty;
+        Se.Settings.Providers.OpenRouterApiKey = OpenRouterSttApiKey ?? string.Empty;
         Se.Settings.Tools.OpenRouterSttModel = OpenRouterSttModel ?? string.Empty;
         Se.Settings.Tools.OpenRouterSttLanguage = OpenRouterSttLanguage ?? string.Empty;
         Se.Settings.Tools.OpenRouterSttTemperature = OpenRouterSttTemperature;
@@ -610,6 +626,9 @@ public partial class SpeechToTextViewModel : ObservableObject
         IsBackendSelectionVisible = IsWhisperCppSelected || IsCrispAsrSelected;
         IsForcedAlignerVisible = IsCrispAsrSelected;
         IsDetectSpeakersVisible = IsCrispAsrSelected && GetEffectiveSelectedEngine() is not CrispAsrMossDiarize;
+
+        // Index-Echo reads the VAD model itself and only understands Silero.
+        IsVadVisible = IsCrispAsrSelected && GetEffectiveSelectedEngine() is not CrispAsrIndexEcho;
     }
 
     private void UpdateForcedAlignerUi()
@@ -1007,7 +1026,9 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// the transcription log says it succeeded but no segments are emitted. Cohere gets the same
     /// treatment because crispasr auto-enables VAD for that backend on long audio anyway; passing
     /// the bundled Silero model keeps it from downloading its own copy into ~/.cache/crispasr
-    /// mid-transcription.
+    /// mid-transcription. Index-Echo windows its audio on Silero speech boundaries when it has the
+    /// model and falls back to fixed 60 s windows otherwise, which cut sentences in half and repeated
+    /// a cue at the seam.
     ///
     /// --chunk-seconds/-ck in the user's parameters means "no VAD, use fixed chunks" - that is
     /// crispasr's own documented way to switch its auto-VAD back off, and it is the only way to
@@ -1017,9 +1038,18 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// <param name="vadSuppressed">
     /// Set on the re-run of a job that came back empty with VAD on (#13911).
     /// </param>
-    internal static bool ShouldForceCrispAsrVad(ISpeechToTextEngine engine, string? crispArgs, bool vadSuppressed)
+    /// <param name="vadChoice">
+    /// The "VAD" combo box. Anything but "Auto" turns VAD on for every Crisp ASR backend (#15563).
+    /// </param>
+    internal static bool ShouldForceCrispAsrVad(ISpeechToTextEngine engine, string? crispArgs, bool vadSuppressed, string? vadChoice = CrispAsrVadModel.Automatic)
     {
-        if (engine is not (CrispAsrCohere or CrispAsrMega) || vadSuppressed)
+        if (vadSuppressed || engine is not ICrispAsrEngine)
+        {
+            return false;
+        }
+
+        var needsVad = engine is CrispAsrCohere or CrispAsrMega or CrispAsrIndexEcho;
+        if (!needsVad && CrispAsrVadModel.Get(vadChoice).Choice == CrispAsrVadModel.Automatic)
         {
             return false;
         }
@@ -1047,7 +1077,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// was the crispasr v0.8.29 GPU packages, built with AVX-512 against a CI runner that had it
     /// (CrispASR #374) - every CPU without AVX-512 got this on the CUDA/Vulkan build while the CPU
     /// build ran fine, so naming the installed package is most of the answer. That build flaw is
-    /// fixed from v0.8.30 (SE now pins v0.8.39), but the message still earns its keep: a pre-AVX2 CPU
+    /// fixed from v0.8.30 (SE now pins v0.8.43), but the message still earns its keep: a pre-AVX2 CPU
     /// hits the same silent death on the AVX2 CPU package, and an install predating the pin bump
     /// keeps the broken GPU binary until the user downloads the engine again.
     /// </summary>
@@ -2006,6 +2036,11 @@ public partial class SpeechToTextViewModel : ObservableObject
         {
             return string.Format(Se.Language.Video.AudioToText.TranscribingXOfY, _batchIndex + 1, _jobItems.Count);
         }
+        else if (ProgressValue >= 1)
+        {
+            // The number keeps the progress readable even where the bar fill is hard to see (#15836).
+            return $"{Se.Language.Video.AudioToText.Transcribing} {(int)ProgressValue}%";
+        }
         else
         {
             return Se.Language.Video.AudioToText.Transcribing;
@@ -2122,10 +2157,9 @@ public partial class SpeechToTextViewModel : ObservableObject
             EstimatedText = string.Empty;
             ElapsedText = string.Empty;
 
-            if (_audioClips != null && failed == 0)
+            if (_audioClips != null)
             {
-                OkPressed = true;
-                Window?.Close();
+                await FinishAudioClips();
                 return;
             }
 
@@ -2144,6 +2178,94 @@ public partial class SpeechToTextViewModel : ObservableObject
                 Window?.Close();
             }
         });
+    }
+
+    private int CountTranscribedAudioClips() => ResultAudioClips.Count(p => p.Transcription.Paragraphs.Count > 0);
+
+    /// <summary>
+    /// End of an audio clip run ("speech to text selected lines"). The clips that were
+    /// transcribed are delivered even when others failed - a clip of only music or silence
+    /// comes back empty and counts as failed, and that used to throw away every other line of
+    /// the run (#15497). With failures the user picks: apply what was transcribed, retry only
+    /// the failed clips, or go back to the dialog.
+    /// </summary>
+    private async Task FinishAudioClips()
+    {
+        var total = ResultAudioClips.Count;
+        var transcribed = CountTranscribedAudioClips();
+        if (transcribed == total)
+        {
+            OkPressed = true;
+            Window?.Close();
+            return;
+        }
+
+        if (transcribed == 0)
+        {
+            await MessageBox.Show(
+                Window!,
+                Se.Language.Video.AudioToText.Title,
+                string.Format(Se.Language.Video.AudioToText.NoLinesTranscribed, total),
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            IsTranscribeEnabled = true;
+            return;
+        }
+
+        var answer = await MessageBox.Show(
+            Window!,
+            Se.Language.Video.AudioToText.Title,
+            string.Format(Se.Language.Video.AudioToText.LinesTranscribedXOfYFailedZ, transcribed, total, total - transcribed),
+            MessageBoxButtons.Cancel,
+            MessageBoxIcon.Question,
+            Se.Language.Video.AudioToText.ApplyTranscribedLines,
+            Se.Language.Video.AudioToText.RetryFailedLines);
+
+        IsTranscribeEnabled = true;
+        if (answer == MessageBoxResult.Custom1)
+        {
+            OkPressed = true;
+            Window?.Close();
+        }
+        else if (answer == MessageBoxResult.Custom2)
+        {
+            _retryFailedClipsOnly = true;
+            Dispatcher.UIThread.Post(() => TranscribeCommand.Execute(null));
+        }
+    }
+
+    /// <summary>
+    /// A cancelled audio clip run: the clips finished before the cancel are offered instead of
+    /// being dropped with the rest (#15497). Returns true when the dialog was closed with them.
+    /// </summary>
+    private async Task<bool> OfferTranscribedAudioClipsAfterCancel()
+    {
+        if (_audioClips == null)
+        {
+            return false;
+        }
+
+        var transcribed = CountTranscribedAudioClips();
+        if (transcribed == 0)
+        {
+            return false;
+        }
+
+        var answer = await MessageBox.Show(
+            Window!,
+            Se.Language.Video.AudioToText.Title,
+            string.Format(Se.Language.Video.AudioToText.LinesTranscribedXOfYCancelled, transcribed, ResultAudioClips.Count),
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+
+        if (answer != MessageBoxResult.Yes)
+        {
+            return false;
+        }
+
+        OkPressed = true;
+        Window?.Close();
+        return true;
     }
 
     public static string GetSubtitleFileName(string videoFileName, string? languageCode, string? outputFolder = null)
@@ -2546,7 +2668,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         {
             Start = (decimal)p.StartTime.TotalSeconds,
             End = (decimal)p.EndTime.TotalSeconds,
-            Text = p.Text
+            Text = engine is CrispAsrIndexEcho ? CrispAsrIndexEcho.GetTranslation(p.Text) : p.Text
         }).ToList();
 
         if (!string.IsNullOrEmpty(srtFileName))
@@ -2753,6 +2875,7 @@ public partial class SpeechToTextViewModel : ObservableObject
             // batch must stop the whole batch, not skip to the next item.
             IsTranscribeEnabled = true;
             HideProgressBar();
+            await OfferTranscribedAudioClipsAfterCancel();
         }
         else if (IsBatchMode)
         {
@@ -2981,6 +3104,44 @@ public partial class SpeechToTextViewModel : ObservableObject
             SpeakerDiarizationModel.DisplayName,
             Se.Language.Video.AudioToText.DetectSpeakers,
             "a speaker diarization model");
+    }
+
+    /// <summary>
+    /// Makes sure the model for the selected VAD is on disk when this run is going to use it.
+    /// Without it crispasr downloads its own copy into ~/.cache mid-transcription.
+    /// </summary>
+    private async Task<bool> EnsureVadModelDownloadedAsync(ISpeechToTextEngine engine)
+    {
+        if (engine is not ICrispAsrEngine)
+        {
+            return true;
+        }
+
+        // The advanced "VAD" button names the model at its download path before it is there.
+        var vadOption = CrispAsrVadModel.FindMissingModelInArguments(engine.CommandLineParameter, engine);
+        if (vadOption == null)
+        {
+            if (!ShouldForceCrispAsrVad(engine, engine.CommandLineParameter, vadSuppressed: false, SelectedVadOption.Choice))
+            {
+                return true;
+            }
+
+            vadOption = CrispAsrVadModel.GetEffective(SelectedVadOption.Choice, engine);
+        }
+
+        if (!vadOption.NeedsDownload)
+        {
+            return true;
+        }
+
+        return await SpeechIsolationModelDownload.EnsureModelDownloadedAsync(
+            Window!,
+            _windowService,
+            engine,
+            vadOption.ToWhisperModel(),
+            vadOption.DisplayName,
+            Se.Language.Video.AudioToText.Vad,
+            "a voice activity detection model");
     }
 
     private Task<bool> EnsureSpeechIsolationModelDownloadedAsync(ISpeechToTextEngine engine)
@@ -3270,11 +3431,38 @@ public partial class SpeechToTextViewModel : ObservableObject
         }
     }
 
-    private static bool IsModelEnglishOnly(WhisperModel model)
+    /// <summary>
+    /// Crisp ASR Parakeet models trained on English only. They ignore any other language and
+    /// still output English - Phonon-2 with a warning in the log, the NVIDIA ones silently.
+    /// </summary>
+    private static readonly string[] EnglishOnlyParakeetPrefixes =
+    {
+        "phonon2-",
+        "parakeet-tdt-0.6b-v2",
+        "parakeet-tdt-1.1b",
+        "parakeet-rnnt-",
+        "parakeet-tdt_ctc-",
+    };
+
+    /// <summary>
+    /// Whether to ask before running an English-only model with <paramref name="languageCode"/>.
+    /// Auto detect is left alone: the engines simply transcribe English then (crispasr skips
+    /// language detection for an English-only model), so nothing is lost.
+    /// </summary>
+    internal static bool ShouldWarnEnglishOnlyModel(WhisperModel model, string languageCode)
+    {
+        return languageCode != "en" && languageCode != "auto" && IsModelEnglishOnly(model);
+    }
+
+    /// <summary>
+    /// Models that only transcribe English.
+    /// </summary>
+    internal static bool IsModelEnglishOnly(WhisperModel model)
     {
         return model.Name.EndsWith(".en", StringComparison.InvariantCulture) ||
                model.Name == "distil-large-v2" ||
-               model.Name == "distil-large-v3";
+               model.Name == "distil-large-v3" ||
+               EnglishOnlyParakeetPrefixes.Any(p => model.Name.StartsWith(p, StringComparison.Ordinal));
     }
 
     [RelayCommand]
@@ -3668,6 +3856,7 @@ public partial class SpeechToTextViewModel : ObservableObject
             viewModal =>
             {
                 viewModal.Engines = Engines.ToList();
+                viewModal.VadChoice = CrispAsrVadModel.GetEffective(SelectedVadOption.Choice, GetEffectiveSelectedEngine()).Choice;
                 viewModal.EngineClickedCommand.Execute(SelectedEngine);
             });
 
@@ -3857,6 +4046,8 @@ public partial class SpeechToTextViewModel : ObservableObject
         return vm.OkPressed;
     }
 
+    partial void OnIsTranscribeEnabledChanged(bool value) => _sleepInhibitor.SetActive(!value);
+
     [RelayCommand]
     private async Task Transcribe()
     {
@@ -4035,6 +4226,11 @@ public partial class SpeechToTextViewModel : ObservableObject
                 RefreshEngineCombo?.Invoke();
             }
 
+            if (!await EnsureIndexEchoCrispAsrVersionAsync(engine))
+            {
+                return;
+            }
+
             // Engines that download their own models (WhisperX) are never routed through SE's
             // downloader: it would fill a folder the engine does not read and re-prompt on
             // every run. Their IsModelInstalled only drives the model dot.
@@ -4131,7 +4327,12 @@ public partial class SpeechToTextViewModel : ObservableObject
                 return;
             }
 
-            if (language.Code != "en" && IsModelEnglishOnly(model.Model))
+            if (!await EnsureVadModelDownloadedAsync(engine))
+            {
+                return;
+            }
+
+            if (ShouldWarnEnglishOnlyModel(model.Model, language.Code))
             {
                 var answer = await MessageBox.Show(
                     Window!,
@@ -4169,16 +4370,37 @@ public partial class SpeechToTextViewModel : ObservableObject
             // do not touch BatchItems here - it holds the user's queued batch list
             _jobItems = new List<SpeechToTextJobItem> { new SpeechToTextJobItem(_videoFileName, string.Empty, mediaInfo) };
         }
+        else if (_retryFailedClipsOnly && _audioClips != null)
+        {
+            _retryFailedClipsOnly = false;
+            _jobItems = BatchItems.Where(p => p.Status != Se.Language.General.Converted).ToList();
+            ResetBatchStatuses(_jobItems);
+        }
         else
         {
             _jobItems = BatchItems;
             ResetBatchStatuses(_jobItems);
         }
 
+        // A clip that is run again must not keep the text of an earlier run - it would be
+        // applied to its line even when this run fails on it.
+        if (_audioClips != null)
+        {
+            foreach (var jobItem in _jobItems)
+            {
+                var clip = ResultAudioClips.FirstOrDefault(p => p.AudioFileName == jobItem.InputVideoFileName);
+                if (clip != null)
+                {
+                    clip.Transcription = new Subtitle();
+                }
+            }
+        }
+
         _batchIndex = 0;
 
         if (_jobItems.Count == 0)
         {
+            IsTranscribeEnabled = true;
             return;
         }
 
@@ -4236,6 +4458,10 @@ public partial class SpeechToTextViewModel : ObservableObject
         }
 
         IsTranscribeEnabled = true;
+        if (_abort)
+        {
+            Dispatcher.UIThread.Post(async () => await OfferTranscribedAudioClipsAfterCancel());
+        }
     }
 
     [RelayCommand]
@@ -4619,6 +4845,12 @@ public partial class SpeechToTextViewModel : ObservableObject
             var langPart = crispAsrEngine.IncludeLanguage || langCode == "auto"
                 ? $"-l {langCode} "
                 : string.Empty;
+            if (crispAsrEngine is CrispAsrIndexEcho)
+            {
+                // A speech translation model: the language list is the target, the source is Chinese.
+                langPart = $"--target-lang {langCode} ";
+            }
+
             var alignerPart = string.Empty;
             var selectedAligner = SelectedForcedAligner ?? ForcedAlignerOption.BuiltIn();
             if (!selectedAligner.IsBuiltIn)
@@ -4647,17 +4879,15 @@ public partial class SpeechToTextViewModel : ObservableObject
             }
 
             var vadPart = string.Empty;
-            if (ShouldForceCrispAsrVad(crispAsrEngine, crispArgs, _crispAsrVadSuppressed))
+            if (ShouldForceCrispAsrVad(crispAsrEngine, crispArgs, _crispAsrVadSuppressed, SelectedVadOption.Choice))
             {
-                var crispFolder = crispAsrEngine.GetAndCreateWhisperFolder();
-                var vadFiles = Directory.Exists(crispFolder)
-                    ? Directory.GetFiles(crispFolder, "ggml-silero-v*.bin", SearchOption.TopDirectoryOnly)
-                    : Array.Empty<string>();
-                var vadPath = vadFiles.OrderByDescending(p => p).FirstOrDefault()
-                              ?? Path.Combine(crispFolder, "ggml-silero-vad.bin");
-                if (File.Exists(vadPath))
+                var vadOption = CrispAsrVadModel.GetEffective(SelectedVadOption.Choice, crispAsrEngine);
+                // A model that is not on disk falls back to Silero - Cohere and Mega must not lose VAD.
+                var vadPath = CrispAsrVadModel.GetModelPath(vadOption, crispAsrEngine)
+                              ?? CrispAsrVadModel.GetModelPath(CrispAsrVadModel.Get(CrispAsrVadModel.Silero), crispAsrEngine);
+                if (vadPath != null)
                 {
-                    vadPart = $" --vad --vad-model \"{vadPath}\"";
+                    vadPart = " " + CrispAsrVadModel.BuildArguments(vadPath);
                 }
             }
 
@@ -5208,19 +5438,10 @@ public partial class SpeechToTextViewModel : ObservableObject
                     _endSeconds = whisperXEndSeconds;
                 }
             }
-            else if (line.StartsWith("whisper_full: progress =", StringComparison.OrdinalIgnoreCase))
+            else if (TryParseWhisperCppProgress(line, out var whisperCppPct))
             {
-                var arr = line.Split('=');
-                if (arr.Length == 2)
-                {
-                    var pctString = arr[1].Trim().TrimEnd('%').TrimEnd();
-                    if (double.TryParse(pctString, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture,
-                            out var pct))
-                    {
-                        _endSeconds = _videoInfo.TotalSeconds * pct / 100.0;
-                        _showProgressPct = pct;
-                    }
-                }
+                _endSeconds = _videoInfo.TotalSeconds * whisperCppPct / 100.0;
+                _showProgressPct = whisperCppPct;
             }
             else if (line.StartsWith("crispasr: progress =", StringComparison.OrdinalIgnoreCase))
             {
@@ -5283,6 +5504,19 @@ public partial class SpeechToTextViewModel : ObservableObject
         }
 
         _resultList.Add(rt);
+    }
+
+    /// <summary>
+    /// Reads the percentage from a whisper.cpp "--print-progress" line. Older builds print
+    /// "whisper_full: progress = 25%", current whisper-cli prints
+    /// "whisper_print_progress_callback: progress =  25%" (#15836).
+    /// </summary>
+    internal static bool TryParseWhisperCppProgress(string line, out double pct)
+    {
+        pct = 0;
+        var match = WhisperCppProgressRegex.Match(line);
+        return match.Success &&
+               double.TryParse(match.Groups[1].Value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out pct);
     }
 
     /// <summary>
@@ -5726,10 +5960,16 @@ public partial class SpeechToTextViewModel : ObservableObject
             return;
         }
 
-        var crispVariant = DownloadHashManager.GetCrispAsrVariant(key)
+        await DownloadCrispAsrUpdateAsync(engine, key);
+    }
+
+    /// <summary>Re-downloads CrispASR, keeping the installed variant (CUDA, Vulkan, ...) when known.</summary>
+    private async Task<bool> DownloadCrispAsrUpdateAsync(ISpeechToTextEngine engine, string? hashKey)
+    {
+        var crispVariant = (hashKey == null ? null : DownloadHashManager.GetCrispAsrVariant(hashKey))
                            ?? (OperatingSystem.IsWindows() ? "vulkan" : string.Empty);
 
-        await _windowService.ShowDialogAsync<DownloadSpeechToTextEngineWindow, DownloadSpeechToTextEngineViewModel>(
+        var vm = await _windowService.ShowDialogAsync<DownloadSpeechToTextEngineWindow, DownloadSpeechToTextEngineViewModel>(
             Window!, viewModel =>
             {
                 viewModel.Engine = engine;
@@ -5738,6 +5978,46 @@ public partial class SpeechToTextViewModel : ObservableObject
             });
 
         RefreshEngineCombo?.Invoke();
+        return vm.OkPressed;
+    }
+
+    /// <summary>
+    /// Index-Echo only exists in CrispASR v0.8.41+; an older binary rejects the backend after the
+    /// user has sat through a 2.7 GB model download. Offers the update before that.
+    /// </summary>
+    private async Task<bool> EnsureIndexEchoCrispAsrVersionAsync(ISpeechToTextEngine engine)
+    {
+        if (engine is not CrispAsrIndexEcho)
+        {
+            return true;
+        }
+
+        var installedVersion = CrispAsrVersion.TryGet(engine.GetExecutable());
+        if (CrispAsrVersion.IsAtLeast(installedVersion, CrispAsrIndexEcho.MinimumCrispAsrVersion))
+        {
+            return true;
+        }
+
+        var answer = await MessageBox.Show(
+            Window!,
+            string.Format(Se.Language.Video.AudioToText.UpdateXTitle, engine.Name),
+            string.Format(Se.Language.Video.AudioToText.XNeedsNewerCrispAsr, engine.Name, CrispAsrIndexEcho.MinimumCrispAsrVersion, installedVersion),
+            MessageBoxButtons.YesNoCancel,
+            MessageBoxIcon.Question);
+
+        if (answer != MessageBoxResult.Yes)
+        {
+            return false;
+        }
+
+        var folder = engine.GetAndCreateWhisperFolder();
+        var lookup = TryReadSidecarHash(folder) ?? TryHashInstalledExecutable(engine, folder);
+        if (!await DownloadCrispAsrUpdateAsync(engine, lookup?.key))
+        {
+            return false;
+        }
+
+        return CrispAsrVersion.IsAtLeast(CrispAsrVersion.TryGet(engine.GetExecutable()), CrispAsrIndexEcho.MinimumCrispAsrVersion);
     }
 
     private async Task CheckQwen3AsrCppForUpdateAsync()
@@ -6121,6 +6401,7 @@ public partial class SpeechToTextViewModel : ObservableObject
         // an orphan burning CPU in the background.
         KillRunningProcesses();
         _openAiCts?.Cancel();
+        _sleepInhibitor.Dispose();
 
         UiUtil.SaveWindowPosition(Window);
         Task.Run(() => { DeleteTempFiles(); });

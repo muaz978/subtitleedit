@@ -443,6 +443,7 @@ public class LanguageGeneral
     public string Percent { get; set; }
     public string PickLayer { get; set; }
     public string PickOllamaModel { get; set; }
+    public string PickModel { get; set; }
     public string LlamaCppUseRemoteServer { get; set; }
     public string LlamaCppEngineSettings { get; set; }
     public string LlamaCppEngineSettingsSubtitle { get; set; }
@@ -519,6 +520,7 @@ public class LanguageGeneral
     public string Reset { get; set; }
     public string ResizePanels { get; set; }
     public string Resolution { get; set; }
+    public string Retry { get; set; }
     public string ReverseRightToLeftStartEnd { get; set; }
     public string Right { get; set; }
     public string RightToLeft { get; set; }
@@ -593,6 +595,8 @@ public class LanguageGeneral
     public string ShowStartColumn { get; set; }
     public string ShowHideColumn { get; set; }
     public string ShowHistory { get; set; }
+    public string ClearHistory { get; set; }
+    public string RemoveFromHistory { get; set; }
     public string ShowLayerColumn { get; set; }
     public string ShowPreview { get; set; }
     public string ShowShotChangesList { get; set; }
@@ -654,12 +658,14 @@ public class LanguageGeneral
     public string StyleExaggeration { get; set; }
     public string Styles { get; set; }
     public string SubtitleFile { get; set; }
+    public string SubtitleFileChangedOutsideX { get; set; }
     public string SubtitleFileName { get; set; }
     public string SubtitleFileSaved { get; set; }
     public string SubtitleFileSavedToX { get; set; }
     public string SubtitleFiles { get; set; }
     public string SubtitleFormats { get; set; }
     public string SubtitleLoadedX { get; set; }
+    public string SubtitleReloadedChangedOutsideX { get; set; }
     public string Suffix { get; set; }
     public string Suggestions { get; set; }
     public string Sync { get; set; }
@@ -743,6 +749,14 @@ public class LanguageGeneral
     public string VideoCustom3ForwardX { get; set; }
     public string VideoCustom4BackX { get; set; }
     public string VideoCustom4ForwardX { get; set; }
+    public string VideoCustom1BackAndPauseX { get; set; }
+    public string VideoCustom1ForwardAndPauseX { get; set; }
+    public string VideoCustom2BackAndPauseX { get; set; }
+    public string VideoCustom2ForwardAndPauseX { get; set; }
+    public string VideoCustom3BackAndPauseX { get; set; }
+    public string VideoCustom3ForwardAndPauseX { get; set; }
+    public string VideoCustom4BackAndPauseX { get; set; }
+    public string VideoCustom4ForwardAndPauseX { get; set; }
     public string VideoExtension { get; set; }
     public string VideoFile { get; set; }
     public string VideoFileGenerated { get; set; }
@@ -1290,6 +1304,7 @@ public class LanguageGeneral
         Percent = "Percent";
         PickLayer = "Set layer";
         PickOllamaModel = "Pick Ollama model";
+        PickModel = "Pick model";
         LlamaCppUseRemoteServer = "Use external server (URL)";
         LlamaCppEngineSettings = "llama.cpp engine settings";
         LlamaCppEngineSettingsSubtitle = "Local llama.cpp server build";
@@ -1366,6 +1381,7 @@ public class LanguageGeneral
         Reset = "Reset";
         ResizePanels = "Resize panels";
         Resolution = "Resolution";
+        Retry = "Retry";
         ReverseRightToLeftStartEnd = "Reverse RTL start/end";
         Right = "Right";
         RightToLeft = "Right to left";
@@ -1440,6 +1456,8 @@ public class LanguageGeneral
         ShowStartColumn = "Show \"Start\" column";
         ShowHideColumn = "Show \"Hide\" column";
         ShowHistory = "Show history";
+        ClearHistory = "Clear history";
+        RemoveFromHistory = "Remove from history";
         ShowLayerColumn = "Show \"Layer\" column";
         ShowPreview = "Show preview";
         ShowShotChangesList = "Show shot changes list";
@@ -1493,12 +1511,14 @@ public class LanguageGeneral
         StyleExaggeration = "Style exaggeration";
         Styles = "Styles";
         SubtitleFile = "Subtitle file";
+        SubtitleFileChangedOutsideX = "The file \"{0}\" was changed outside Subtitle Edit." + Environment.NewLine + Environment.NewLine + "Reload it and lose your changes?";
         SubtitleFileName = "Subtitle file name";
         SubtitleFileSaved = "Subtitle file saved";
         SubtitleFileSavedToX = "Subtitle file saved to {0}";
         SubtitleFiles = "Subtitle files";
         SubtitleFormats = "Subtitle formats";
         SubtitleLoadedX = "Subtitle loaded: {0}";
+        SubtitleReloadedChangedOutsideX = "Subtitle reloaded (changed outside Subtitle Edit): {0}";
         Suffix = "Suffix";
         Suggestions = "Suggestions";
         Sync = "Sync";
@@ -1582,6 +1602,14 @@ public class LanguageGeneral
         VideoCustom3ForwardX = "Video, custom milliseconds ({0:#,###,##0}) forward, 3";
         VideoCustom4BackX = "Video, custom milliseconds ({0:#,###,##0}) back, 4";
         VideoCustom4ForwardX = "Video, custom milliseconds ({0:#,###,##0}) forward, 4";
+        VideoCustom1BackAndPauseX = "Video, custom milliseconds ({0:#,###,##0}) back and pause, 1";
+        VideoCustom1ForwardAndPauseX = "Video, custom milliseconds ({0:#,###,##0}) forward and pause, 1";
+        VideoCustom2BackAndPauseX = "Video, custom milliseconds ({0:#,###,##0}) back and pause, 2";
+        VideoCustom2ForwardAndPauseX = "Video, custom milliseconds ({0:#,###,##0}) forward and pause, 2";
+        VideoCustom3BackAndPauseX = "Video, custom milliseconds ({0:#,###,##0}) back and pause, 3";
+        VideoCustom3ForwardAndPauseX = "Video, custom milliseconds ({0:#,###,##0}) forward and pause, 3";
+        VideoCustom4BackAndPauseX = "Video, custom milliseconds ({0:#,###,##0}) back and pause, 4";
+        VideoCustom4ForwardAndPauseX = "Video, custom milliseconds ({0:#,###,##0}) forward and pause, 4";
         VideoExtension = "Video file extension";
         VideoFile = "Video file";
         VideoFileGenerated = "Video file generated";

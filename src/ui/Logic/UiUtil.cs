@@ -1036,6 +1036,39 @@ public static class UiUtil
         return comboBox;
     }
 
+    /// <summary>
+    /// Runs <paramref name="commit"/> when the user is done typing in an editable combo box: on
+    /// Enter, or when keyboard focus leaves the combo box. Not on every keystroke - typing "15"
+    /// would otherwise apply "1" first. Nothing is committed while the drop-down is open; picking
+    /// an item there goes through the normal selection. <paramref name="handleEnter"/> marks Enter
+    /// as handled, so it does not also reach window shortcuts; leave it off in a dialog where Enter
+    /// should still click the default button after the commit.
+    /// </summary>
+    public static void OnEditableComboBoxCommit(ComboBox comboBox, Action commit, bool handleEnter)
+    {
+        comboBox.AddHandler(InputElement.KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None && !comboBox.IsDropDownOpen)
+            {
+                commit();
+                if (handleEnter)
+                {
+                    e.Handled = true;
+                }
+            }
+        }, RoutingStrategies.Bubble, handledEventsToo: true);
+
+        comboBox.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == InputElement.IsKeyboardFocusWithinProperty &&
+                e.NewValue is false &&
+                !comboBox.IsDropDownOpen)
+            {
+                commit();
+            }
+        };
+    }
+
     public static TextBox MakeTextBox(double width, object viewModel, string propertyTextPath)
     {
         return MakeTextBox(width, viewModel, propertyTextPath, null);
@@ -1079,10 +1112,15 @@ public static class UiUtil
     /// in screenshots or screen shares, with an eye button to reveal it while editing.
     /// </summary>
     public static StackPanel MakeApiKeyTextBox(double width, object viewModel, string propertyTextPath,
-        string? propertyIsVisiblePath = null)
+        string? propertyIsVisiblePath = null, string? placeholderText = null)
     {
         var textBox = MakeTextBox(width, viewModel, propertyTextPath);
         textBox.PasswordChar = '●';
+        if (placeholderText != null)
+        {
+            textBox.PlaceholderText = placeholderText;
+        }
+
         AutomationProperties.SetName(textBox, Se.Language.General.ApiKey);
 
         var buttonReveal = MakeButton(null, IconNames.Eye);
@@ -3534,6 +3572,19 @@ public static class UiUtil
             }
         }
 
+        // A dialog is shown centered on its owner, and resizing it re-centers it, so the size
+        // goes first and the window stops being centered before it is moved. (#15393)
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+
+        // A non-resizable window gets its size from its content (SizeToContent), so a saved
+        // size can only be stale - applying one from an older layout clips the window.
+        if (!existing.IsFullScreen && !existing.IsMaximized &&
+            existing.Width > 0 && existing.Height > 0 && window.CanResize)
+        {
+            window.Width = existing.Width;
+            window.Height = existing.Height;
+        }
+
         window.Position = desired;
 
         if (existing.IsFullScreen)
@@ -3546,21 +3597,13 @@ public static class UiUtil
         }
         else
         {
-            // A non-resizable window gets its size from its content (SizeToContent), so a saved
-            // size can only be stale - applying one from an older layout clips the window.
-            if (existing.Width > 0 && existing.Height > 0 && window.CanResize)
-            {
-                window.Width = existing.Width;
-                window.Height = existing.Height;
-            }
-
             window.WindowState = WindowState.Normal;
         }
     }
 
     public static void ShowHelp(string helpName, string section = "")
     {
-        var helpUrl = $"http://subtitleedit.github.io/subtitleedit/{helpName}.html";
+        var helpUrl = $"https://subtitleedit.github.io/subtitleedit/{helpName}.html";
         if (!string.IsNullOrEmpty(section))
         {
             helpUrl += $"#{section}";
@@ -3571,7 +3614,7 @@ public static class UiUtil
 
     public static void ShowHelp()
     {
-        OpenUrl("http://subtitleedit.github.io/subtitleedit");
+        OpenUrl("https://subtitleedit.github.io/subtitleedit");
     }
 
     public static void OpenUrl(string url)

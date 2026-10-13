@@ -135,13 +135,21 @@ public class SettingsPage : UserControl
 
         UpdateVisibleSections(string.Empty);
 
+        // Search updates immediately, without the category navigation fade.
         _searchBox.TextChanged += (_, e) => UpdateVisibleSections(_searchBox.Text ?? string.Empty);
         ActualThemeVariantChanged += (_, _) => Dispatcher.UIThread.Post(RefreshSections);
         _vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(SettingsViewModel.SelectedSection))
             {
-                RefreshSections();
+                if (_vm.DeferSectionRefresh)
+                {
+                    UpdateMenuHighlight();
+                }
+                else
+                {
+                    RefreshSections();
+                }
             }
         };
     }
@@ -396,8 +404,11 @@ public class SettingsPage : UserControl
                         [!TextBlock.TextProperty] = new Binding(nameof(_vm.MinGapFramesAsMs)) { Source = _vm },
                     }.WithBindIsVisible(_vm, nameof(_vm.UseFrameMode)),
                 }
-            }),
-            new SettingsItem(Se.Language.Options.Settings.MaxLines, () => MakeNumericUpDownInt(nameof(_vm.MaxLines), _vm.RuleValueChanged)),
+            })
+            {
+                EnglishLabel = EnglishLabelLookup.English.Options.Settings.MinGapMs + " " + EnglishLabelLookup.English.Options.Settings.MinGapFrames,
+            },
+            new SettingsItem(Se.Language.Options.Settings.MaxLines,() => MakeNumericUpDownInt(nameof(_vm.MaxLines), _vm.RuleValueChanged)),
             new SettingsItem(Se.Language.Options.Settings.UnbreakSubtitlesShortThan, () => MakeNumericUpDownInt(nameof(_vm.UnbreakLinesShorterThan), _vm.RuleValueChanged)),
 
             new SettingsItem(Se.Language.Options.Settings.DialogStyle, () => MakeComboBoxDialogStyle()),
@@ -420,13 +431,19 @@ public class SettingsPage : UserControl
             MakeNumericSettingInt(Se.Language.Options.Settings.NewEmptyDefaultMs, nameof(_vm.NewEmptyDefaultMs)),
             MakeNumericSettingInt(Se.Language.Options.Settings.TimeCodeUpDownStepMs, nameof(_vm.TimeCodeUpDownStepMs), 1, 5000),
             MakeNumericSettingInt(Se.Language.Options.Settings.MoveSelectedLinesStepMs, nameof(_vm.MoveSelectedLinesStepMs), 1, 60000),
+            MakeNumericSettingInt(Se.Language.Options.Settings.MoveStartEndStepMs, nameof(_vm.MoveStartEndStepMs), 1, 5000),
             MakeCheckboxSetting(Se.Language.Options.Settings.MoveLinesShortenNeighbor, nameof(_vm.MoveLinesShortenNeighbor)),
             MakeCheckboxSetting(Se.Language.Options.Settings.PromptBeforeDelete, nameof(_vm.PromptBeforeDelete)),
-            MakeCheckboxSetting(Se.Language.Options.Settings.UseFrameMode, nameof(_vm.UseFrameMode)),
+            new SettingsItem(Se.Language.Options.Settings.TimeCodeMode, () => MakeComboBoxTimeCodeMode()),
+            MakeCheckboxSetting(Se.Language.Options.Settings.FrameModeSnapToVideoFrames, nameof(_vm.FrameModeSnapToVideoFrames),
+                new Binding(nameof(_vm.IsFramesTimeCodeMode)) { Source = _vm }),
             MakeCheckboxSetting(Se.Language.Options.Settings.TextBoxLimitNewLines, nameof(_vm.TextBoxLimitNewLines)),
             MakeCheckboxSetting(Se.Language.General.LockTimeCodes, nameof(_vm.LockTimeCodes)),
             MakeCheckboxSetting(Se.Language.Options.Settings.RememberPositionAndSize, nameof(_vm.RememberPositionAndSize)),
-            MakeCheckboxSetting(Se.Language.Options.Settings.OpenLastFileOnStart, nameof(_vm.OpenLastFileOnStart)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.TitleBarFullFileName, nameof(_vm.TitleBarFullFileName)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.ShowRecentFiles, nameof(_vm.ShowRecentFiles)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.OpenLastFileOnStart, nameof(_vm.OpenLastFileOnStart),
+                new Binding(nameof(_vm.ShowRecentFiles)) { Source = _vm }),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoConvertToUtf8, nameof(_vm.AutoConvertToUtf8)),
             MakeCheckboxSetting(Se.Language.Options.Settings.ForceCrLfOnSave, nameof(_vm.ForceCrLfOnSave)),
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowFormatLimitWarning, nameof(_vm.ShowFormatLimitWarning)),
@@ -609,6 +626,9 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoOpenVideoFile, nameof(_vm.AutoOpenVideoFile)),
             MakeCheckboxSetting(Se.Language.Options.Settings.ShowSecondarySubtitleDialog, nameof(_vm.ShowSecondarySubtitleDialog)),
             MakeCheckboxSetting(Se.Language.Options.Settings.RememberSecondarySubtitleFile, nameof(_vm.RememberSecondarySubtitleFile)),
+            new SettingsItem(Se.Language.Options.Settings.Deinterlace,
+                () => UiUtil.MakeComboBox(_vm.MpvDeinterlaceItems, _vm, nameof(_vm.MpvSelectedDeinterlace))),
+            new SettingsItem(Se.Language.Options.Settings.SubtitlePreviewProperties, () => MakeMpvPreviewSettings(_vm)),
             new SettingsItem(!_vm.IsLibMpvDownloadVisible, Se.Language.Options.Settings.DownloadMpv, () => new StackPanel
             {
                 Children =
@@ -641,7 +661,6 @@ public class SettingsPage : UserControl
                     }
                 },
             }),
-            new SettingsItem(Se.Language.Options.Settings.SubtitlePreviewProperties, () => MakeMpvPreviewSettings(_vm)),
             new SettingsItem(!_vm.IsLibVlcDownloadVisible, Se.Language.Options.Settings.DownloadVlc, () => new StackPanel
             {
                 Children =
@@ -771,6 +790,7 @@ public class SettingsPage : UserControl
                 () => UiUtil.MakeComboBox(_vm.WaveformMouseWheelVideoPositionSteps, _vm, nameof(_vm.SelectedWaveformMouseWheelVideoPositionStep))),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformCenterVideoPositionAlsoWhenPaused, nameof(_vm.WaveformCenterVideoPositionAlsoWhenPaused)),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformSelectCurrentSubtitleWhilePaused, nameof(_vm.WaveformSelectCurrentSubtitleWhilePaused)),
+            MakeCheckboxSetting(Se.Language.Options.Settings.WaveformRememberZoom, nameof(_vm.WaveformRememberZoom)),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformDrawGridLines, nameof(_vm.WaveformDrawGridLines)),
             MakeCheckboxSetting(Se.Language.Options.Settings.WaveformUseSkiaRenderer, nameof(_vm.WaveformUseSkiaRenderer)),
             // SE 4 parity: the per-paragraph footer in the waveform ("#43  01:10" and the
@@ -858,6 +878,7 @@ public class SettingsPage : UserControl
             MakeCheckboxSetting(Se.Language.Options.Settings.MergeKeepEndTime, nameof(_vm.MergeKeepEndTime)),
             MakeCheckboxSetting(Se.Language.Options.Settings.MergeKeepEndTimeOnlyAssa, nameof(_vm.MergeKeepEndTimeOnlyAssa),
                 new Binding(nameof(_vm.MergeKeepEndTime)) { Source = _vm }),
+            MakeCheckboxSetting(Se.Language.Options.Settings.MergeAutoBreak, nameof(_vm.MergeAutoBreak)),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoBreakLineEndingEarly, nameof(_vm.AutoBreakLineEndingEarly)),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoBreakCommaBreakEarly, nameof(_vm.AutoBreakCommaBreakEarly)),
             MakeCheckboxSetting(Se.Language.Options.Settings.AutoBreakDashEarly, nameof(_vm.AutoBreakDashEarly)),
@@ -952,6 +973,13 @@ public class SettingsPage : UserControl
                 120,
                 _vm,
                 nameof(_vm.FontScale))),
+            new SettingsItem(Se.Language.Options.Settings.TextSelectionOpacity, () => UiUtil.MakeNumericUpDownInt(
+                UiTheme.MinTextSelectionOpacity,
+                100,
+                100,
+                120,
+                _vm,
+                nameof(_vm.TextSelectionOpacity))),
             new SettingsItem(Se.Language.Options.Settings.DarkThemeForegroundColor, () => new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -1428,6 +1456,20 @@ public class SettingsPage : UserControl
         };
         comboBoxCpsLineLengthStyle.SelectionChanged += (s, e) => _vm.RuleValueChanged();
         return comboBoxCpsLineLengthStyle;
+    }
+
+    private ComboBox MakeComboBoxTimeCodeMode()
+    {
+        return new ComboBox
+        {
+            Width = 250,
+            DataContext = _vm,
+            [!ItemsControl.ItemsSourceProperty] = new Binding(nameof(_vm.TimeCodeModes)),
+            [!SelectingItemsControl.SelectedItemProperty] =
+                new Binding(nameof(_vm.SelectedTimeCodeMode)) { Mode = BindingMode.TwoWay },
+            ItemTemplate = new FuncDataTemplate<TimeCodeModeDisplay>((f, _) =>
+                new TextBlock { Text = f?.Name }, true)
+        };
     }
 
     private ComboBox MakeComboBoxDialogStyle()

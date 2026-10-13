@@ -86,8 +86,58 @@ internal class SubtitleConverter
 
     public async Task<ConversionResult> ConvertAsync(ConversionOptions options)
     {
+        var targets = SplitTranslateTargets(options.TranslateTo);
+        if (targets.Count <= 1)
+        {
+            return await ConvertSingleTargetAsync(options);
+        }
+
+        // "--translate-to da,sv,de": one full run per language, each output named after its
+        // language ("movie.da.srt", "movie.sv.srt", ...).
+        var merged = new ConversionResult();
+        if (!string.IsNullOrEmpty(options.OutputFilename) || options.NoLanguageSuffix)
+        {
+            merged.Errors.Add("--output-filename and --no-language-suffix cannot be used with several --translate-to languages - the outputs would get the same name.");
+            return merged;
+        }
+
+        // Enumerate the inputs once: with a wildcard ("*.srt") and the output next to the input,
+        // a later language would otherwise also pick up the earlier ones' outputs
+        // ("movie.de.srt" -> "movie.de.fr.srt").
+        var inputFiles = GetInputFiles(options);
+        foreach (var target in targets)
+        {
+            var result = await ConvertSingleTargetAsync(options with { TranslateTo = target }, new List<string>(inputFiles));
+            merged.TotalFiles += result.TotalFiles;
+            merged.SuccessfulFiles += result.SuccessfulFiles;
+            merged.FailedFiles += result.FailedFiles;
+            merged.Errors.AddRange(result.Errors.Select(p => $"[{target}] {p}"));
+            merged.Warnings.AddRange(result.Warnings.Select(p => $"[{target}] {p}"));
+            merged.Files.AddRange(result.Files);
+        }
+
+        return merged;
+    }
+
+    /// <summary>"da, sv,de" -> ["da", "sv", "de"], without duplicates.</summary>
+    internal static List<string> SplitTranslateTargets(string? translateTo)
+    {
+        if (string.IsNullOrWhiteSpace(translateTo))
+        {
+            return new List<string>();
+        }
+
+        return translateTo
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private async Task<ConversionResult> ConvertSingleTargetAsync(ConversionOptions options, List<string>? inputFiles = null)
+    {
         var result = new ConversionResult();
         _usedOutputFileNames.Clear();
+        _translateRunner = null;
 
         try
         {
@@ -100,7 +150,7 @@ internal class SubtitleConverter
             WarnIf3DIgnored(options, result);
 
             // Get input files
-            var inputFiles = GetInputFiles(options);
+            inputFiles ??= GetInputFiles(options);
             result.TotalFiles = inputFiles.Count;
 
             if (inputFiles.Count == 0)
@@ -1415,11 +1465,14 @@ internal record class ConversionOptions
     /// <summary>Endpoint of an already-running translate server; for llamacpp this skips the local llama-server auto-start.</summary>
     public string? TranslateUrl { get; init; }
 
-    /// <summary>Model: ollama/lmstudio model name, or llamacpp .gguf file name/path.</summary>
+    /// <summary>Model: ollama/lmstudio/openai-compatible model name, or llamacpp .gguf file name/path.</summary>
     public string? TranslateModel { get; init; }
 
+    /// <summary>API key for the engines in <see cref="AutoTranslateRunner.ApiKeyEngines"/> (openai-compatible, deepl).</summary>
+    public string? TranslateApiKey { get; init; }
+
     /// <summary>
-    /// Prompt override for the LLM translate engines (llamacpp/ollama/lmstudio): inline text
+    /// Prompt override for the LLM translate engines (llamacpp/ollama/lmstudio/openai-compatible): inline text
     /// (<c>\n</c> for a line break) or the path to a text file. See
     /// <see cref="AutoTranslateRunner.ReadPromptOption"/>.
     /// </summary>

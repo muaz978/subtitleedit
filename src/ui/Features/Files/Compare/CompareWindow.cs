@@ -37,6 +37,7 @@ public class CompareWindow : Window
     private readonly CompareViewModel _vm;
     private readonly CompareOverviewRuler _ruler = new();
     private ScrollViewer? _scrollViewer;
+    private (int Index, double Top)? _scrollAnchor;
 
     public CompareWindow(CompareViewModel vm)
     {
@@ -83,8 +84,24 @@ public class CompareWindow : Window
         // Tunnel, so Ctrl+Enter and Escape reach the edit commands before the line's text box takes them.
         AddHandler(KeyDownEvent, vm.KeyDown, RoutingStrategies.Tunnel);
 
-        vm.RowsRebuilt += (_, _) => _ruler.SetRows(vm.Rows);
+        vm.RowsRebuilt += (_, _) =>
+        {
+            _ruler.SetRows(vm.Rows);
+            _scrollAnchor = null; // a row index from before the rebuild may be another line now
+        };
         _ruler.ScrollRequested += (_, fraction) => ScrollToFraction(fraction);
+
+        // Activating the window gives focus back to the row that had it - when the list was
+        // wheel-scrolled away from that row, the list jumped to an estimate of where it is (#15843).
+        // That scroll comes after Activated, so the place from the last scroll is still the user's.
+        Activated += delegate
+        {
+            var anchor = _scrollAnchor;
+            if (anchor != null)
+            {
+                Dispatcher.UIThread.Post(() => vm.RestoreScrollAnchor(anchor), DispatcherPriority.Background);
+            }
+        };
 
         Closing += vm.WindowClosing;
 
@@ -125,10 +142,12 @@ public class CompareWindow : Window
             Child = tabs,
         };
 
-        var options = new StackPanel
+        // Wraps rather than clips when the window is too narrow for all the options.
+        var options = new WrapPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 16,
+            ItemSpacing = 16,
+            LineSpacing = 4,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(16, 0, 0, 0),
             Children =
@@ -136,6 +155,7 @@ public class CompareWindow : Window
                 MakeOption(vm, Se.Language.File.IgnoreWhitespace, Se.Language.File.IgnoreWhitespaceHint, nameof(vm.IgnoreWhiteSpace)),
                 MakeOption(vm, Se.Language.File.IgnoreFormatting, Se.Language.File.IgnoreFormattingHint, nameof(vm.IgnoreFormatting)),
                 MakeOption(vm, Se.Language.File.IgnoreNumbering, Se.Language.File.IgnoreNumberingHint, nameof(vm.IgnoreNumbering)),
+                MakeTimeToleranceOption(vm),
             },
         };
 
@@ -210,6 +230,25 @@ public class CompareWindow : Window
         return checkBox;
     }
 
+    private static Control MakeTimeToleranceOption(CompareViewModel vm)
+    {
+        var label = UiUtil.MakeLabel(Se.Language.File.IgnoreTimeDifferenceMs);
+        var numericUpDown = UiUtil.MakeNumericUpDownInt(0, 10_000, 0, 120, vm, nameof(vm.IgnoreTimeDifferenceMs));
+        numericUpDown.Increment = 10;
+        numericUpDown.ValueChanged += vm.CheckBoxChanged;
+        AutomationProperties.SetName(numericUpDown, Se.Language.File.IgnoreTimeDifferenceMs);
+
+        var panel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { label, numericUpDown },
+        };
+        AddHint(panel, Se.Language.File.IgnoreTimeDifferenceMsHint);
+        return panel;
+    }
+
     private Control MakeHeaders(CompareViewModel vm)
     {
         // Left: the current subtitle, editable while it is still the editor's own.
@@ -248,9 +287,16 @@ public class CompareWindow : Window
             [!ToolTip.TipProperty] = new Binding(nameof(vm.RightFileName)),
         };
         var pillRight = MakePill(IconNames.Lock, string.Empty, highlighted: false, fixedText: Se.Language.File.CompareReadOnly);
-        var buttonRightReload = UiUtil.MakeButton(string.Format(Se.Language.File.LoadXFromFile, System.IO.Path.GetFileName(vm.LeftFileName)), vm.ReloadRightFromFileCommand)
+        // A short label, the file name in the hint: the whole name made the button so wide that the
+        // "Reference" caption was pushed under the read-only pill (#15619).
+        var buttonRightReload = UiUtil.MakeButton(Se.Language.File.CompareLoadSavedFile, vm.ReloadRightFromFileCommand)
             .WithIconLeft(IconNames.Refresh)
             .WithBindIsVisible(nameof(vm.IsReloadFromFileVisible));
+        AddHint(buttonRightReload, vm.ReloadFromFileHint);
+        if (Se.Settings.Appearance.ShowHints)
+        {
+            buttonRightReload[!ToolTip.TipProperty] = new Binding(nameof(vm.ReloadFromFileHint));
+        }
         var buttonRightBrowse = UiUtil.MakeButtonBrowse(vm.PickRightSubtitleFileCommand, accessibleName: Se.Language.General.OpenSubtitleFileTitle);
 
         var right = MakeHeaderCard(
@@ -293,6 +339,7 @@ public class CompareWindow : Window
             },
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
+            ClipToBounds = true, // a card too narrow for icon + caption clips them instead of drawing under the pills
         };
         // Margins, not column spacing, so a hidden "*" leaves no gap.
         icon.Margin = new Thickness(0, 0, 6, 0);
@@ -481,8 +528,10 @@ public class CompareWindow : Window
     }
 
     /// <summary>
-    /// Sync points (#15394): right-click a current line and a reference line - in either order -
-    /// to make them a pair; the comparison is then lined up above and below it separately.
+    /// The row menu. First what the gutter arrow does, plus taking only the text or only the
+    /// timing (#15621) - a right-click (Ctrl+Click on macOS) on the arrow opens this menu too.
+    /// Then sync points (#15394): right-click a current line and a reference line - in either
+    /// order - to make them a pair; the comparison is then lined up above and below it separately.
     /// Acts on the selected row, which a right-click selects, so the menu key works too.
     /// </summary>
     private static MenuFlyout MakeRowContextFlyout(CompareViewModel vm)
@@ -510,6 +559,15 @@ public class CompareWindow : Window
             return item;
         }
 
+        string RowPath(string property) => $"{nameof(vm.SelectedRow)}.{property}";
+
+        var take = MakeItem(string.Empty, vm.TakeReferenceCommand, RowPath(nameof(CompareRow.CanTakeReference)), IconNames.ArrowLeft);
+        take.Bind(HeaderedSelectingItemsControl.HeaderProperty, new Binding(RowPath(nameof(CompareRow.TakeReferenceHint))));
+        var takeText = MakeItem(Se.Language.File.CompareTakeText, vm.TakeReferenceTextCommand, RowPath(nameof(CompareRow.CanTakeText)));
+        var takeTiming = MakeItem(Se.Language.File.CompareTakeTiming, vm.TakeReferenceTimingCommand, RowPath(nameof(CompareRow.CanTakeTiming)));
+        var takeSeparator = new Separator { [!IsVisibleProperty] = new Binding(RowPath(nameof(CompareRow.HasTakeActions))) { FallbackValue = false } };
+        takeSeparator.DataContext = vm;
+
         var pickCurrent = MakeItem(string.Empty, vm.PickSyncCurrentCommand, $"{nameof(vm.SelectedRow)}.{nameof(CompareRow.HasLeft)}", IconNames.LinkVariant);
         pickCurrent.Bind(HeaderedSelectingItemsControl.HeaderProperty, new Binding(nameof(vm.PickSyncCurrentHeader)));
         var pickReference = MakeItem(string.Empty, vm.PickSyncReferenceCommand, $"{nameof(vm.SelectedRow)}.{nameof(CompareRow.HasRight)}", IconNames.LinkVariant);
@@ -521,6 +579,10 @@ public class CompareWindow : Window
         {
             Items =
             {
+                take,
+                takeText,
+                takeTiming,
+                takeSeparator,
                 pickCurrent,
                 pickReference,
                 MakeItem(Se.Language.File.CompareSyncRemove, vm.RemoveSyncPointCommand, $"{nameof(vm.SelectedRow)}.{nameof(CompareRow.IsSyncPoint)}"),
@@ -643,7 +705,10 @@ public class CompareWindow : Window
         };
     }
 
-    /// <summary>"12   00:00:01,250 → 00:00:03,480   2.23s", with the cells that differ marked.</summary>
+    /// <summary>
+    /// "12   00:00:01,250 → 00:00:03,480   2.23s", with a differing number marked. Differing times
+    /// are not filled - the reference shows how far off they are instead (#15622).
+    /// </summary>
     private static Control MakeMeta(string side, string durationPath, bool showEdited)
     {
         var panel = new StackPanel
@@ -654,9 +719,9 @@ public class CompareWindow : Window
             Children =
             {
                 MakeMetaCell($"{side}.{nameof(CompareItem.NumberDisplay)}", $"{side}.{nameof(CompareItem.NumberBackgroundBrush)}", FontWeight.SemiBold, 22),
-                MakeMetaCell($"{side}.{nameof(CompareItem.StartTimeDisplay)}", $"{side}.{nameof(CompareItem.StartTimeBackgroundBrush)}"),
+                MakeMetaCell($"{side}.{nameof(CompareItem.StartTimeDisplay)}", null),
                 new TextBlock { Text = "→", Opacity = 0.45, FontSize = UiUtil.ScaledFontSize(11), VerticalAlignment = VerticalAlignment.Center },
-                MakeMetaCell($"{side}.{nameof(CompareItem.EndTimeDisplay)}", $"{side}.{nameof(CompareItem.EndTimeBackgroundBrush)}"),
+                MakeMetaCell($"{side}.{nameof(CompareItem.EndTimeDisplay)}", null),
                 new TextBlock
                 {
                     Opacity = 0.45,
@@ -667,6 +732,22 @@ public class CompareWindow : Window
                 },
             },
         };
+
+        if (!showEdited)
+        {
+            var delta = new TextBlock
+            {
+                Opacity = 0.8,
+                FontSize = UiUtil.ScaledFontSize(11),
+                FontWeight = FontWeight.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(6, 0, 0, 0),
+                [!TextBlock.TextProperty] = new Binding(nameof(CompareRow.TimingDeltaDisplay)),
+                [!IsVisibleProperty] = new Binding(nameof(CompareRow.HasTimingDelta)),
+            };
+            AddHint(delta, Se.Language.File.CompareTimingDeltaHint);
+            panel.Children.Add(delta);
+        }
 
         // The half of a sync point that waits for its other half.
         panel.Children.Add(new Icon
@@ -696,15 +777,14 @@ public class CompareWindow : Window
         return panel;
     }
 
-    private static Border MakeMetaCell(string textPath, string backgroundPath, FontWeight? weight = null, double minWidth = 0)
+    private static Border MakeMetaCell(string textPath, string? backgroundPath, FontWeight? weight = null, double minWidth = 0)
     {
-        return new Border
+        var cell = new Border
         {
             CornerRadius = new CornerRadius(3),
             Padding = new Thickness(3, 0),
             MinWidth = minWidth,
             VerticalAlignment = VerticalAlignment.Center,
-            [!Border.BackgroundProperty] = new Binding(backgroundPath),
             Child = new TextBlock
             {
                 Opacity = 0.7,
@@ -713,6 +793,13 @@ public class CompareWindow : Window
                 [!TextBlock.TextProperty] = new Binding(textPath),
             },
         };
+
+        if (backgroundPath != null)
+        {
+            cell.Bind(Border.BackgroundProperty, new Binding(backgroundPath));
+        }
+
+        return cell;
     }
 
     /// <summary>
@@ -1036,7 +1123,11 @@ public class CompareWindow : Window
             return;
         }
 
-        _scrollViewer.ScrollChanged += (_, _) => UpdateRulerViewport();
+        _scrollViewer.ScrollChanged += (_, _) =>
+        {
+            UpdateRulerViewport();
+            _scrollAnchor = _vm.GetScrollAnchor();
+        };
         _scrollViewer.PropertyChanged += (_, e) =>
         {
             if (e.Property == ScrollViewer.ExtentProperty || e.Property == ScrollViewer.ViewportProperty)

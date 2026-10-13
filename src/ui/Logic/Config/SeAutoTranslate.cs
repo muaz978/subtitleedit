@@ -1,6 +1,7 @@
 ﻿using Nikse.SubtitleEdit.Features.Translate.LlamaCppAdvanced;
 using Nikse.SubtitleEdit.UiLogic.AutoTranslate;
 using System.Collections.Generic;
+using System;
 
 namespace Nikse.SubtitleEdit.Logic.Config;
 
@@ -40,6 +41,10 @@ public class SeAutoTranslate
     // /api/generate URL the classic Ollama engine stores in OllamaUrl.
     public string OllamaAdvancedUrl { get; set; } = OllamaAdvancedTranslate.DefaultUrl;
     public string OllamaAdvancedModel { get; set; } = string.Empty;
+
+    // LM Studio advanced: same advanced engine against LM Studio's OpenAI-compatible endpoint.
+    public string LmStudioAdvancedUrl { get; set; } = LmStudioAdvancedTranslate.DefaultUrl;
+    public string LmStudioAdvancedModel { get; set; } = string.Empty;
     public string GroqUrl { get; set; }
     public string GroqPrompt { get; set; }
     public string GroqApiKey { get; set; }
@@ -67,14 +72,14 @@ public class SeAutoTranslate
     public string CopyPasteLineSeparator { get; set; }
     public string OpenRouterUrl { get; set; }
     public string OpenRouterPrompt { get; set; }
-    public string OpenRouterApiKey { get; set; }
+    [Obsolete("Use Se.Settings.Providers.OpenRouterApiKey - kept only so old settings files can be migrated.")]
+    public string OpenRouterApiKey { get; set; } = string.Empty;
     public string OpenRouterModel { get; set; }
     public string LibreTranslateApiKey { get; set; }
     public string LibreTranslateUrl { get; set; }
     public string DeepLApiKey { get; set; }
     public string DeepLUrl { get; set; }
     public string DeepLFormality { get; set; }
-    public string DeepLXUrl { get; set; }
     public string MyMemoryApiKey { get; set; }
     public string NllbApiUrl { get; set; }
     public string NllbServeUrl { get; set; }
@@ -89,14 +94,11 @@ public class SeAutoTranslate
     public string NvidiaModel { get; set; }
     public string PapagoApiKeyId { get; set; }
     public string PapagoApiKey { get; set; }
-    public string MistralApiKey { get; set; }
+    [Obsolete("Use Se.Settings.Providers.MistralApiKey - kept only so old settings files can be migrated.")]
+    public string MistralApiKey { get; set; } = string.Empty;
     public string MistralUrl { get; set; }
     public string MistralModel { get; set; }
     public string MistralPrompt { get; set; }
-    public string AvalAiUrl { get; set; }
-    public string AvalAiPrompt { get; set; }
-    public string AvalAiApiKey { get; set; }
-    public string AvalAiModel { get; set; }
     public string ApiRouteUrl { get; set; }
     public string ApiRoutePrompt { get; set; }
     public string ApiRouteApiKey { get; set; }
@@ -112,9 +114,6 @@ public class SeAutoTranslate
     public string LaraApiSecret { get; set; }
 
 
-    public string KoboldCppUrl { get; set; }
-    public string KoboldCppPrompt { get; set; }
-    public decimal KoboldCppTemperature { get; set; }
     public string AnthropicApiUrl { get; set; }
     public string AnthropicPrompt { get; set; }
     public string AnthropicApiKey { get; set; }
@@ -124,7 +123,6 @@ public class SeAutoTranslate
     public string GeminiProApiKey { get; set; }
     public string GeminiModel { get; set; }
     public string GeminiPrompt { get; set; }
-    public string SeamlessM4TUrl { get; set; }
     public string CrispAsrExe { get; set; }
     public string CrispAsrModel { get; set; }
 
@@ -133,11 +131,7 @@ public class SeAutoTranslate
         AnthropicApiKey = string.Empty;
         AnthropicApiModel = AnthropicTranslate.Models[0];
         AnthropicApiUrl = AnthropicTranslate.DefaultUrl;
-        AnthropicPrompt = "Translate from {0} to {1}, keep sentences in {1} as they are, do not censor the translation, give only the output without comments:";
-        AvalAiApiKey = string.Empty;
-        AvalAiModel = AvalAi.Models[0];
-        AvalAiPrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments:";
-        AvalAiUrl = AvalAi.DefaultUrl;
+        AnthropicPrompt = "Translate from {0} to {1}, keep sentences in {1} as they are, keep punctuation as input, keep line breaks exactly the same, do not censor the translation, give only the output without comments:";
         ApiRouteApiKey = string.Empty;
         ApiRouteModel = ApiRouteTranslate.Models[0];
         ApiRoutePrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments:";
@@ -162,7 +156,6 @@ public class SeAutoTranslate
         DeepLApiKey = string.Empty;
         DeepLFormality = string.Empty;
         DeepLUrl = "https://api-free.deepl.com/";
-        DeepLXUrl = "http://localhost:1188";
         DeepSeekApiKey = string.Empty;
         DeepSeekModel = DeepSeekTranslate.Models[0];
         DeepSeekPrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments:";
@@ -179,9 +172,6 @@ public class SeAutoTranslate
         GroqModel = GroqTranslate.Models[0];
         GroqPrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments:";
         GroqUrl = GroqTranslate.DefaultUrl;
-        KoboldCppPrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments or notes:";
-        KoboldCppTemperature = 0.4m;
-        KoboldCppUrl = KoboldCppTranslate.DefaultUrl;
         LibreTranslateApiKey = string.Empty;
         LibreTranslateUrl = "http://localhost:5000/";
         LibreTranslateUrl = "http://localhost:5000/";
@@ -195,7 +185,6 @@ public class SeAutoTranslate
         MicrosoftTranslatorApiKey = string.Empty;
         MicrosoftTranslatorCategory = string.Empty;
         MicrosoftTranslatorTokenEndpoint = "https://api.cognitive.microsoft.com/sts/v1.0/issueToken";
-        MistralApiKey = string.Empty;
         MistralModel = MistralTranslate.Models[0];
         MistralPrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments:";
         MistralUrl = MistralTranslate.DefaultUrl;
@@ -204,17 +193,15 @@ public class SeAutoTranslate
         NllbServeModel = string.Empty;
         NllbServeUrl = "http://127.0.0.1:6060/";
         OllamaModel = string.Empty;
-        OllamaModels = "llama3.2,llama3.2:1b,phi3,gemma2,qwen2,mistral";
+        OllamaModels = "gemma4,gemma4:e4b,qwen3,qwen3:4b,llama3.2,mistral-small3.2";
         OllamaPrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments or notes:";
         OllamaUrl = OllamaTranslate.DefaultUrl;
-        OpenRouterApiKey = string.Empty;
         OpenRouterModel = OpenRouterTranslate.Models[0];
         OpenRouterPrompt = "Translate from {0} to {1}, keep punctuation as input, do not censor the translation, give only the output without comments:";
         OpenRouterUrl = OpenRouterTranslate.DefaultUrl;
         PapagoApiKey = string.Empty;
         PapagoApiKeyId = string.Empty;
         RequestMaxBytes = 1000;
-        SeamlessM4TUrl = "http://localhost:5000/";
         CrispAsrExe = string.Empty;
         CrispAsrModel = string.Empty;
         LaraApiId = string.Empty;

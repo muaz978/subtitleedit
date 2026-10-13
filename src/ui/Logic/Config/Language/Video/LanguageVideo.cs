@@ -47,6 +47,7 @@ public class LanguageVideo
     public string RemuxVideoMpgMaxTwoCaptionTracks { get; set; }
     public string RemuxVideoMccRequiresMpg { get; set; }
     public string RemuxVideoMpgReencodeVideoX { get; set; }
+    public string RemuxVideoFileHasNoAudioX { get; set; }
     public string RemuxVideoAddingClosedCaptions { get; set; }
     public string RemuxVideoSelectAudioTrack { get; set; }
     public string RemuxVideoSelectAudioTrackFor { get; set; }
@@ -160,6 +161,10 @@ public class LanguageVideo
     public string ReEncodeGeneratingDone { get; set; }
     public string ReEncodeGeneratedFilesX { get; set; }
     public string ReEncodeFfmpegParameters { get; set; }
+    public string AnalyzingVideoX { get; set; }
+    public string AnalyzingVideoXofY { get; set; }
+    public string BackgroundImageFileNotSelected { get; set; }
+    public string BackgroundImageFileDoesNotExistX { get; set; }
     public string Voices { get; set; }
     public string Presets { get; set; }
     public string TalkerX { get; set; }
@@ -206,6 +211,7 @@ public class LanguageVideo
         RemuxVideoSccNotWithWebM = "Scenarist (.scc) closed captions need the MOV container, which cannot hold the VP9/AV1 video of a .webm file. Remove the .scc file or convert it to another subtitle format.";
         RemuxVideoMpgMaxTwoCaptionTracks = "An .mpg file holds at most two closed caption tracks (CC1 and CC3) - remove subtitle files so that one or two are left.";
         RemuxVideoMccRequiresMpg = "MacCaption (.mcc) subtitles are embedded as CEA-608/708 closed captions in the MPEG-2 video, which requires the MPG container. Output format has been automatically switched to .mpg.";
+        RemuxVideoFileHasNoAudioX = "\"{0}\" has no audio track, so it cannot be used as an audio source.";
         RemuxVideoMpgReencodeVideoX = "Closed captions in an .mpg file need MPEG-2 video, and the video is {0}. Re-encode the video to MPEG-2? This takes longer and lowers the quality a little.";
         RemuxVideoAddingClosedCaptions = "Adding closed captions...";
         RemuxVideoSelectAudioTrack = "Select audio track";
@@ -308,6 +314,10 @@ public class LanguageVideo
         ReEncodeGeneratingDone = "Generating done";
         ReEncodeGeneratedFilesX = "Generated files ({0}):";
         ReEncodeFfmpegParameters = "ffmpeg parameters";
+        AnalyzingVideoX = "Analyzing video... {0}%     {1}";
+        AnalyzingVideoXofY = "Analyzing video {0}/{1}... {2}%     {3}";
+        BackgroundImageFileNotSelected = "Background image file not selected";
+        BackgroundImageFileDoesNotExistX = "Background image file does not exist: {0}";
         AssaStyleWillBeUsed = "Current ASSA style will be used" + Environment.NewLine + Environment.NewLine +
                               "Change subtitle format if" + Environment.NewLine +
                               "you want to set styles here";

@@ -38,10 +38,10 @@ public class SeTableViewColumn : TableViewColumn
         HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
     }
 
-    public static readonly StyledProperty<bool> IsVisibleProperty =
+    public static new readonly StyledProperty<bool> IsVisibleProperty =
         AvaloniaProperty.Register<SeTableViewColumn, bool>(nameof(IsVisible), defaultValue: true);
 
-    public bool IsVisible
+    public new bool IsVisible
     {
         get => GetValue(IsVisibleProperty);
         set => SetValue(IsVisibleProperty, value);
@@ -619,6 +619,22 @@ public static class TableViewExtras
     public static void AddSpaceToggle<TItem>(TableView tableView, Func<TItem, bool> getChecked, Action<TItem, bool> setChecked)
         where TItem : class
     {
+        AddSpaceToggle<TItem>(tableView, getChecked, (items, value) =>
+        {
+            foreach (var item in items)
+            {
+                setChecked(item, value);
+            }
+        });
+    }
+
+    /// <summary>
+    /// <see cref="AddSpaceToggle{TItem}(TableView, Func{TItem, bool}, Action{TItem, bool})"/> with
+    /// one call for all selected rows - for a view model that recounts after every single change.
+    /// </summary>
+    public static void AddSpaceToggle<TItem>(TableView tableView, Func<TItem, bool> getChecked, Action<List<TItem>, bool> setAllChecked)
+        where TItem : class
+    {
         tableView.AddHandler(InputElement.KeyDownEvent, (object? _, KeyEventArgs e) =>
         {
             // A cell being edited in place (AI review's After column) must keep its spaces.
@@ -633,12 +649,7 @@ public static class TableViewExtras
                 return;
             }
 
-            var newValue = !selected.All(getChecked);
-            foreach (var item in selected)
-            {
-                setChecked(item, newValue);
-            }
-
+            setAllChecked(selected, !selected.All(getChecked));
             e.Handled = true;
         }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
     }
