@@ -870,6 +870,8 @@ public partial class MainViewModel :
     private readonly HashSet<string> _waveformsBeingGenerated = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _waveformsBeingGeneratedLock = new();
     private VideoPlayerControl? _fullScreenVideoPlayerControl;
+    private FullScreenVideoWindow? _fullScreenVideoWindow;
+    private bool _fullScreenOwnsKeyboard; // keys reaching the main window belong to the fullscreen window (#16039)
     private static readonly IBrush _transparentBrush = new ImmutableSolidColorBrush(Colors.Transparent);
     private static IBrush _errorBrush = new ImmutableSolidColorBrush(_errorColor);
     private SpellCheckDictionaryDisplay? _currentSpellCheckDictionary;
@@ -2621,8 +2623,9 @@ public partial class MainViewModel :
     private static readonly Regex AssaTagBlockRegex = new(@"\{[^}]*\}", RegexOptions.Compiled);
 
     /// <summary>
-    /// A row the ASSA draw dialog imports as drawing: a \p1 drawing, or a mask-only line
-    /// (just an \iclip, no text) as the dialog writes for a layer of erase shapes.
+    /// A row the ASSA draw dialog imports as drawing: a \p1 drawing, a mask-only line
+    /// (just an \iclip, no text) as the dialog writes for a layer of erase shapes, or a text
+    /// line it wrote for a bubble or text box.
     /// </summary>
     internal static bool IsAssaDrawingText(string text)
     {
@@ -2631,7 +2634,7 @@ public partial class MainViewModel :
             return false;
         }
 
-        if (AssaDrawingTagRegex.IsMatch(text))
+        if (AssaDrawingTagRegex.IsMatch(text) || AssaDrawTextLine.IsTextLine(text))
         {
             return true;
         }
@@ -9166,9 +9169,9 @@ public partial class MainViewModel :
             return;
         }
 
-        SavePluginSettings(plugin, response);
+        PluginRequestHelper.SaveSettings(plugin, response);
 
-        if (!HasPluginSubtitle(response.Subtitle))
+        if (!PluginRequestHelper.HasSubtitle(response.Subtitle))
         {
             if (!string.IsNullOrWhiteSpace(response.Message))
             {
@@ -9218,185 +9221,27 @@ public partial class MainViewModel :
 
     private PluginRequest BuildPluginRequest(InstalledPlugin plugin, List<int> selectedIndices)
     {
-        var subtitle = GetUpdateSubtitle();
-        var format = SelectedSubtitleFormat;
-
-        var frameRate = _mediaInfo != null
-            ? (double)_mediaInfo.FramesRateNonNormalized
-            : Se.Settings.General.CurrentFrameRate;
-
-        JsonElement? settings = null;
-        if (Se.Settings.Plugins.Settings.TryGetValue(plugin.Manifest.Name, out var settingsJson) &&
-            !string.IsNullOrWhiteSpace(settingsJson))
+        var request = PluginRequestHelper.CreateRequest(plugin, PluginConstants.RequestTypeRun);
+        request.Subtitle = PluginRequestHelper.ToPluginSubtitle(GetUpdateSubtitle(), SelectedSubtitleFormat, _subtitleFileName ?? string.Empty);
+        request.SubtitleEncoding = SelectedEncoding?.DisplayName ?? string.Empty;
+        request.SelectedIndices = selectedIndices;
+        request.VideoFileName = _videoFileName ?? string.Empty;
+        if (_mediaInfo != null)
         {
-            try
-            {
-                using var doc = JsonDocument.Parse(settingsJson);
-                settings = doc.RootElement.Clone();
-            }
-            catch (Exception exception)
-            {
-                Se.LogError(exception, "Invalid stored plugin settings for " + plugin.Manifest.Name);
-            }
+            request.FrameRate = (double)_mediaInfo.FramesRateNonNormalized;
         }
 
-        int? settingsVersion = null;
-        if (Se.Settings.Plugins.SettingsVersions.TryGetValue(plugin.Manifest.Name, out var storedVersion))
-        {
-            settingsVersion = storedVersion;
-        }
-
-        var videoPositionSeconds = _videoFileName != null ? GetVideoPlayerControl()?.Position : null;
-
-        return new PluginRequest
-        {
-            PluginDataDirectory = GetPluginDataDirectory(plugin),
-            Subtitle = new PluginSubtitle
-            {
-                Format = format.Name,
-                FileName = _subtitleFileName ?? string.Empty,
-                // A binary format (EBU STL, PAC, ...) has no text form - Ebu.ToText returns
-                // "Not supported!" - so plugins get its header and paragraphs only.
-                Native = format.IsTextBased ? subtitle.ToText(format) : string.Empty,
-                SubRip = subtitle.ToText(new Nikse.SubtitleEdit.Core.SubtitleFormats.SubRip()),
-                Header = subtitle.Header,
-                Paragraphs = subtitle.Paragraphs.Select(ToPluginParagraph).ToList(),
-            },
-            SubtitleEncoding = SelectedEncoding?.DisplayName ?? string.Empty,
-            SelectedIndices = selectedIndices,
-            VideoFileName = _videoFileName ?? string.Empty,
-            FrameRate = frameRate,
-            VideoDurationSeconds = _mediaInfo?.Duration?.TotalSeconds,
-            VideoPositionSeconds = videoPositionSeconds,
-            VideoWidth = _mediaInfo?.Dimension.Width,
-            VideoHeight = _mediaInfo?.Dimension.Height,
-            UiLanguage = Se.Settings.General.Language ?? string.Empty,
-            Theme = UiTheme.ThemeName,
-            ThemeColors = PluginThemeColorsFactory.Build(),
-            SeVersion = Se.Version,
-            Rules = BuildPluginRules(),
-            Settings = settings,
-            SettingsVersion = settingsVersion,
-        };
-    }
-
-    // Persistent, writable folder private to a plugin, keyed by its (sanitized) manifest name -
-    // the same identity used to persist plugin settings. Lives under Plugins/Data so it survives
-    // plugin updates (which replace the install folder). Created here so the plugin can rely on it.
-    private static string GetPluginDataDirectory(InstalledPlugin plugin)
-    {
-        var name = plugin.Manifest.Name;
-        foreach (var c in Path.GetInvalidFileNameChars())
-        {
-            name = name.Replace(c, '_');
-        }
-
-        var path = Path.Combine(Se.PluginsDataFolder, name);
-        try
-        {
-            Directory.CreateDirectory(path);
-        }
-        catch (Exception exception)
-        {
-            Se.LogError(exception, "Could not create plugin data directory: " + path);
-        }
-
-        return path;
-    }
-
-    private static PluginRules BuildPluginRules()
-    {
-        var general = Se.Settings.General;
-        return new PluginRules
-        {
-            SubtitleMinimumDisplayMilliseconds = general.SubtitleMinimumDisplayMilliseconds,
-            SubtitleMaximumDisplayMilliseconds = general.SubtitleMaximumDisplayMilliseconds,
-            SubtitleMaximumCharactersPerSeconds = general.SubtitleMaximumCharactersPerSeconds,
-            SubtitleOptimalCharactersPerSeconds = general.SubtitleOptimalCharactersPerSeconds,
-            SubtitleLineMaximumLength = general.SubtitleLineMaximumLength,
-            MaxNumberOfLines = general.MaxNumberOfLines,
-            MinimumMillisecondsBetweenLines = general.MinimumBetweenLines.GetMilliseconds(),
-            MinimumFramesBetweenLines = general.MinimumBetweenLines.Frames,
-            UseFrameMode = general.UseFrameMode,
-            EbuStlTeletextUseBox = Configuration.Settings.SubtitleSettings.EbuStlTeletextUseBox,
-            EbuStlTeletextUseDoubleHeight = Configuration.Settings.SubtitleSettings.EbuStlTeletextUseDoubleHeight,
-            VideoOffsetMs = general.CurrentVideoOffsetInMs,
-        };
-    }
-
-    private static PluginParagraph ToPluginParagraph(Paragraph p)
-    {
-        return new PluginParagraph
-        {
-            StartMs = p.StartTime.TotalMilliseconds,
-            EndMs = p.EndTime.TotalMilliseconds,
-            Text = p.Text ?? string.Empty,
-            Style = p.Style,
-            Actor = p.Actor,
-            Language = p.Language,
-            Region = p.Region,
-            Effect = p.Effect,
-            Extra = p.Extra,
-            MarginL = p.MarginL,
-            MarginR = p.MarginR,
-            MarginV = p.MarginV,
-            Layer = p.Layer,
-            IsComment = p.IsComment,
-            Forced = p.Forced,
-            NewSection = p.NewSection,
-            Bookmark = p.Bookmark,
-        };
-    }
-
-    private static Paragraph FromPluginParagraph(PluginParagraph p)
-    {
-        return new Paragraph(new TimeCode(p.StartMs), new TimeCode(p.EndMs), p.Text ?? string.Empty)
-        {
-            Style = p.Style,
-            Actor = p.Actor,
-            Language = p.Language,
-            Region = p.Region,
-            Effect = p.Effect,
-            Extra = p.Extra,
-            MarginL = p.MarginL,
-            MarginR = p.MarginR,
-            MarginV = p.MarginV,
-            Layer = p.Layer,
-            IsComment = p.IsComment,
-            Forced = p.Forced,
-            NewSection = p.NewSection,
-            Bookmark = p.Bookmark,
-        };
-    }
-
-    private static bool HasPluginSubtitle(PluginSubtitle? subtitle)
-    {
-        return subtitle != null && (subtitle.Paragraphs is { Count: > 0 } || !string.IsNullOrWhiteSpace(subtitle.Native));
+        request.VideoDurationSeconds = _mediaInfo?.Duration?.TotalSeconds;
+        request.VideoPositionSeconds = _videoFileName != null ? GetVideoPlayerControl()?.Position : null;
+        request.VideoWidth = _mediaInfo?.Dimension.Width;
+        request.VideoHeight = _mediaInfo?.Dimension.Height;
+        return request;
     }
 
     private async Task<bool> ApplyPluginSubtitle(InstalledPlugin plugin, PluginResponse response)
     {
         var pluginSubtitle = response.Subtitle!;
-        var subtitle = new Subtitle();
-        if (pluginSubtitle.Paragraphs is { Count: > 0 })
-        {
-            // Lossless path: the lines come back exactly as SE holds them, so the current format
-            // (and for EBU STL the teletext rows and GSI header) survive - no re-parse involved.
-            subtitle.Paragraphs.AddRange(pluginSubtitle.Paragraphs.Select(FromPluginParagraph));
-            subtitle.Renumber();
-        }
-        else
-        {
-            var lines = pluginSubtitle.Native.SplitToLines().ToList();
-            var format = SubtitleFormat.AllSubtitleFormats
-                .FirstOrDefault(f => f.Name.Equals(pluginSubtitle.Format, StringComparison.OrdinalIgnoreCase));
-
-            var loadedFormat = subtitle.ReloadLoadSubtitle(lines, string.Empty, format);
-            if (loadedFormat == null)
-            {
-                subtitle.Paragraphs.Clear();
-            }
-        }
+        var subtitle = PluginRequestHelper.ReadSubtitle(pluginSubtitle);
 
         if (subtitle.Paragraphs.Count == 0)
         {
@@ -9411,8 +9256,8 @@ public partial class MainViewModel :
         if (pluginSubtitle.Paragraphs is { Count: > 0 })
         {
             var current = GetUpdateSubtitle();
-            var currentParagraphs = JsonSerializer.Serialize(current.Paragraphs.Select(ToPluginParagraph).ToList(), PluginJsonContext.Default.Options);
-            var resultParagraphs = JsonSerializer.Serialize(subtitle.Paragraphs.Select(ToPluginParagraph).ToList(), PluginJsonContext.Default.Options);
+            var currentParagraphs = JsonSerializer.Serialize(current.Paragraphs.Select(PluginRequestHelper.ToPluginParagraph).ToList(), PluginJsonContext.Default.Options);
+            var resultParagraphs = JsonSerializer.Serialize(subtitle.Paragraphs.Select(PluginRequestHelper.ToPluginParagraph).ToList(), PluginJsonContext.Default.Options);
             if ((pluginSubtitle.Header ?? current.Header) == current.Header && currentParagraphs == resultParagraphs)
             {
                 return true;
@@ -9471,32 +9316,6 @@ public partial class MainViewModel :
 
         SetSelectedFrameRate(frameRate);
         ApplyCurrentFrameRate(frameRate);
-    }
-
-    private static void SavePluginSettings(InstalledPlugin plugin, PluginResponse response)
-    {
-        if (!response.Settings.HasValue)
-        {
-            return;
-        }
-
-        try
-        {
-            Se.Settings.Plugins.Settings[plugin.Manifest.Name] = response.Settings.Value.GetRawText();
-            if (response.SettingsVersion.HasValue)
-            {
-                Se.Settings.Plugins.SettingsVersions[plugin.Manifest.Name] = response.SettingsVersion.Value;
-            }
-            else
-            {
-                Se.Settings.Plugins.SettingsVersions.Remove(plugin.Manifest.Name);
-            }
-            Se.SaveSettings();
-        }
-        catch (Exception exception)
-        {
-            Se.LogError(exception, "Failed to persist plugin settings for " + plugin.Manifest.Name);
-        }
     }
 
     [RelayCommand]
@@ -17899,8 +17718,11 @@ public partial class MainViewModel :
             return;
         }
 
-        var focusedTextBox = selectedItems.Count == 1 ? GetFocusedTextBoxWrapper() : null;
-        var reselectAll = TextBoxSurroundToggler.IsWholeTextSelected(focusedTextBox);
+        // Not gated on focus: the edit box keeps (and shows) its selection without focus, and on
+        // Windows the box can briefly report no focus during an Alt shortcut - the stale range
+        // then cut off the last characters again (#16015).
+        var editTextBox = selectedItems.Count == 1 ? GetFocusedTextBoxWrapper() ?? EditTextBox : null;
+        var reselectAll = TextBoxSurroundToggler.IsWholeTextSelected(editTextBox);
 
         var newTexts = TextBoxSurroundToggler.ApplyToTexts(
             behavior, scope, surroundLeft, selectedItems.Select(p => p.Text), surroundRight);
@@ -17911,7 +17733,7 @@ public partial class MainViewModel :
 
         if (reselectAll)
         {
-            TextBoxSurroundToggler.SelectAllAfterTextChange(focusedTextBox!);
+            TextBoxSurroundToggler.SelectAllAfterTextChange(editTextBox!);
         }
 
         _updateAudioVisualizer = true;
@@ -20079,6 +19901,12 @@ public partial class MainViewModel :
             control!.Position = _fullScreenVideoPlayerControl.PositionForRestore;
             control!.Volume = _fullScreenVideoPlayerControl.Volume;
             _fullScreenVideoPlayerControl = null;
+            _fullScreenVideoWindow = null;
+            _fullScreenOwnsKeyboard = false;
+            if (Window != null)
+            {
+                Window.Activated -= OnMainWindowActivatedWhileFullScreen;
+            }
 
             // A track switched while fullscreen (toggle-audio-track shortcut) only ever reached the
             // fullscreen player, so hand it to the player we are going back to - otherwise playback
@@ -20112,6 +19940,14 @@ public partial class MainViewModel :
             ReapplySelectedAudioTrack(readyPlayer); // the selected audio track (#12844)
             RefreshSubtitlePreview();               // and the subtitle itself (#13407)
         });
+        // Keys that still reach the main window while fullscreen is up are forwarded there (see
+        // TryForwardKeyDownToFullScreen) until the user goes back to the main window on purpose -
+        // by clicking it or activating it - e.g. to edit on another monitor.
+        _fullScreenVideoWindow = fullScreenWindow;
+        _fullScreenOwnsKeyboard = true;
+        fullScreenWindow.Activated += (_, _) => _fullScreenOwnsKeyboard = true;
+        fullScreenWindow.AddHandler(InputElement.PointerPressedEvent, (_, _) => _fullScreenOwnsKeyboard = true, RoutingStrategies.Tunnel, handledEventsToo: true);
+        Window!.Activated += OnMainWindowActivatedWhileFullScreen;
         fullScreenWindow.Show(Window!);
         _shortcutManager.ClearKeys();
 
@@ -20120,6 +19956,51 @@ public partial class MainViewModel :
         // fullscreen mpv core is initialized lazily by its rendering surface and has not even
         // loaded the video yet, so mpv rejected the sub-add and nothing tried again (#13407).
         RefreshSubtitlePreview();
+    }
+
+    private void OnMainWindowActivatedWhileFullScreen(object? sender, EventArgs e) => _fullScreenOwnsKeyboard = false;
+
+    /// <summary>
+    /// Sends a key that reached the main window to the fullscreen video window instead, when that
+    /// window should have had it. On some X11 window managers (Hyprland's XWayland) the fullscreen
+    /// window gets the OS focus but Avalonia never sees it activated, so keyboard focus - and with
+    /// it Escape and the seek keys - stayed in the main window. There, arrow keys could even reach
+    /// the main menu and hang the UI thread in Avalonia's menu navigation (#16039).
+    /// </summary>
+    private bool TryForwardKeyDownToFullScreen(KeyEventArgs e)
+    {
+        if (!_fullScreenOwnsKeyboard || _fullScreenVideoWindow is not { } fullScreenWindow || e.Handled)
+        {
+            return false;
+        }
+
+        if (Menu is { IsOpen: true })
+        {
+            Menu.Close();
+        }
+
+        fullScreenWindow.FocusVideo();
+        fullScreenWindow.HandleForwardedKeyDown(e);
+        e.Handled = true;
+        return true;
+    }
+
+    private bool TryForwardKeyUpToFullScreen(KeyEventArgs e)
+    {
+        if (!_fullScreenOwnsKeyboard || _fullScreenVideoWindow is not { } fullScreenWindow)
+        {
+            return false;
+        }
+
+        // Handled also keeps Avalonia's access-key handler from opening the main menu on an Alt
+        // release (the key-up handler is attached for both tunnel and bubble, so forward once).
+        if (!e.Handled)
+        {
+            fullScreenWindow.HandleForwardedKeyUp(e);
+            e.Handled = true;
+        }
+
+        return true;
     }
 
     private List<(string name, List<string> keys, IRelayCommand command)> BuildFullScreenShortcutBindings()
@@ -33038,6 +32919,11 @@ public partial class MainViewModel :
 
     internal void OnKeyDownHandler(object? sender, KeyEventArgs keyEventArgs)
     {
+        if (TryForwardKeyDownToFullScreen(keyEventArgs))
+        {
+            return;
+        }
+
         lock (_onKeyDownHandlerLock)
         {
             AudioVisualizer?.SetKeyModifiers(keyEventArgs);
@@ -33438,9 +33324,25 @@ public partial class MainViewModel :
                 }
             }
 
-            if (AudioVisualizer != null && AudioVisualizer.IsFocused)
+            var isWaveformFocused = AudioVisualizer != null && AudioVisualizer.IsFocused;
+            if (isWaveformFocused)
             {
                 var relayCommand = _shortcutManager.CheckShortcuts(keyEventArgs, CategoryWaveform);
+                if (relayCommand != null)
+                {
+                    keyEventArgs.Handled = true;
+                    relayCommand.Execute(null);
+                    return;
+                }
+            }
+
+            // Selecting a line by clicking the waveform (or using the video player's buttons/sliders)
+            // moves focus there, which left SubtitleGridAndTextBox shortcuts like "Toggle dialog
+            // dashes" dead until the grid or text box was clicked again. They act on the grid
+            // selection, so run them from these controls too, like SE 4 did (#16013).
+            if (isWaveformFocused || GetVideoPlayerControl()?.IsKeyboardFocusWithin == true)
+            {
+                var relayCommand = _shortcutManager.CheckShortcuts(keyEventArgs, CategorySubtitleGridAndTextBox);
                 if (relayCommand != null)
                 {
                     keyEventArgs.Handled = true;
@@ -33509,6 +33411,8 @@ public partial class MainViewModel :
     /// </summary>
     internal void OnPointerPressedHandler(object? sender, PointerPressedEventArgs e)
     {
+        _fullScreenOwnsKeyboard = false; // a click in the main window takes the keyboard back from fullscreen
+
         if (!e.KeyModifiers.HasFlag(KeyModifiers.Alt))
         {
             return; // plain clicks arm nothing, and this runs on every press in the window
@@ -33526,6 +33430,11 @@ public partial class MainViewModel :
 
     public void OnKeyUpHandler(object? sender, KeyEventArgs e)
     {
+        if (TryForwardKeyUpToFullScreen(e))
+        {
+            return;
+        }
+
         if (_setEndAtKeyUpLine != null)
         {
             var vp = GetVideoPlayerControl();

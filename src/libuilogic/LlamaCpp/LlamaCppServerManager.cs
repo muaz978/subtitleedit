@@ -46,7 +46,9 @@ public sealed record LlamaCppModel(
     // stays empty until the token budget runs out, so the line comes back untranslated. The
     // Qwen families avoid this through their chat-template override instead (chatml +
     // --no-jinja bypasses the embedded template's thinking logic).
-    bool NoThinking = false);
+    bool NoThinking = false,
+    // OCR models only: how the subtitle image is framed before it is sent (see AiOcrPadding).
+    AiOcrPadding OcrPadding = AiOcrPadding.Square);
 
 /// <summary>
 /// Manages the local <c>llama-server</c> process used by the llama.cpp auto-translate and OCR
@@ -376,10 +378,38 @@ public static class LlamaCppServerManager
         // unstrippable because genuine SDH "# lyrics" hash cues - which it preserves verbatim -
         // look the same), and it silently drops ♪ note marks. GLM-OCR gets both right.
         // Q8_0 only: bf16 measured identical on the same corpus while twice the size.
+        // Border, not the square (2026-10-15, b10840, 60 English + 121 Arabic images): English
+        // character error 1.4% vs 8.6% in the square, Arabic 8.1% vs 7.7%, and Video OCR crops
+        // take 1.5 s instead of 16-21 s because the square triples the image tokens.
         new LlamaCppModel("HunyuanOCR 1.5 (Q8_0)", "HunyuanOCR-Q8_0.gguf", "1.3 GB",
             "https://huggingface.co/ggml-org/HunyuanOCR-GGUF/resolve/main/HunyuanOCR-Q8_0.gguf",
             MmprojFileName: "mmproj-HunyuanOCR-Q8_0.gguf",
-            MmprojUrl: "https://huggingface.co/ggml-org/HunyuanOCR-GGUF/resolve/main/mmproj-HunyuanOCR-Q8_0.gguf"),
+            MmprojUrl: "https://huggingface.co/ggml-org/HunyuanOCR-GGUF/resolve/main/mmproj-HunyuanOCR-Q8_0.gguf",
+            OcrPadding: AiOcrPadding.Border),
+        // QARI-OCR 0.2.2.1 (NAMAA-Space, Apache-2.0): Qwen2-VL-2B fine-tuned for Arabic, here as
+        // mradermacher's merged GGUF. The pick for Arabic, not a general default - see #16043.
+        // Measured 2026-10-14 on b10840 with SE's flags, shared prompt and square pad over 61
+        // Arabic images (20 HD bitmaps, 20 SD bitmaps, 20 burned-in 720p bottom-third crops, one
+        // real anime frame), exact / character error / median s per image:
+        //   QARI 0.2.2.1 29/61, 5.2% (HD bitmaps 0.6%), 4.5 s - no loops, no empty answers
+        //   HunyuanOCR 26/61, 9.3%, 1.5 s; LFM2.5-VL 10/61, 10.1%; PaddleOCR-VL 4/61, 12.7%
+        //   (writes أ/إ as ا and ى as ي); GLM-OCR 1/61, 56% (fluent invented Arabic);
+        //   LightOnOCR 1/61 (loops); plain Qwen2-VL-2B 0/61 (chats about the image).
+        // Rejected alongside it: QARI 0.3 (13-17/61, emits HTML tags - a document-structure
+        // model), QARI 0.4 4B (25/61 with its own prompt, 0/61 under the shared prompt) and
+        // Arabic-GLM-OCR-v2 (18/61 with 16 repetition loops and 7 empty answers).
+        // It follows the shared prompt as-is and reads Latin text correctly, but it joins every
+        // two-line subtitle into one line (all 12 two-line Arabic cases, and English too) and
+        // turns ♪ into لَ, so it ranks behind the general models for non-Arabic subtitles.
+        // Border, not the square (2026-10-15, 121 Arabic images): 7.3% character error vs 7.7%,
+        // the same line breaks, and 2.6 s instead of 31 s per Video OCR crop. The square's only
+        // edge is on HD bitmaps, and there only in how often a mixed Arabic/Latin line comes back
+        // with its runs swapped (1 vs 3 of 40) - the words themselves are read equally well.
+        new LlamaCppModel("QARI-OCR 0.2.2.1 Arabic 2B (Q8_0)", "Qari-OCR-0.2.2.1-VL-2B-Instruct-merged.Q8_0.gguf", "2.4 GB",
+            "https://huggingface.co/mradermacher/Qari-OCR-0.2.2.1-VL-2B-Instruct-merged-GGUF/resolve/main/Qari-OCR-0.2.2.1-VL-2B-Instruct-merged.Q8_0.gguf",
+            MmprojFileName: "mmproj-Qari-OCR-0.2.2.1-VL-2B-Instruct-merged.Q8_0.gguf",
+            MmprojUrl: "https://huggingface.co/mradermacher/Qari-OCR-0.2.2.1-VL-2B-Instruct-merged-GGUF/resolve/main/Qari-OCR-0.2.2.1-VL-2B-Instruct-merged.mmproj-Q8_0.gguf",
+            OcrPadding: AiOcrPadding.Border),
         // Last on purpose: the weakest and by far the slowest of the four on subtitle images
         // (9/14 recognized, 2.53% character error, 18.5 s/image against GLM-OCR's 2.5 s). It loses
         // line breaks, drops ♪ note marks, misreads Cyrillic ё as е and Chinese 的, and wraps
@@ -389,6 +419,22 @@ public static class LlamaCppServerManager
             MmprojFileName: "mmproj-LightOnOCR-1B-1025-Q8_0.gguf",
             MmprojUrl: "https://huggingface.co/ggml-org/LightOnOCR-1B-1025-GGUF/resolve/main/mmproj-LightOnOCR-1B-1025-Q8_0.gguf"),
     };
+
+    /// <summary>
+    /// The image framing for a curated OCR model given by its file name without extension (what
+    /// the engines send as the model name). Unknown and self-supplied models get the square.
+    /// </summary>
+    public static AiOcrPadding GetOcrPadding(string? modelName)
+    {
+        if (string.IsNullOrWhiteSpace(modelName))
+        {
+            return AiOcrPadding.Square;
+        }
+
+        var model = OcrModels.FirstOrDefault(m =>
+            Path.GetFileNameWithoutExtension(m.FileName).Equals(modelName.Trim(), StringComparison.OrdinalIgnoreCase));
+        return model?.OcrPadding ?? AiOcrPadding.Square;
+    }
 
     /// <summary>
     /// The OCR prompt to send for <paramref name="model"/>: the model's own
