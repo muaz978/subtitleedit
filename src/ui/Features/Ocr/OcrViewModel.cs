@@ -158,8 +158,10 @@ public partial class OcrViewModel : ObservableObject
     [ObservableProperty] private bool _isFallbackDatabaseVisible;
     [ObservableProperty] private string _nOcrBinaryOcrFallbackDatabase;
     [ObservableProperty] private string _binaryOcrNOcrFallbackDatabase;
-    [ObservableProperty] private double _imageMaxHeight = 100;
-    [ObservableProperty] private double _imageMaxWidth = 200;
+    private const double DefaultImageMaxHeight = 100;
+    private const double DefaultImageMaxWidth = 200;
+    [ObservableProperty] private double _imageMaxHeight = DefaultImageMaxHeight;
+    [ObservableProperty] private double _imageMaxWidth = DefaultImageMaxWidth;
     [ObservableProperty] private FontFamily _textBoxFontFamily;
     [ObservableProperty] private decimal _textBoxFontSize;
     [ObservableProperty] private FontWeight _textBoxFontWeight;
@@ -769,6 +771,13 @@ public partial class OcrViewModel : ObservableObject
                     d.Name.Contains(result.SelectedDictionary.NativeName, StringComparison.OrdinalIgnoreCase))
                 ?? Dictionaries.FirstOrDefault();
         }
+        else if (result.DictionariesChanged)
+        {
+            // Keep the current dictionary unless it was the one uninstalled.
+            var currentFileName = SelectedDictionary?.DictionaryFileName;
+            LoadDictionaries();
+            SelectedDictionary = Dictionaries.FirstOrDefault(d => d.DictionaryFileName == currentFileName) ?? Dictionaries.FirstOrDefault();
+        }
     }
 
     [RelayCommand]
@@ -814,7 +823,7 @@ public partial class OcrViewModel : ObservableObject
         var clampedItemNumber = Math.Clamp(currentItemNumber, 0, totalItems);
         OcrUiUpdates.EnqueueProgress(
             clampedItemNumber * 100.0 / totalItems,
-            string.Format(Se.Language.Ocr.RunningOcrDotDotDotXY, clampedItemNumber, totalItems));
+            string.Format(Se.Language.General.RunningOcrXY, clampedItemNumber, totalItems));
     }
 
     [RelayCommand]
@@ -1306,29 +1315,23 @@ public partial class OcrViewModel : ObservableObject
             return;
         }
 
-        var result = await _windowService.ShowDialogAsync<ShowImageWindow, ShowImageViewModel>(Window!, vm => { vm.Initialize(Se.Language.Ocr.OcrImage, item.GetBitmapCropped(), item.Text); });
-        _isCtrlDown = false;
+        await _windowService.ShowDialogAsync<ShowImageWindow, ShowImageViewModel>(Window!, vm =>
+        {
+            vm.Initialize(Se.Language.Ocr.OcrImage, item.GetBitmapCropped(), item.Text);
+            vm.Navigate = direction =>
+            {
+                var idx = OcrSubtitleItems.IndexOf(item) + direction;
+                if (idx < 0 || idx >= OcrSubtitleItems.Count)
+                {
+                    return null;
+                }
 
-        if (result.LeftPressed)
-        {
-            var idx = OcrSubtitleItems.IndexOf(item);
-            var prevIdx = idx - 1;
-            if (prevIdx >= 0)
-            {
-                SelectedOcrSubtitleItem = OcrSubtitleItems[prevIdx];
-                await ViewSelectedImage();
-            }
-        }
-        else if (result.RightPressed)
-        {
-            var idx = OcrSubtitleItems.IndexOf(item);
-            var nextIdx = idx + 1;
-            if (nextIdx < OcrSubtitleItems.Count)
-            {
-                SelectedOcrSubtitleItem = OcrSubtitleItems[nextIdx];
-                await ViewSelectedImage();
-            }
-        }
+                item = OcrSubtitleItems[idx];
+                SelectedOcrSubtitleItem = item;
+                return new ShowImageItem(Se.Language.Ocr.OcrImage, item.GetBitmapCropped(), item.Text);
+            };
+        });
+        _isCtrlDown = false;
     }
 
     [RelayCommand]
@@ -1650,7 +1653,7 @@ public partial class OcrViewModel : ObservableObject
             }
             else if (!engineInstalled)
             {
-                message = Se.Language.Ocr.LlamaCppDownloadEnginePrompt;
+                message = Se.Language.General.LlamaCppDownloadEnginePrompt;
             }
             else
             {
@@ -5206,6 +5209,37 @@ public partial class OcrViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Ctrl+mouse wheel over the grid zooms the image thumbnails, like Ctrl+plus/minus.
+    /// Attached as a tunnel handler so the grid's ScrollViewer doesn't scroll as well.
+    /// </summary>
+    internal void SubtitleGridPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        if (e.Delta.Y == 0 || !(e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        ZoomImages(e.Delta.Y > 0);
+    }
+
+    private void ZoomImages(bool zoomIn)
+    {
+        // TableView rows auto-size to their content, so changing the bound
+        // Image Max sizes re-measures the rows - no explicit RowHeight needed.
+        if (zoomIn && ImageMaxHeight < 300)
+        {
+            ImageMaxHeight *= 1.1;
+            ImageMaxWidth *= 1.1;
+        }
+        else if (!zoomIn && ImageMaxHeight > 50)
+        {
+            ImageMaxHeight *= 0.9;
+            ImageMaxWidth *= 0.9;
+        }
+    }
+
     internal void SubtitleGridDoubleTapped()
     {
         CommandInspectLine();
@@ -5249,22 +5283,18 @@ public partial class OcrViewModel : ObservableObject
         else if ((e.Key == Key.Add || e.Key == Key.OemPlus) && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             e.Handled = true;
-            if (ImageMaxHeight < 300)
-            {
-                // TableView rows auto-size to their content, so changing the bound
-                // Image Max sizes re-measures the rows - no explicit RowHeight needed.
-                ImageMaxHeight *= 1.1;
-                ImageMaxWidth *= 1.1;
-            }
+            ZoomImages(true);
         }
         else if ((e.Key == Key.Subtract || e.Key == Key.OemMinus) && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             e.Handled = true;
-            if (ImageMaxHeight > 50)
-            {
-                ImageMaxHeight *= 0.9;
-                ImageMaxWidth *= 0.9;
-            }
+            ZoomImages(false);
+        }
+        else if ((e.Key == Key.D0 || e.Key == Key.NumPad0) && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            e.Handled = true;
+            ImageMaxHeight = DefaultImageMaxHeight;
+            ImageMaxWidth = DefaultImageMaxWidth;
         }
         else if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {

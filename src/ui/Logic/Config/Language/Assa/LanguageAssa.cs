@@ -41,8 +41,6 @@ public class LanguageAssa
     public string DrawImportSvg { get; set; }
     public string DrawRotateClockwise { get; set; }
     public string DrawConvertToCurve { get; set; }
-    public string DrawBackground { get; set; }
-    public string DrawPosition { get; set; }
     public string DrawZoom { get; set; }
     public string DrawShapeTool { get; set; }
     public string DrawColorPickerTool { get; set; }
@@ -92,6 +90,75 @@ public class LanguageAssa
     public string DrawClipArtNoEntry { get; set; }
     public string DrawClipArtPopcorn { get; set; }
     public string DrawClipArtCoffeeCup { get; set; }
+    public string DrawClipArtRainbow { get; set; }
+    public string DrawClipArtTrophy { get; set; }
+    public string DrawClipArtRocket { get; set; }
+    public string DrawClipArtBalloon { get; set; }
+    public string DrawClipArtCamera { get; set; }
+    public string DrawClipArtPartyPopper { get; set; }
+    public string DrawClipArtPizzaSlice { get; set; }
+    public string DrawClipArtIceCream { get; set; }
+    public string DrawClipArtUmbrella { get; set; }
+    public string DrawClipArtCatFace { get; set; }
+    public string DrawClipArtKey { get; set; }
+    public string DrawClipArtChristmasTree { get; set; }
+    public string DrawClipArtYouTube { get; set; }
+    public string DrawClipArtInstagram { get; set; }
+    public string DrawClipArtLinkedIn { get; set; }
+    public string DrawClipArtFacebook { get; set; }
+    public string DrawClipArtX { get; set; }
+    public string DrawClipArtTikTok { get; set; }
+    public string DrawClipArtClosedCaptions { get; set; }
+    public string DrawClipArtSpeakerLabel { get; set; }
+    public string DrawClipArtTranslation { get; set; }
+    public string DrawClipArtSignLanguage { get; set; }
+    public string DrawClipArtAi { get; set; }
+    public string DrawClipArtHeadphones { get; set; }
+    public string DrawClipArtYummy { get; set; }
+    public string DrawClipArtDrooling { get; set; }
+    public string DrawClipArtDisgusted { get; set; }
+    public string DrawClipArtTooSpicy { get; set; }
+    public string DrawClipArtChefsKiss { get; set; }
+    public string DrawClipArtLoveIt { get; set; }
+    public string DrawClipArtStarRating { get; set; }
+    public string DrawAnimation { get; set; }
+    public string DrawAnimationIn { get; set; }
+    public string DrawAnimationOut { get; set; }
+    public string DrawAnimationFade { get; set; }
+    public string DrawAnimationPop { get; set; }
+    public string DrawAnimationZoom { get; set; }
+    public string DrawAnimationSpin { get; set; }
+    public string DrawAnimationFromLeft { get; set; }
+    public string DrawAnimationFromRight { get; set; }
+    public string DrawAnimationFromTop { get; set; }
+    public string DrawAnimationFromBottom { get; set; }
+    public string DrawAnimationToLeft { get; set; }
+    public string DrawAnimationToRight { get; set; }
+    public string DrawAnimationToTop { get; set; }
+    public string DrawAnimationToBottom { get; set; }
+    public string DrawAnimationPlay { get; set; }
+    public string DrawAnimationStop { get; set; }
+    public string DrawAnimationLayerHint { get; set; }
+    public string DrawAnimationLoop { get; set; }
+    public string DrawAnimationPulse { get; set; }
+    public string DrawAnimationBlink { get; set; }
+    public string DrawAnimationBounce { get; set; }
+    public string DrawAnimationShake { get; set; }
+    public string DrawAnimationSwing { get; set; }
+    public string DrawAnimationFlip { get; set; }
+    public string DrawAnimationLoopBlocked { get; set; }
+    public string DrawClipArtLoadingSpinner { get; set; }
+    public string DrawClipArtRec { get; set; }
+    public string DrawClipArtRingingPhone { get; set; }
+    public string DrawClipArtBeatingHeart { get; set; }
+    public string DrawClipArtBouncingArrow { get; set; }
+    public string DrawClipArtRingingBell { get; set; }
+    public string DrawClipArtPointingHand { get; set; }
+    public string DrawClipArtWiFi { get; set; }
+    public string DrawClipArtTwinklingStar { get; set; }
+    public string DrawClipArtAlarmClock { get; set; }
+    public string DrawClipArtHourglass { get; set; }
+    public string DrawClipArtIdea { get; set; }
     public string DrawCategoryMyShapes { get; set; }
     public string DrawShapeSpeechBubble { get; set; }
     public string DrawShapeSpeechBubbleRight { get; set; }
@@ -135,8 +202,6 @@ public class LanguageAssa
     public string DrawShapeCross { get; set; }
     public string DrawShapeSmiley { get; set; }
     public string DrawShapeSadSmiley { get; set; }
-    public string DrawSize { get; set; }
-    public string DrawLayer { get; set; }
     public string DrawBackgroundVideoFrame { get; set; }
     public string DrawBackgroundVideoFrameAt { get; set; }
     public string DrawBackgroundImage { get; set; }
@@ -144,7 +209,6 @@ public class LanguageAssa
     public string DrawBackgroundStretch { get; set; }
     public string DrawBackgroundOpacity { get; set; }
     public string DrawBackgroundVideoFrameFailed { get; set; }
-    public string DrawImages { get; set; }
     public string DrawConvertToLine { get; set; }
     public string DrawConvertShapeToCurves { get; set; }
     public string DrawConvertShapeToLines { get; set; }
@@ -154,10 +218,21 @@ public class LanguageAssa
     public string DrawTextTool { get; set; }
     public string DrawDefaultText { get; set; }
     public string DrawShrinkToFit { get; set; }
-    public string DrawTextColor { get; set; }
     public string DrawTextBox { get; set; }
-    public string DrawDiscardChangesTitle { get; set; }
     public string DrawDiscardChanges { get; set; }
+    public string DrawColorPickerToolName { get; set; }
+    public string DrawOpenDrawing { get; set; }
+    public string DrawSaveDrawing { get; set; }
+    public string DrawDrawingFiles { get; set; }
+    public string DrawAssFiles { get; set; }
+    public string DrawPositionXY { get; set; }
+    public string DrawXShapes { get; set; }
+    public string DrawXPoints { get; set; }
+    public string DrawShapeXDraw { get; set; }
+    public string DrawShapeXErase { get; set; }
+    public string DrawGroup { get; set; }
+    public string DrawUngroup { get; set; }
+    public string DrawGroupX { get; set; }
 
     // Progress Bar Generator
     public string ProgressBarTitle { get; set; }
@@ -167,7 +242,6 @@ public class LanguageAssa
     public string ProgressBarForeColor { get; set; }
     public string ProgressBarSquareCorners { get; set; }
     public string ProgressBarRoundedCorners { get; set; }
-    public string ProgressBarChapters { get; set; }
     public string ProgressBarSplitterWidth { get; set; }
     public string ProgressBarSplitterHeight { get; set; }
     public string ProgressBarXAdjustment { get; set; }
@@ -198,7 +272,6 @@ public class LanguageAssa
     public string FontCollectorUsedIn { get; set; }
     public string FontCollectorFontFiles { get; set; }
     public string FontCollectorStyleX { get; set; }
-    public string FontCollectorInlineLineX { get; set; }
     public string FontCollectorFound { get; set; }
     public string FontCollectorNotFound { get; set; }
     public string FontCollectorEmbedded { get; set; }
@@ -274,12 +347,9 @@ public class LanguageAssa
     public string StylesSummary { get; set; }
     public string StylesTransform { get; set; }
     public string StylesEditing { get; set; }
-    public string StylesPreviewSampleText { get; set; }
     public string StylesPreviewSampleTextHint { get; set; }
     public string StylesScale { get; set; }
-    public string StylesPreviewDark { get; set; }
     public string StylesPreviewChecker { get; set; }
-    public string StylesPreviewLight { get; set; }
     public string AllCategories { get; set; }
     public string NewCategory { get; set; }
     public string RenameCategory { get; set; }
@@ -345,7 +415,6 @@ public class LanguageAssa
     public string SetPositionTopCenter { get; set; }
     public string SetPositionTopRight { get; set; }
     public string SetPositionMiddleLeft { get; set; }
-    public string SetPositionCenter { get; set; }
     public string SetPositionMiddleRight { get; set; }
     public string SetPositionBottomLeft { get; set; }
     public string SetPositionBottomCenter { get; set; }
@@ -467,7 +536,6 @@ public class LanguageAssa
     public string AdvancedEffectSingleWordPopDescription { get; set; }
     public string AdvancedEffectBoldCaptions { get; set; }
     public string AdvancedEffectBoldCaptionsDescription { get; set; }
-    public string AdvancedEffectBoxColor { get; set; }
     public string AdvancedEffectHighlightColor { get; set; }
     public string AdvancedEffectUpperCase { get; set; }
     public string AdvancedEffectTextSizePercent { get; set; }
@@ -485,12 +553,12 @@ public class LanguageAssa
     {
         // ASSA Draw
         AssaDraw = "ASSA Draw";
-        DrawSelectTool = "Select (move points)";
+        DrawSelectTool = "Select and move shapes";
         DrawUseShapeForErase = "Use shape for erase (iclip)";
-        DrawLineTool = "Line Tool (F4)";
-        DrawBezierTool = "Bezier Curve (F5)";
-        DrawRectangleTool = "Rectangle (F6)";
-        DrawCircleTool = "Circle (F7)";
+        DrawLineTool = "Line tool";
+        DrawBezierTool = "Bezier curve";
+        DrawRectangleTool = "Rectangle";
+        DrawCircleTool = "Circle";
         DrawCloseShape = "Close Shape (F8/Enter)";
         DrawDeleteShape = "Delete Shape (Del)";
         DrawChangeLayer = "Change Layer";
@@ -498,7 +566,7 @@ public class LanguageAssa
         DrawZoomIn = "Zoom In (Ctrl++)";
         DrawZoomOut = "Zoom Out (Ctrl+-)";
         DrawResetView = "Reset View (Ctrl+0)";
-        DrawToggleGrid = "Toggle Grid (Ctrl+G)";
+        DrawToggleGrid = "Toggle Grid (Ctrl+')";
         DrawTogglePreview = "Toggle preview (F9)";
         DrawPreviewFailed = "Preview failed - ffmpeg with libass (subtitles filter) is required";
         DrawCopyToClipboard = "Copy to Clipboard (Ctrl+C)";
@@ -522,8 +590,6 @@ public class LanguageAssa
         DrawImportSvg = "Import SVG image...";
         DrawRotateClockwise = "Rotate 90° clockwise";
         DrawConvertToCurve = "Convert segment to curve";
-        DrawBackground = "Background";
-        DrawPosition = "Position";
         DrawZoom = "Zoom";
         DrawShapeTool = "Shape tool";
         DrawColorPickerTool = "Pick color from a shape or the background";
@@ -573,6 +639,75 @@ public class LanguageAssa
         DrawClipArtNoEntry = "No entry";
         DrawClipArtPopcorn = "Popcorn";
         DrawClipArtCoffeeCup = "Coffee cup";
+        DrawClipArtRainbow = "Rainbow";
+        DrawClipArtTrophy = "Trophy";
+        DrawClipArtRocket = "Rocket";
+        DrawClipArtBalloon = "Balloon";
+        DrawClipArtCamera = "Camera";
+        DrawClipArtPartyPopper = "Party popper";
+        DrawClipArtPizzaSlice = "Pizza slice";
+        DrawClipArtIceCream = "Ice cream";
+        DrawClipArtUmbrella = "Umbrella";
+        DrawClipArtCatFace = "Cat face";
+        DrawClipArtKey = "Key";
+        DrawClipArtChristmasTree = "Christmas tree";
+        DrawClipArtYouTube = "YouTube";
+        DrawClipArtInstagram = "Instagram";
+        DrawClipArtLinkedIn = "LinkedIn";
+        DrawClipArtFacebook = "Facebook";
+        DrawClipArtX = "X";
+        DrawClipArtTikTok = "TikTok";
+        DrawClipArtClosedCaptions = "Closed captions";
+        DrawClipArtSpeakerLabel = "Speaker";
+        DrawClipArtTranslation = "Translation";
+        DrawClipArtSignLanguage = "Sign language";
+        DrawClipArtAi = "AI";
+        DrawClipArtHeadphones = "Headphones";
+        DrawClipArtYummy = "Yummy";
+        DrawClipArtDrooling = "Drooling";
+        DrawClipArtDisgusted = "Disgusted";
+        DrawClipArtTooSpicy = "Too spicy";
+        DrawClipArtChefsKiss = "Chef's kiss";
+        DrawClipArtLoveIt = "Love it";
+        DrawClipArtStarRating = "{0} of 5 stars";
+        DrawAnimation = "Animation";
+        DrawAnimationIn = "In";
+        DrawAnimationOut = "Out";
+        DrawAnimationFade = "Fade";
+        DrawAnimationPop = "Pop";
+        DrawAnimationZoom = "Zoom";
+        DrawAnimationSpin = "Spin";
+        DrawAnimationFromLeft = "From left";
+        DrawAnimationFromRight = "From right";
+        DrawAnimationFromTop = "From top";
+        DrawAnimationFromBottom = "From bottom";
+        DrawAnimationToLeft = "To left";
+        DrawAnimationToRight = "To right";
+        DrawAnimationToTop = "To top";
+        DrawAnimationToBottom = "To bottom";
+        DrawAnimationPlay = "Play animation";
+        DrawAnimationStop = "Stop animation";
+        DrawAnimationLayerHint = "Applies to the whole layer (one subtitle line); a group moves as one.";
+        DrawAnimationLoop = "Loop";
+        DrawAnimationPulse = "Pulse";
+        DrawAnimationBlink = "Blink";
+        DrawAnimationBounce = "Bounce";
+        DrawAnimationShake = "Shake";
+        DrawAnimationSwing = "Swing";
+        DrawAnimationFlip = "Flip";
+        DrawAnimationLoopBlocked = "This loop turns around another point than the in/out effect, so it is left out.";
+        DrawClipArtLoadingSpinner = "Loading spinner";
+        DrawClipArtRec = "REC";
+        DrawClipArtRingingPhone = "Ringing phone";
+        DrawClipArtBeatingHeart = "Beating heart";
+        DrawClipArtBouncingArrow = "Bouncing arrow";
+        DrawClipArtRingingBell = "Ringing bell";
+        DrawClipArtPointingHand = "Pointing hand";
+        DrawClipArtWiFi = "Wi-Fi";
+        DrawClipArtTwinklingStar = "Twinkling star";
+        DrawClipArtAlarmClock = "Alarm clock";
+        DrawClipArtHourglass = "Hourglass";
+        DrawClipArtIdea = "Idea";
         DrawCategoryMyShapes = "My shapes";
         DrawShapeSpeechBubble = "Speech bubble";
         DrawShapeSpeechBubbleRight = "Speech bubble, tail right";
@@ -616,8 +751,6 @@ public class LanguageAssa
         DrawShapeCross = "Cross";
         DrawShapeSmiley = "Smiley";
         DrawShapeSadSmiley = "Sad smiley";
-        DrawSize = "Size";
-        DrawLayer = "Layer";
         DrawBackgroundVideoFrame = "Video frame (current position)";
         DrawBackgroundVideoFrameAt = "Video frame at...";
         DrawBackgroundImage = "Image file...";
@@ -625,7 +758,6 @@ public class LanguageAssa
         DrawBackgroundStretch = "Stretch image to canvas";
         DrawBackgroundOpacity = "Background opacity";
         DrawBackgroundVideoFrameFailed = "Could not get a video frame at {0}.";
-        DrawImages = "Images";
         DrawConvertToLine = "Convert segment to line";
         DrawConvertShapeToCurves = "Convert all lines to curves";
         DrawConvertShapeToLines = "Convert all curves to lines";
@@ -635,10 +767,21 @@ public class LanguageAssa
         DrawTextTool = "Text tool";
         DrawDefaultText = "Text";
         DrawShrinkToFit = "Shrink to fit";
-        DrawTextColor = "Text color";
         DrawTextBox = "Text box";
-        DrawDiscardChangesTitle = "Discard changes?";
         DrawDiscardChanges = "The drawing has been changed." + System.Environment.NewLine + "Discard the changes?";
+        DrawColorPickerToolName = "Color picker";
+        DrawOpenDrawing = "Open ASSA drawing";
+        DrawSaveDrawing = "Save ASSA drawing";
+        DrawDrawingFiles = "ASSA drawing files";
+        DrawAssFiles = "ASS files";
+        DrawPositionXY = "Position: {0}, {1}";
+        DrawXShapes = "{0} shapes";
+        DrawXPoints = "{0} points";
+        DrawShapeXDraw = "Shape {0} (draw)";
+        DrawShapeXErase = "Shape {0} (erase)";
+        DrawGroup = "Group (Ctrl+G)";
+        DrawUngroup = "Ungroup (Ctrl+Shift+G)";
+        DrawGroupX = "Group {0}";
 
         // Progress Bar Generator
         ProgressBarTitle = "ASSA progress bar";
@@ -646,7 +789,6 @@ public class LanguageAssa
         ProgressBarForeColor = "Foreground color";
         ProgressBarSquareCorners = "Square corners";
         ProgressBarRoundedCorners = "Rounded corners";
-        ProgressBarChapters = "Chapters";
         ProgressBarSplitterWidth = "Splitter width";
         ProgressBarSplitterHeight = "Splitter height";
         ProgressBarXAdjustment = "X adjustment";
@@ -677,7 +819,6 @@ public class LanguageAssa
         FontCollectorUsedIn = "Used in";
         FontCollectorFontFiles = "Font file(s)";
         FontCollectorStyleX = "Style: {0}";
-        FontCollectorInlineLineX = "Line {0}";
         FontCollectorFound = "Found";
         FontCollectorNotFound = "Not found";
         FontCollectorEmbedded = "Embedded";
@@ -752,12 +893,9 @@ public class LanguageAssa
         StylesSummary = "{0} styles in file · {1} saved";
         StylesTransform = "Transform";
         StylesEditing = "Editing";
-        StylesPreviewSampleText = "Sample text";
         StylesPreviewSampleTextHint = "Sample text - \\N for a new line";
         StylesScale = "Scale %";
-        StylesPreviewDark = "Dark";
         StylesPreviewChecker = "Checker";
-        StylesPreviewLight = "Light";
         AllCategories = "[All]";
         NewCategory = "New category...";
         RenameCategory = "Rename category...";
@@ -769,7 +907,7 @@ public class LanguageAssa
         AttachmentsTitleX = "Attachments - {0}";
         SmartWrappingTopWide = "0: Smart wrapping (top wide)";
         EndOfLineWrapping = "1: End-of-line word wrapping, only \\N breaks";
-        NoWrapping = "2: No wrapping, both \\N an \\n breaks";
+        NoWrapping = "2: No wrapping, both \\N and \\n breaks";
         SmartWrappingBottomWide = "3: Smart wrapping (bottom wide)";
         FontsAndGraphics = "Fonts and graphics";
         WrapStyle = "Wrap style";
@@ -823,7 +961,6 @@ public class LanguageAssa
         SetPositionTopCenter = "Top center";
         SetPositionTopRight = "Top right";
         SetPositionMiddleLeft = "Middle left";
-        SetPositionCenter = "Center";
         SetPositionMiddleRight = "Middle right";
         SetPositionBottomLeft = "Bottom left";
         SetPositionBottomCenter = "Bottom center";
@@ -945,7 +1082,6 @@ public class LanguageAssa
         AdvancedEffectSingleWordPopDescription = "Shows one big word at a time, popping in as it is spoken - short-video caption style";
         AdvancedEffectBoldCaptions = "Bold captions";
         AdvancedEffectBoldCaptionsDescription = "Bold captions with a thick outline - the spoken word lights up in color and grows";
-        AdvancedEffectBoxColor = "Box color";
         AdvancedEffectHighlightColor = "Highlight color";
         AdvancedEffectUpperCase = "Uppercase";
         AdvancedEffectTextSizePercent = "Text size (%)";

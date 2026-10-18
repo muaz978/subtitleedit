@@ -374,8 +374,10 @@ namespace Nikse.SubtitleEdit.Core.Common
                 }
 
                 var conversion = GetCaseConversion(next);
-                if (conversion == CaseConversion.None)
+                if (conversion == CaseConversion.None ||
+                    conversion != CaseConversion.End && i + 2 < replaceWith.Length && char.IsDigit(replaceWith[i + 2]))
                 {
+                    // A digit after \u, \l, \U or \L is an ASSA tag like {\u1} (underline), not a case escape.
                     sb.Append(ch);
                     continue;
                 }
@@ -489,7 +491,7 @@ namespace Nikse.SubtitleEdit.Core.Common
 
         private static bool ContainsNonLineFeedNewLine(string text)
         {
-            return text.IndexOf('\r') >= 0 || text.IndexOf('\u2028') >= 0;
+            return text.Contains('\r') || text.Contains('\u2028');
         }
     }
 }

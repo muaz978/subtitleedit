@@ -513,7 +513,14 @@ public class NikseBitmapImageSplitter2
             // as a bogus second line (#14292).
             if (lineBitmaps.Count == 1 && lineBitmaps[0].NikseBitmap?.GetNonTransparentHeight() > minLineHeight * 2.2)
             {
-                lineBitmaps = SplitToLinesNew(lineBitmaps[0], minLineHeight, averageLineHeight);
+                // A single line of large text (tall parentheses) clears that height too; the cut
+                // then shaved the tip off a parenthesis into a bogus second line, read as "*".
+                // A "line" of crumbs isn't one: keep the text whole then.
+                var split = SplitToLinesNew(lineBitmaps[0], minLineHeight, averageLineHeight);
+                if (split.Count < 2 || split.All(l => l.NikseBitmap?.GetNonTransparentHeight() >= minLineHeight / 2))
+                {
+                    lineBitmaps = split;
+                }
             }
         }
         else
@@ -576,26 +583,47 @@ public class NikseBitmapImageSplitter2
     /// </summary>
     private static void SetBaseline(List<ImageSplitterItem2> list, int lineStart)
     {
-        var bottoms = new List<int>();
+        var maxHeight = 0;
+        for (var i = lineStart; i < list.Count; i++)
+        {
+            maxHeight = Math.Max(maxHeight, list[i].NikseBitmap?.Height ?? 0);
+        }
+
+        var glyphs = new List<(int Bottom, bool Mark)>();
         for (var i = lineStart; i < list.Count; i++)
         {
             var bitmap = list[i].NikseBitmap;
             if (bitmap != null)
             {
-                bottoms.Add(list[i].Top + bitmap.Height);
+                // Under 45% of the tallest glyph is a mark: quotes and apostrophes reach ~40%,
+                // x-height letters stay above ~55% (even beside tall brackets).
+                glyphs.Add((list[i].Top + bitmap.Height, bitmap.Height * 20 < maxHeight * 9));
             }
         }
 
-        if (bottoms.Count == 0)
+        if (glyphs.Count == 0)
         {
             return;
         }
 
-        bottoms.Sort();
+        glyphs.Sort((a, b) => a.Bottom.CompareTo(b.Bottom));
 
         // Lower median: with an even count the upper one is a descender in a two-glyph line
         // ("Ну"), which made the other glyph look capital-height.
-        var baseline = bottoms[(bottoms.Count - 1) / 2];
+        var median = glyphs[(glyphs.Count - 1) / 2];
+        var baseline = median.Bottom;
+
+        // In a short line the marks can outnumber the letters ("-Tom--", "''Okay!'' Y--"); a
+        // median on a dash or quote floating above every letter is no baseline, so the floating
+        // marks are left out. Periods and commas stay in: they sit on (or hang below) the line.
+        var letterBottoms = glyphs.Where(g => !g.Mark).Select(g => g.Bottom).ToList();
+        var tolerance = Math.Max(1, maxHeight / 20);
+        if (median.Mark && letterBottoms.Count > 0 && median.Bottom < letterBottoms.Min() - tolerance)
+        {
+            var grounded = glyphs.Where(g => g.Bottom >= letterBottoms.Min() - tolerance).ToList();
+            baseline = grounded[(grounded.Count - 1) / 2].Bottom;
+        }
+
         for (var i = lineStart; i < list.Count; i++)
         {
             if (list[i].NikseBitmap != null)

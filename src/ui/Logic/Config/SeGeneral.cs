@@ -22,6 +22,7 @@ public class SeGeneral
     public int SubtitleLineMaximumLength { get; set; } = 43;
     public int MaxNumberOfLines { get; set; }
     public bool SubtitleTextBoxLimitNewLines { get; set; } = true;
+    public bool SubtitleTextBoxAutoWrapWhileTyping { get; set; }
     public double SubtitleMaximumCharactersPerSeconds { get; set; }
     public double SubtitleOptimalCharactersPerSeconds { get; set; }
     public double SubtitleMaximumWordsPerMinute { get; set; }
@@ -29,6 +30,7 @@ public class SeGeneral
     public string DialogStyle { get; set; }
     public string ContinuationStyle { get; set; }
     public string CpsLineLengthStrategy { get; set; }
+    public string CpsLineLengthIgnoreTagsRegex { get; set; }
 
     public CustomContinuationStyle CustomContinuationStyle { get; set; }
     public bool FixContinuationStyleUncheckInsertsAllCaps { get; set; }
@@ -183,6 +185,8 @@ public class SeGeneral
     public bool ColorTimeCodeOverlap { get; set; }
     public bool ColorGapTooShort { get; set; }
     public string ErrorColor { get; set; }
+    public bool ColorCustomErrorRules { get; set; }
+    public List<SeCustomErrorRule> CustomErrorRules { get; set; } = new();
 
     public string FfmpegPath { get; set; }
     public bool FfmpegUseCenterChannelOnly { get; set; }
@@ -272,6 +276,7 @@ public class SeGeneral
         SubtitleMaximumWordsPerMinute = 400;
         DialogStyle = DialogType.DashBothLinesWithSpace.ToString();
         CpsLineLengthStrategy = nameof(CalcAll);
+        CpsLineLengthIgnoreTagsRegex = string.Empty;
         ContinuationStyle = Core.Enums.ContinuationStyle.None.ToString();
         CustomContinuationStyle = new CustomContinuationStyle();
         FixContinuationStyleUncheckInsertsAllCaps = true;
@@ -337,6 +342,7 @@ public class SeGeneral
         FavoriteSubtitleFormats = new SubRip().FriendlyName + ";" + new AdvancedSubStationAlpha().FriendlyName;
         FavoriteLanguages = string.Empty;
         CpsLineLengthStrategy = nameof(CalcAll);
+        CpsLineLengthIgnoreTagsRegex = string.Empty;
         RememberPositionAndSize = true;
 
         ColorDurationTooShort = true;
@@ -352,6 +358,7 @@ public class SeGeneral
         ColorTimeCodeOverlap = true;
         ColorGapTooShort = true;
         ErrorColor = Color.FromArgb(50, 255, 0, 0).FromColorToHex();
+        ColorCustomErrorRules = true;
 
         FfmpegPath = string.Empty;
         LibMpvPath = string.Empty;

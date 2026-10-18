@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Automation;
@@ -47,7 +47,7 @@ public class AssaStylesWindow : Window
         MinWidth = 1050;
         MinHeight = 600;
         Background = EditorChrome.WindowBrush;
-        EditorChrome.AddEditorStyles(Styles);
+        EditorChrome.AddWindowStyles(Styles, EditorWindowStyles.TextFields);
         AddStyles(Styles);
 
         vm.Window = this;
@@ -546,10 +546,7 @@ public class AssaStylesWindow : Window
     {
         var name = new TextBox
         {
-            FontSize = 12.5,
-            Background = EditorChrome.FieldBrush,
-            BorderBrush = EditorChrome.FieldBorderBrush,
-            CornerRadius = new CornerRadius(6),
+            Classes = { EditorChrome.TextClass },
             [!TextBox.TextProperty] = new Binding(Current + nameof(StyleDisplay.Name)) { Mode = BindingMode.TwoWay },
         };
         AutomationProperties.SetName(name, Se.Language.General.Name);
@@ -724,7 +721,7 @@ public class AssaStylesWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 6, 0),
         });
-        var names = new[] { Se.Language.Assa.StylesPreviewDark, Se.Language.Assa.StylesPreviewChecker, Se.Language.Assa.StylesPreviewLight };
+        var names = new[] { Se.Language.General.Dark, Se.Language.Assa.StylesPreviewChecker, Se.Language.General.Light };
         for (var i = 0; i < names.Length; i++)
         {
             var index = i;
@@ -751,15 +748,12 @@ public class AssaStylesWindow : Window
         // The preview's text - saved in Settings.json
         var sampleText = new TextBox
         {
-            FontSize = 12.5,
-            Background = EditorChrome.FieldBrush,
-            BorderBrush = EditorChrome.FieldBorderBrush,
-            CornerRadius = new CornerRadius(6),
+            Classes = { EditorChrome.TextClass },
             PlaceholderText = Se.Language.Assa.StylesPreviewSampleTextHint,
             VerticalAlignment = VerticalAlignment.Center,
             [!TextBox.TextProperty] = new Binding(nameof(vm.PreviewText)) { Mode = BindingMode.TwoWay },
         };
-        AutomationProperties.SetName(sampleText, Se.Language.Assa.StylesPreviewSampleText);
+        AutomationProperties.SetName(sampleText, Se.Language.General.SampleText);
         if (Se.Settings.Appearance.ShowHints)
         {
             ToolTip.SetTip(sampleText, Se.Language.Assa.StylesPreviewSampleTextHint);
