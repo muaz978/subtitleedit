@@ -135,27 +135,13 @@ public partial class SubtitleLineViewModel : ObservableObject
                          ebuLine >= 1 &&
                          ebuLine <= 23;
 
-            var text = Text ?? string.Empty;
-            var alignment = string.Empty;
-
-            if (text.StartsWith("{\\an1}") ||
-                text.StartsWith("{\\an4}") ||
-                text.StartsWith("{\\an7}"))
+            var alignment = GetLeadingAlignmentDigit(Text) switch
             {
-                alignment = "L";
-            }
-            else if (text.StartsWith("{\\an3}") ||
-                     text.StartsWith("{\\an6}") ||
-                     text.StartsWith("{\\an9}"))
-            {
-                alignment = "R";
-            }
-            else if (text.StartsWith("{\\an2}") ||
-                     text.StartsWith("{\\an5}") ||
-                     text.StartsWith("{\\an8}"))
-            {
-                alignment = "C";
-            }
+                '1' or '4' or '7' => "L",
+                '3' or '6' or '9' => "R",
+                '2' or '5' or '8' => "C",
+                _ => string.Empty,
+            };
 
             if (!hasRow)
             {
@@ -193,24 +179,28 @@ public partial class SubtitleLineViewModel : ObservableObject
     {
         get
         {
-            var text = Text ?? string.Empty;
-
-            if (text.StartsWith("{\\an1}") ||
-                text.StartsWith("{\\an4}") ||
-                text.StartsWith("{\\an7}"))
+            return GetLeadingAlignmentDigit(Text) switch
             {
-                return TextAlignment.Left;
-            }
-
-            if (text.StartsWith("{\\an3}") ||
-                text.StartsWith("{\\an6}") ||
-                text.StartsWith("{\\an9}"))
-            {
-                return TextAlignment.Right;
-            }
-
-            return TextAlignment.Center;
+                '1' or '4' or '7' => TextAlignment.Left,
+                '3' or '6' or '9' => TextAlignment.Right,
+                _ => TextAlignment.Center,
+            };
         }
+    }
+
+    /// <summary>
+    /// The digit of a leading "{\anX}" tag, or '\0'. An ordinal check: the culture-aware
+    /// StartsWith calls this replaced ran up to nine times per row bind and per keystroke.
+    /// </summary>
+    private static char GetLeadingAlignmentDigit(string? text)
+    {
+        if (text == null || text.Length < 6 || text[0] != '{' || text[1] != '\\' || text[2] != 'a' || text[3] != 'n' || text[5] != '}')
+        {
+            return '\0';
+        }
+
+        var digit = text[4];
+        return digit >= '1' && digit <= '9' ? digit : '\0';
     }
 
     public bool NewSection { get; set; }
@@ -945,6 +935,11 @@ public partial class SubtitleLineViewModel : ObservableObject
                 return _errorBrush;
             }
 
+            if (IsGapInColorRange(Se.Settings.General, Gap))
+            {
+                return _errorBrush;
+            }
+
             return _transparentBrush;
         }
     }
@@ -985,6 +980,10 @@ public partial class SubtitleLineViewModel : ObservableObject
             else if (general.ColorGapTooShort && Gap < general.MinimumBetweenLines.GetMilliseconds())
             {
                 Add("gap too short");
+            }
+            else if (IsGapInColorRange(general, Gap))
+            {
+                Add("gap in range");
             }
 
             if (_shotInWarning)
@@ -1422,7 +1421,31 @@ public partial class SubtitleLineViewModel : ObservableObject
     private static bool HasGapError(SeGeneral general, double gapMs)
         => gapMs < 0
             ? general.ColorTimeCodeOverlap
-            : general.ColorGapTooShort && gapMs < general.MinimumBetweenLines.GetMilliseconds();
+            : (general.ColorGapTooShort && gapMs < general.MinimumBetweenLines.GetMilliseconds()) ||
+              IsGapInColorRange(general, gapMs);
+
+    /// <summary>
+    /// True when "Color gap in range" is on and the gap is inside GapRangeMin..GapRangeMax
+    /// (both inclusive). In frame mode the gap is rounded to whole frames first, so a 3 frame
+    /// gap matches a min of 3 frames even when its millisecond value is off by rounding.
+    /// </summary>
+    public static bool IsGapInColorRange(SeGeneral general, double gapMs)
+    {
+        // The last line has Gap = double.MaxValue (no next line).
+        if (!general.ColorGapInRange || gapMs < 0 || gapMs > int.MaxValue)
+        {
+            return false;
+        }
+
+        if (general.UseFrameMode)
+        {
+            var frames = SubtitleFormat.MillisecondsToFrames(gapMs);
+            return frames >= general.GapRangeMin.Frames && frames <= general.GapRangeMax.Frames;
+        }
+
+        var ms = Math.Round(gapMs, MidpointRounding.AwayFromZero);
+        return ms >= general.GapRangeMin.Milliseconds && ms <= general.GapRangeMax.Milliseconds;
+    }
 
     /// <summary>All errors as one newline-separated string (batch error list, tooltips).</summary>
     public string GetErrors(SubtitleLineViewModel? prev, SubtitleLineViewModel? next)
@@ -1528,6 +1551,10 @@ public partial class SubtitleLineViewModel : ObservableObject
             {
                 errors.Add(new LineError(LineErrorType.GapTooShort, string.Format(l.DetailGapToPrevious, Math.Round(gapPrev, 3), minGap)));
             }
+            else if (IsGapInColorRange(general, gapPrev))
+            {
+                errors.Add(new LineError(LineErrorType.GapInRange, string.Format(l.DetailGapInRangeToPrevious, Math.Round(gapPrev, 3), general.GapRangeMin.GetMilliseconds(), general.GapRangeMax.GetMilliseconds())));
+            }
         }
 
         if (next != null)
@@ -1543,6 +1570,10 @@ public partial class SubtitleLineViewModel : ObservableObject
             else if (gapNext < minGap && general.ColorGapTooShort)
             {
                 errors.Add(new LineError(LineErrorType.GapTooShort, string.Format(l.DetailGapToNext, Math.Round(gapNext, 3), minGap)));
+            }
+            else if (IsGapInColorRange(general, gapNext))
+            {
+                errors.Add(new LineError(LineErrorType.GapInRange, string.Format(l.DetailGapInRangeToNext, Math.Round(gapNext, 3), general.GapRangeMin.GetMilliseconds(), general.GapRangeMax.GetMilliseconds())));
             }
         }
 

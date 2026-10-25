@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Data;
 using Avalonia.Layout;
@@ -33,7 +32,7 @@ public class GetKeyWindow : Window
 
         var labelShortcutName = new TextBlock
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center,
@@ -46,7 +45,7 @@ public class GetKeyWindow : Window
         var labelKey = new TextBlock
         {
             Text = Se.Language.Options.Shortcuts.PressAKey,
-            FontSize = 15,
+            FontSize = EditorChrome.ScaledFont(15),
             FontWeight = FontWeight.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,
             TextAlignment = TextAlignment.Center,

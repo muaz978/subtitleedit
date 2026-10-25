@@ -22,7 +22,7 @@ public class Se
     internal const int CurrentShortcutsMigrationVersion = 6;
     internal const int CurrentLayoutMigrationVersion = 2;
 
-    public static string Version { get; set; } = "v5.4.0-beta1";
+    public static string Version { get; set; } = "v5.4.0-beta6";
 
     public SeGeneral General { get; set; } = new();
     public List<SeShortCut> Shortcuts { get; set; } = new();
@@ -1416,6 +1416,10 @@ public class Se
         ss.TimedTextItunesTimeCodeFormat = Settings.Formats.TimedTextItunesTimeCodeFormat;
         ss.TimedTextItunesStyleAttribute = Settings.Formats.TimedTextItunesStyleAttribute;
         ss.TimedTextItunesLanguage = Settings.Formats.TimedTextItunesLanguage ?? string.Empty;
+        ss.TimedTextItunesDefaultColor = Settings.Formats.TimedTextItunesDefaultColor ?? "white";
+        ss.TimedTextItunesDefaultStyle = Settings.Formats.TimedTextItunesDefaultStyle ?? string.Empty;
+        ss.TimedTextItunesDefaultRegion = Settings.Formats.TimedTextItunesDefaultRegion ?? string.Empty;
+        ss.TimedTextItunesHeaderTemplate = SeItunesTimedTextPreset.LoadHeaderTemplate(Settings.Formats);
         ss.TimedTextImsc11TimeCodeFormat = Settings.Formats.TimedTextImsc11TimeCodeFormat;
         ss.TimedTextImsc11FileExtension = Settings.Formats.TimedTextImsc11FileExtension;
 

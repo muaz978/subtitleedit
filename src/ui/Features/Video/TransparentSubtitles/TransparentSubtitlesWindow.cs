@@ -250,17 +250,6 @@ public class TransparentSubtitlesWindow : Window
         return grid;
     }
 
-    private static StackPanel Horizontal(params Control[] controls)
-    {
-        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var control in controls)
-        {
-            panel.Children.Add(control);
-        }
-
-        return panel;
-    }
-
     private static ComboBox Combo<T>(System.Collections.ObjectModel.ObservableCollection<T> items, TransparentSubtitlesViewModel vm, string property, string name)
     {
         var comboBox = UiUtil.MakeComboBox(items, vm, property);
@@ -276,29 +265,6 @@ public class TransparentSubtitlesWindow : Window
         field.ValueChanged += vm.NumericUpDownChanged;
         AutomationProperties.SetName(field, name);
         return field;
-    }
-
-    private static TextBlock Hint(string property) => new()
-    {
-        FontSize = 11.5,
-        Foreground = EditorChrome.DimTextBrush,
-        VerticalAlignment = VerticalAlignment.Center,
-        TextTrimming = TextTrimming.CharacterEllipsis,
-        [!TextBlock.TextProperty] = new Binding(property),
-    };
-
-    private static ToggleSwitch Switch(string property, string name)
-    {
-        var toggle = new ToggleSwitch
-        {
-            OnContent = null,
-            OffContent = null,
-            MinWidth = 0,
-            VerticalAlignment = VerticalAlignment.Center,
-            [!ToggleSwitch.IsCheckedProperty] = new Binding(property) { Mode = BindingMode.TwoWay },
-        };
-        AutomationProperties.SetName(toggle, name);
-        return toggle;
     }
 
     private Control MakeStylePanel(TransparentSubtitlesViewModel vm)
@@ -323,8 +289,8 @@ public class TransparentSubtitlesWindow : Window
             ColumnDefinitions = { new ColumnDefinition(GridLength.Auto), new ColumnDefinition(new GridLength(1, GridUnitType.Star)), new ColumnDefinition(GridLength.Auto) },
         };
         row.Add(new Optris.Icons.Avalonia.Icon { Value = icon, FontSize = 13, Foreground = EditorChrome.IconBrush, VerticalAlignment = VerticalAlignment.Center }, 0, 0);
-        var value = Hint(valueProperty);
-        value.FontSize = 12.5;
+        var value = EditorChrome.MakeBoundHint(valueProperty);
+        value.FontSize = EditorChrome.FieldFontSize;
         row.Add(value, 0, 1);
         row.Add(button, 0, 2);
         return row;
@@ -339,9 +305,9 @@ public class TransparentSubtitlesWindow : Window
         var sizeFactor = Field(vm, nameof(vm.FontFactor), 0.1, 1.0, "Aa", Se.Language.Video.BurnIn.FontSizeFactor, "0.00", 0.05m);
         var bold = new ToggleButton
         {
-            Content = new TextBlock { Text = "B", FontWeight = FontWeight.Bold, FontSize = 13 },
+            Content = new TextBlock { Text = "B", FontWeight = FontWeight.Bold, FontSize = EditorChrome.FieldFontSize },
             Width = 28,
-            Height = 28,
+            Height = EditorChrome.ScaledSize(28),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             [!ToggleButton.IsCheckedProperty] = new Binding(nameof(vm.FontIsBold)) { Mode = BindingMode.TwoWay },
@@ -349,7 +315,7 @@ public class TransparentSubtitlesWindow : Window
         bold.Classes.Add("tool");
         bold.PropertyChanged += vm.CheckBoxChanged;
         AutomationProperties.SetName(bold, Se.Language.General.Bold);
-        var factorHint = Hint(nameof(vm.FontFactorText));
+        var factorHint = EditorChrome.MakeBoundHint(nameof(vm.FontFactorText));
         var sizeRow = new Grid
         {
             ColumnSpacing = 6,
@@ -373,10 +339,10 @@ public class TransparentSubtitlesWindow : Window
         rows.Children.Add(fontName);
         rows.Children.Add(sizeRow);
         rows.Children.Add(Row(Se.Language.Video.BurnIn.BoxType, boxType));
-        rows.Children.Add(Row(Se.Language.General.TextColor, Horizontal(textColor)));
-        rows.Children.Add(Row(null, Horizontal(outlineColor, Field(vm, nameof(vm.SelectedFontOutline), 0, 50, "W", Se.Language.General.OutlineWidth, increment: 0.5m, width: 70)), nameof(vm.FontOutlineText)));
-        rows.Children.Add(Row(null, Horizontal(shadowColor, Field(vm, nameof(vm.SelectedFontShadowWidth), 0, 50, "W", Se.Language.General.ShadowWidth, increment: 0.5m, width: 70)), nameof(vm.FontShadowText)));
-        rows.Children.Add(Row(Se.Language.General.Spacing, Horizontal(Field(vm, nameof(vm.SelectedFontSpacing), -20, 100, "↔", Se.Language.General.Spacing, width: 70))));
+        rows.Children.Add(Row(Se.Language.General.TextColor, EditorChrome.MakeInlineRow(textColor)));
+        rows.Children.Add(Row(null, EditorChrome.MakeInlineRow(outlineColor, Field(vm, nameof(vm.SelectedFontOutline), 0, 50, "W", Se.Language.General.OutlineWidth, increment: 0.5m, width: 70)), nameof(vm.FontOutlineText)));
+        rows.Children.Add(Row(null, EditorChrome.MakeInlineRow(shadowColor, Field(vm, nameof(vm.SelectedFontShadowWidth), 0, 50, "W", Se.Language.General.ShadowWidth, increment: 0.5m, width: 70)), nameof(vm.FontShadowText)));
+        rows.Children.Add(Row(Se.Language.General.Spacing, EditorChrome.MakeInlineRow(Field(vm, nameof(vm.SelectedFontSpacing), -20, 100, "↔", Se.Language.General.Spacing, width: 70))));
         return EditorChrome.MakeEditorSection(Se.Language.Video.BurnIn.SubtitleStyle, rows, first: true);
     }
 
@@ -484,10 +450,10 @@ public class TransparentSubtitlesWindow : Window
         var pickTo = EditorChrome.CreateToolButton("fa-solid fa-film", Se.Language.Video.BurnIn.ToTime, vm.BrowseCutToCommand, 28);
         pickTo.Bind(IsEnabledProperty, new Binding(nameof(vm.IsCutActive)));
 
-        var cut = Horizontal(
-            Switch(nameof(vm.IsCutActive), Se.Language.General.Cut),
+        var cut = EditorChrome.MakeInlineRow(
+            EditorChrome.MakeSwitch(nameof(vm.IsCutActive), Se.Language.General.Cut),
             new Optris.Icons.Avalonia.Icon { Value = "fa-solid fa-scissors", FontSize = 13, Foreground = EditorChrome.IconBrush, VerticalAlignment = VerticalAlignment.Center },
-            new TextBlock { Text = Se.Language.General.Cut, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) },
+            new TextBlock { Text = Se.Language.General.Cut, FontSize = EditorChrome.FieldFontSize, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) },
             Time(nameof(vm.CutFrom), Se.Language.Video.BurnIn.FromTime),
             pickFrom,
             new TextBlock { Text = "→", Foreground = EditorChrome.DimTextBrush, VerticalAlignment = VerticalAlignment.Center },
@@ -498,10 +464,10 @@ public class TransparentSubtitlesWindow : Window
         // The source video, single mode only
         var fileName = UiUtil.MakeFilePathLabel(vm, nameof(vm.VideoFileName));
         fileName.Foreground = EditorChrome.DimTextBrush;
-        fileName.FontSize = 12;
+        fileName.FontSize = EditorChrome.FieldFontSize;
         fileName.VerticalAlignment = VerticalAlignment.Center;
-        var size = Hint(nameof(vm.VideoFileSize));
-        var source = Horizontal(new Optris.Icons.Avalonia.Icon { Value = "fa-solid fa-file-video", FontSize = 12, Foreground = EditorChrome.FaintTextBrush, VerticalAlignment = VerticalAlignment.Center }, fileName, size);
+        var size = EditorChrome.MakeBoundHint(nameof(vm.VideoFileSize));
+        var source = EditorChrome.MakeInlineRow(new Optris.Icons.Avalonia.Icon { Value = "fa-solid fa-file-video", FontSize = 12, Foreground = EditorChrome.FaintTextBrush, VerticalAlignment = VerticalAlignment.Center }, fileName, size);
         source.HorizontalAlignment = HorizontalAlignment.Right;
         source.Bind(IsVisibleProperty, new Binding(nameof(vm.IsBatchMode)) { Converter = InverseBooleanConverter.Instance });
 
@@ -527,12 +493,12 @@ public class TransparentSubtitlesWindow : Window
         AutomationProperties.SetName(width, Se.Language.General.Width);
         var height = EditorChrome.MakeField(nameof(vm.VideoHeight), 0, 10_000, 76, "H");
         AutomationProperties.SetName(height, Se.Language.General.Height);
-        var size = Horizontal(width, new TextBlock { Text = "×", Foreground = EditorChrome.DimTextBrush, VerticalAlignment = VerticalAlignment.Center }, height);
+        var size = EditorChrome.MakeInlineRow(width, new TextBlock { Text = "×", Foreground = EditorChrome.DimTextBrush, VerticalAlignment = VerticalAlignment.Center }, height);
         size.Bind(IsVisibleProperty, new Binding(nameof(vm.UseSourceResolution)) { Converter = InverseBooleanConverter.Instance });
         var source = new TextBlock
         {
             Text = Se.Language.General.UseSourceResolution,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             [!TextBlock.IsVisibleProperty] = new Binding(nameof(vm.UseSourceResolution)),
@@ -613,7 +579,7 @@ public class TransparentSubtitlesWindow : Window
         });
         dataGrid.Bind(TableView.SelectedItemProperty, new Binding(nameof(vm.SelectedJobItem)) { Source = vm });
 
-        var actions = Horizontal(
+        var actions = EditorChrome.MakeInlineRow(
             EditorChrome.CreateToolButton("fa-solid fa-plus", Se.Language.General.AddDotDotDot, vm.AddCommand, 26),
             EditorChrome.CreateToolButton("fa-solid fa-minus", Se.Language.General.Remove, vm.RemoveCommand, 26),
             EditorChrome.CreateToolButton("fa-solid fa-trash", Se.Language.General.Clear, vm.ClearCommand, 26),
@@ -653,7 +619,7 @@ public class TransparentSubtitlesWindow : Window
             .WithBindVisible(vm, nameof(vm.UseOutputFolderVisible));
         var useSourceFolder = EditorChrome.MakeDimLabel(Se.Language.General.UseSourceFolder, new Thickness(0));
         useSourceFolder.Bind(IsVisibleProperty, new Binding(nameof(vm.UseSourceFolderVisible)));
-        var output = Horizontal(
+        var output = EditorChrome.MakeInlineRow(
             new Optris.Icons.Avalonia.Icon { Value = "fa-solid fa-folder", FontSize = 12, Foreground = EditorChrome.FaintTextBrush, VerticalAlignment = VerticalAlignment.Center },
             outputFolder,
             useSourceFolder,
@@ -695,8 +661,8 @@ public class TransparentSubtitlesWindow : Window
         progressBar.VerticalAlignment = VerticalAlignment.Center;
         progressBar.Bind(ProgressBar.ValueProperty, new Binding(nameof(vm.ProgressValue)));
 
-        var statusText = Hint(nameof(vm.ProgressText));
-        statusText.FontSize = 12;
+        var statusText = EditorChrome.MakeBoundHint(nameof(vm.ProgressText));
+        statusText.FontSize = EditorChrome.FieldFontSize;
 
         var grid = new Grid
         {
@@ -725,8 +691,8 @@ public class TransparentSubtitlesWindow : Window
         {
             var button = new Button
             {
-                Content = new TextBlock { Text = text, FontSize = 12.5, Margin = new Thickness(12, 0) },
-                Height = 28,
+                Content = new TextBlock { Text = text, FontSize = EditorChrome.FieldFontSize, Margin = new Thickness(12, 0) },
+                Height = EditorChrome.ScaledSize(28),
                 Command = command,
                 VerticalContentAlignment = VerticalAlignment.Center,
             };
@@ -757,7 +723,7 @@ public class TransparentSubtitlesWindow : Window
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(2),
             VerticalAlignment = VerticalAlignment.Center,
-            Child = Horizontal(Mode(Se.Language.General.SingleMode, vm.SingleModeCommand, false), Mode(Se.Language.General.BatchMode, vm.BatchModeCommand, true)),
+            Child = EditorChrome.MakeInlineRow(Mode(Se.Language.General.SingleMode, vm.SingleModeCommand, false), Mode(Se.Language.General.BatchMode, vm.BatchModeCommand, true)),
         };
         ((StackPanel)modes.Child).Spacing = 2;
 
@@ -783,7 +749,7 @@ public class TransparentSubtitlesWindow : Window
 
         var buttonOk = UiUtil.MakeButtonOk(vm.OkCommand).WithBindEnabled(nameof(vm.IsGenerating), InverseBooleanConverter.Instance);
         var buttonCancel = UiUtil.MakeButtonCancel(vm.CancelCommand);
-        var buttons = Horizontal(buttonCancel, buttonOk, buttonGenerate);
+        var buttons = EditorChrome.MakeInlineRow(buttonCancel, buttonOk, buttonGenerate);
         buttons.Spacing = 10;
 
         var bar = new DockPanel();
@@ -793,14 +759,7 @@ public class TransparentSubtitlesWindow : Window
         bar.Children.Add(buttons);
         bar.Children.Add(new Border());
 
-        return new Border
-        {
-            Child = bar,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(bar);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

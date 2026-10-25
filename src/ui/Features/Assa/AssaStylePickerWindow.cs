@@ -1,11 +1,8 @@
 ﻿using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Layout;
-using Avalonia.Media;
 using CommunityToolkit.Mvvm.Input;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
@@ -78,14 +75,7 @@ public class AssaStylePickerWindow : Window
         buttons.Children.Add(buttonCancel);
         buttons.Children.Add(buttonAccept);
 
-        return new Border
-        {
-            Child = buttons,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(buttons);
     }
 
     private static TableView MakeDataGrid(AssaStylePickerViewModel vm, out TableView tableView)
@@ -134,17 +124,7 @@ public class AssaStylePickerWindow : Window
             Header = Se.Language.General.Enabled,
             CellTheme = UiUtil.TableViewNoPaddingCellTheme,
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-            CellTemplate = new FuncDataTemplate<StyleDisplay>((item, _) =>
-            new Border
-            {
-                Background = Brushes.Transparent, // Prevents highlighting
-                Padding = new Thickness(4),
-                Child = new CheckBox
-                {
-                    [!ToggleButton.IsCheckedProperty] = new Binding(nameof(StyleDisplay.IsSelected)),
-                    HorizontalAlignment = HorizontalAlignment.Center
-                }
-            }),
+            CellTemplate = TableViewExtras.MakeCheckBoxCellTemplate<StyleDisplay>(nameof(StyleDisplay.IsSelected), focusable: true),
             // Content-sized (Auto) on the DataGrid; TableView treats Auto as star.
             Width = new GridLength(80),
         });

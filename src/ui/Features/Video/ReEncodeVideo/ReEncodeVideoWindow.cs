@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
@@ -38,7 +37,7 @@ public class ReEncodeVideoWindow : Window
 
         var labelInfoText = new TextBlock
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
             MaxWidth = 560,
             HorizontalAlignment = HorizontalAlignment.Left,
@@ -110,7 +109,7 @@ public class ReEncodeVideoWindow : Window
             }
         }.WithBindVisible(vm, nameof(vm.UseSourceResolution), InverseBooleanConverter.Instance);
 
-        var labelSourceResolution = new TextBlock { Text = Se.Language.General.UseSourceResolution, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
+        var labelSourceResolution = new TextBlock { Text = Se.Language.General.UseSourceResolution, FontSize = EditorChrome.FieldFontSize, VerticalAlignment = VerticalAlignment.Center };
         var buttonResolutionSource = EditorChrome.CreateToolButton("fa-solid fa-ellipsis", Se.Language.General.Resolution, vm.BrowseResolutionCommand, 28);
         var panelResolutionSource = new StackPanel
         {

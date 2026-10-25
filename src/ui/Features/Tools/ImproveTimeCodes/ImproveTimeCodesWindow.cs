@@ -15,7 +15,6 @@ using Nikse.SubtitleEdit.Features.Video.SpeechToText.Engines;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
-using Optris.Icons.Avalonia;
 
 namespace Nikse.SubtitleEdit.Features.Tools.ImproveTimeCodes;
 
@@ -106,7 +105,7 @@ public class ImproveTimeCodesWindow : Window
         var engineStatus = new TextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.EngineStatus)) { Source = vm },
         };
 
@@ -366,7 +365,7 @@ public class ImproveTimeCodesWindow : Window
         {
             VerticalAlignment = VerticalAlignment.Center,
             FontWeight = FontWeight.SemiBold,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             MinWidth = 120,
             TextAlignment = TextAlignment.Center,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.ChangePositionLabel)) { Source = vm },
@@ -396,7 +395,7 @@ public class ImproveTimeCodesWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
             Foreground = EditorChrome.DimTextBrush,
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             // With the speech-to-text counts it can be longer than the room beside the buttons.
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = TextAlignment.Right,
@@ -450,21 +449,10 @@ public class ImproveTimeCodesWindow : Window
             Header = Se.Language.General.Apply,
             CellTheme = UiUtil.TableViewNoPaddingCellTheme,
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-            CellTemplate = new FuncDataTemplate<ImproveTimeCodesRow>((_, _) => new Border
-            {
-                Background = Brushes.Transparent,
-                Padding = new Thickness(4),
-                Child = new CheckBox
-                {
-                    Focusable = false,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    [!ToggleButton.IsCheckedProperty] = new Binding(nameof(ImproveTimeCodesRow.Apply)) { Mode = BindingMode.TwoWay },
-                    // Disabled rather than hidden: a hidden box collapses the row, and the rows
-                    // would all change height the moment the results arrive.
-                    [!IsEnabledProperty] = new Binding(nameof(ImproveTimeCodesRow.IsChanged)),
-                    [!AutomationProperties.NameProperty] = new Binding(nameof(ImproveTimeCodesRow.Text)),
-                },
-            }),
+            CellTemplate = TableViewExtras.MakeCheckBoxCellTemplate<ImproveTimeCodesRow>(nameof(ImproveTimeCodesRow.Apply), nameof(ImproveTimeCodesRow.Text),
+                // Disabled rather than hidden: a hidden box collapses the row, and the rows
+                // would all change height the moment the results arrive.
+                configure: cb => cb[!IsEnabledProperty] = new Binding(nameof(ImproveTimeCodesRow.IsChanged))),
             Width = new GridLength(70),
         };
 
@@ -583,7 +571,7 @@ public class ImproveTimeCodesWindow : Window
             TextWrapping = TextWrapping.Wrap,
             MaxLines = 2,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.StatusText)) { Source = vm },
             [!IsVisibleProperty] = new Binding("!" + nameof(vm.IsAligning)) { Source = vm },

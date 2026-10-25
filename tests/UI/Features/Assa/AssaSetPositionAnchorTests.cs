@@ -21,7 +21,7 @@ public class AssaSetPositionAnchorTests
     [AvaloniaFact]
     public void Anchors_PlaceTheBoxInsideTheSafeArea()
     {
-        var vm = new AssaSetPositionViewModel(); // 1x1 text box on a 1920x1080 render canvas
+        var vm = new AssaSetPositionViewModel { IsPreviewReady = true }; // 1x1 text box on a 1920x1080 render canvas
 
         vm.SetAnchorCommand.Execute(0);
         Assert.Equal(96, vm.ScreenshotX);
@@ -40,7 +40,7 @@ public class AssaSetPositionAnchorTests
     [AvaloniaFact]
     public void PositionFields_MoveTheAnchor_AndFollowTheBox()
     {
-        var vm = new AssaSetPositionViewModel();
+        var vm = new AssaSetPositionViewModel { IsPreviewReady = true };
         vm.ScreenshotX = 100;
         Assert.Equal(vm.ResultX, vm.PositionX);
 
@@ -49,5 +49,36 @@ public class AssaSetPositionAnchorTests
         Assert.Equal(700, vm.ResultX);
         Assert.Equal(300, vm.ResultY);
         Assert.Contains("\\pos(700,300)", vm.TagsPreview);
+    }
+
+    [AvaloniaFact]
+    public void BeforeTheTextIsRendered_MovesAndOkWait()
+    {
+        // The dialog opens before ffmpeg has rendered the text (#16289); its place is unknown then
+        var vm = new AssaSetPositionViewModel();
+
+        vm.SetAnchorCommand.Execute(0);
+        vm.Nudge(10, 10);
+        vm.DragTo(500, 500);
+        Assert.Equal(0, vm.ScreenshotX);
+        Assert.Equal(0, vm.ScreenshotY);
+        Assert.False(vm.OkCommand.CanExecute(null));
+        Assert.Equal(string.Empty, vm.TagsPreview);
+
+        vm.IsPreviewReady = true;
+        Assert.True(vm.OkCommand.CanExecute(null));
+    }
+
+    [AvaloniaFact]
+    public void CenterAt_PutsTheBoxCenterOnThePoint()
+    {
+        // Click-to-place (#16289): the 1x1 box is centered on the mouse point (no guide near it)
+        var vm = new AssaSetPositionViewModel { IsPreviewReady = true };
+
+        vm.CenterAt(500.4, 300.6);
+
+        Assert.Equal(500, vm.ScreenshotX);
+        Assert.Equal(300, vm.ScreenshotY);
+        Assert.Equal(-1, vm.AnchorIndex);
     }
 }

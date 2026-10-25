@@ -148,17 +148,7 @@ public class ReviewSpeechWindow : Window
             Header = Se.Language.General.Enabled,
             CellTheme = UiUtil.TableViewNoPaddingCellTheme,
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-            CellTemplate = new FuncDataTemplate<ReviewRow>((item, _) =>
-                new Border
-                {
-                    Background = Brushes.Transparent, // Prevents highlighting
-                    Padding = new Thickness(4),
-                    Child = new CheckBox
-                    {
-                        [!ToggleButton.IsCheckedProperty] = new Binding(nameof(ReviewRow.Include)),
-                        HorizontalAlignment = HorizontalAlignment.Center
-                    }
-                }),
+            CellTemplate = TableViewExtras.MakeCheckBoxCellTemplate<ReviewRow>(nameof(ReviewRow.Include), focusable: true),
             Width = new GridLength(80),
         });
         lineGrid.Columns.Add(new SeTableViewColumn
@@ -428,7 +418,7 @@ public class ReviewSpeechWindow : Window
         {
             Content = OmniVoiceTtsCpp.InstructionWhisper,
             DataContext = vm,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Margin = new Thickness(0, 2, 0, 0),
         };
         whisper.Bind(CheckBox.IsCheckedProperty, new Binding(nameof(vm.OmniVoiceWhisper)) { Mode = BindingMode.TwoWay });
@@ -490,7 +480,7 @@ public class ReviewSpeechWindow : Window
     {
         return new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             FontFeatures = new FontFeatureCollection { FontFeature.Parse("tnum") },
             [!TextBlock.TextProperty] = new Binding(property) { Converter = new DoubleToTwoDecimalConverter(), Source = vm },
@@ -559,7 +549,7 @@ public class ReviewSpeechWindow : Window
         {
             [!TextBlock.TextProperty] = new Binding(nameof(vm.PositionText)),
             VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 15,
+            FontSize = EditorChrome.ScaledFont(15),
             FontFeatures = new FontFeatureCollection { FontFeature.Parse("tnum") },
             Background = Brushes.Transparent, // hit-testable between the digits
             Cursor = new Cursor(StandardCursorType.Hand),
@@ -586,20 +576,21 @@ public class ReviewSpeechWindow : Window
         // Mirror the main window's waveform theme so the review waveform looks the same as the
         // one users are already used to.
         var settings = Se.Settings.Waveform;
+        var colors = WaveformColors.Current;
         var audioVisualizer = new AudioVisualizer
         {
             DrawGridLines = settings.DrawGridLines,
-            WaveformColor = settings.WaveformColor.FromHexToColor(),
-            WaveformBackgroundColor = settings.WaveformBackgroundColor.FromHexToColor(),
-            WaveformSelectedColor = settings.WaveformSelectedColor.FromHexToColor(),
-            WaveformCursorColor = settings.WaveformCursorColor.FromHexToColor(),
-            WaveformShotChangeColor = settings.WaveformShotChangeColor.FromHexToColor(),
-            WaveformGridColor = settings.WaveformGridColor.FromHexToColor(),
-            WaveformParagraphLeftColor = settings.WaveformParagraphLeftColor.FromHexToColor(),
-            WaveformParagraphRightColor = settings.WaveformParagraphRightColor.FromHexToColor(),
-            WaveformFancyHighColor = settings.WaveformFancyHighColor.FromHexToColor(),
-            ParagraphBackground = settings.ParagraphBackground.FromHexToColor(),
-            ParagraphSelectedBackground = settings.ParagraphSelectedBackground.FromHexToColor(),
+            WaveformColor = colors.Waveform,
+            WaveformBackgroundColor = colors.Background,
+            WaveformSelectedColor = colors.Selected,
+            WaveformCursorColor = colors.Cursor,
+            WaveformShotChangeColor = colors.ShotChange,
+            WaveformGridColor = colors.Grid,
+            WaveformParagraphLeftColor = colors.ParagraphLeft,
+            WaveformParagraphRightColor = colors.ParagraphRight,
+            WaveformFancyHighColor = colors.FancyHigh,
+            ParagraphBackground = colors.ParagraphBackground,
+            ParagraphSelectedBackground = colors.ParagraphSelectedBackground,
             InvertMouseWheel = settings.InvertMouseWheel,
             VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalAlignment = HorizontalAlignment.Stretch,

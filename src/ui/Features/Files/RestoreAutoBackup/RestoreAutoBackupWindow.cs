@@ -4,7 +4,6 @@ using Avalonia.Controls.Templates;
 using Avalonia.Media;
 using Avalonia.Data;
 using Avalonia.Layout;
-using Nikse.SubtitleEdit.Controls;
 using Optris.Icons.Avalonia;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
@@ -157,13 +156,13 @@ public class RestoreAutoBackupWindow : Window
         var infoText = new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.SettingsBackupInfo)),
         };
         var lastBackupText = new TextBlock
         {
             Foreground = EditorChrome.DimTextBrush,
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.LastSettingsBackupText)),
         };
 

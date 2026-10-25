@@ -4,7 +4,6 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
-using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -78,7 +77,7 @@ public class ActorPickerWindow : Window
         };
 
         var labelKeysHint = EditorChrome.MakeWrappingDimLabel(Se.Language.General.ActorPickerKeysHint);
-        labelKeysHint.FontSize = 11.5;
+        labelKeysHint.FontSize = EditorChrome.ScaledFont(11.5);
 
         var panel = new StackPanel
         {
@@ -121,7 +120,7 @@ public class ActorPickerWindow : Window
         var labelNumber = new TextBlock
         {
             FontWeight = FontWeight.SemiBold,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.AccentBrush,
             Width = 24,
             VerticalAlignment = VerticalAlignment.Center,
@@ -134,7 +133,7 @@ public class ActorPickerWindow : Window
 
         var labelName = new TextBlock
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
         };

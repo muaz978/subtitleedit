@@ -276,6 +276,7 @@ public static class ShortcutsMain
         { nameof(MainViewModel.OpenDataFolderCommand), Se.Language.Options.Shortcuts.OpenSeDataFolder },
         { nameof(MainViewModel.SetupLikeSe4Command), Se.Language.General.SetUpLikeSubtitleEdit4 },
         { nameof(MainViewModel.ToggleIsWaveformToolbarVisibleCommand), Se.Language.Options.Shortcuts.ToggleWaveformToolbar },
+        { nameof(MainViewModel.CycleThemeCommand), Se.Language.Options.Shortcuts.CycleTheme },
         { nameof(MainViewModel.ToggleSubtitleGridFormattingCommand), Se.Language.Options.Shortcuts.ToggleSubtitleGridFormatting },
 
         // File
@@ -384,6 +385,7 @@ public static class ShortcutsMain
 
         { nameof(MainViewModel.ShowGoToVideoPositionCommand), Se.Language.Options.Shortcuts.GeneralGoToVideoPosition },
         { nameof(MainViewModel.ToggleLinesItalicOrSelectedTextCommand), Se.Language.Options.Shortcuts.GeneralToggleItalic },
+        { nameof(MainViewModel.RecordSpeechToTextBoxCommand), Se.Language.Options.Shortcuts.GeneralRecordSpeechToTextBox },
         { nameof(MainViewModel.ToggleLinesBoldOrSelectedTextCommand), Se.Language.Options.Shortcuts.GeneralToggleBold },
         { nameof(MainViewModel.ToggleLinesUnderlineOrSelectedTextCommand), Se.Language.Options.Shortcuts.GeneralToggleUnderline },
         { nameof(MainViewModel.ToggleLinesBoxOrSelectedTextCommand), Se.Language.Options.Shortcuts.GeneralToggleBox },
@@ -849,6 +851,7 @@ public static class ShortcutsMain
         AddShortcut(shortcuts, vm.GoToNextEmptyLineCommand, nameof(vm.GoToNextEmptyLineCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.OpenDataFolderCommand, nameof(vm.OpenDataFolderCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ToggleIsWaveformToolbarVisibleCommand, nameof(vm.ToggleIsWaveformToolbarVisibleCommand), ShortcutCategory.General);
+        AddShortcut(shortcuts, vm.CycleThemeCommand, nameof(vm.CycleThemeCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.ToggleSubtitleGridFormattingCommand, nameof(vm.ToggleSubtitleGridFormattingCommand), ShortcutCategory.General);
         AddShortcut(shortcuts, vm.SetupLikeSe4Command, nameof(vm.SetupLikeSe4Command), ShortcutCategory.General);
 
@@ -895,6 +898,7 @@ public static class ShortcutsMain
 
         AddShortcut(shortcuts, vm.ShowGoToVideoPositionCommand, nameof(vm.ShowGoToVideoPositionCommand), ShortcutCategory.General, ShortcutGroup.Video);
         AddShortcut(shortcuts, vm.ToggleLinesItalicOrSelectedTextCommand, nameof(vm.ToggleLinesItalicOrSelectedTextCommand), ShortcutCategory.SubtitleGridAndTextBox);
+        AddShortcut(shortcuts, vm.RecordSpeechToTextBoxCommand, nameof(vm.RecordSpeechToTextBoxCommand), ShortcutCategory.SubtitleGridAndTextBox);
         AddShortcut(shortcuts, vm.ToggleLinesBoldOrSelectedTextCommand, nameof(vm.ToggleLinesBoldOrSelectedTextCommand), ShortcutCategory.SubtitleGridAndTextBox);
         AddShortcut(shortcuts, vm.ToggleLinesUnderlineOrSelectedTextCommand, nameof(vm.ToggleLinesUnderlineOrSelectedTextCommand), ShortcutCategory.SubtitleGridAndTextBox);
         AddShortcut(shortcuts, vm.ToggleLinesBoxOrSelectedTextCommand, nameof(vm.ToggleLinesBoxOrSelectedTextCommand), ShortcutCategory.SubtitleGridAndTextBox);

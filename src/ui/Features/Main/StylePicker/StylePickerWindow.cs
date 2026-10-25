@@ -4,7 +4,6 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
-using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -91,7 +90,7 @@ public class StylePickerWindow : Window
         };
 
         var labelKeysHint = EditorChrome.MakeWrappingDimLabel(Se.Language.General.StylePickerKeysHint);
-        labelKeysHint.FontSize = 11.5;
+        labelKeysHint.FontSize = EditorChrome.ScaledFont(11.5);
 
         var panelList = new StackPanel
         {
@@ -184,7 +183,7 @@ public class StylePickerWindow : Window
         var labelNumber = new TextBlock
         {
             FontWeight = FontWeight.SemiBold,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.AccentBrush,
             Width = 24,
             VerticalAlignment = VerticalAlignment.Center,
@@ -200,7 +199,7 @@ public class StylePickerWindow : Window
 
         var labelName = new TextBlock
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
@@ -235,7 +234,7 @@ public class StylePickerWindow : Window
         var labelSummary = new TextBlock
         {
             Foreground = EditorChrome.DimTextBrush,
-            FontSize = 11.5,
+            FontSize = EditorChrome.ScaledFont(11.5),
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         labelSummary.Bind(TextBlock.TextProperty, new Binding(nameof(StylePickerItem.Summary)));
@@ -274,7 +273,7 @@ public class StylePickerWindow : Window
         var labelName = new TextBlock
         {
             FontWeight = FontWeight.SemiBold,
-            FontSize = 15,
+            FontSize = EditorChrome.ScaledFont(15),
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         labelName.Bind(TextBlock.TextProperty, new Binding(nameof(StylePickerItem.Name)));
@@ -323,7 +322,7 @@ public class StylePickerWindow : Window
 
         var labelUsage = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             TextWrapping = TextWrapping.Wrap,
         };
@@ -358,7 +357,7 @@ public class StylePickerWindow : Window
 
         var value = new TextBlock
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             TextWrapping = TextWrapping.Wrap,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -383,7 +382,7 @@ public class StylePickerWindow : Window
         var labelName = new TextBlock
         {
             Text = label,
-            FontSize = 10.5,
+            FontSize = EditorChrome.ScaledFont(10.5),
             Foreground = EditorChrome.DimTextBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
         };

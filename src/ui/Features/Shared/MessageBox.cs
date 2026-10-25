@@ -50,8 +50,6 @@ public enum MessageBoxIcon
 
 public class MessageBox : Window
 {
-    private static string CustomButton1Text { get; set; } = string.Empty;
-    private static string CustomButton2Text { get; set; } = string.Empty;
     private MessageBoxResult _result = MessageBoxResult.None;
     private readonly bool _hasCancel;
     private readonly bool _hasOnlyOk;
@@ -292,14 +290,7 @@ public class MessageBox : Window
                 break;
         }
 
-        var buttonBar = new Border
-        {
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-            Child = buttonPanel,
-        };
+        var buttonBar = EditorChrome.WrapButtonBar(buttonPanel);
 
         if (!string.IsNullOrEmpty(custom1) ||  !string.IsNullOrEmpty(custom2))
         {

@@ -1,7 +1,5 @@
 using Avalonia;
-using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Data.Converters;
@@ -365,19 +363,33 @@ public class AutoTranslateWindow : Window
 
     private Border BuildRowGrid(AutoTranslateViewModel vm)
     {
+        var menuItemTranslateRow = new MenuItem
+        {
+            Header = Se.Language.General.TranslateRow,
+            Command = vm.TranslateRowCommand,
+        };
+        var menuItemTranslateRows = new MenuItem
+        {
+            Header = Se.Language.General.TranslateRows,
+            Command = vm.TranslateRowsCommand,
+        };
         var contextMenu = new MenuFlyout
         {
             Items =
             {
-                new MenuItem
-                {
-                    Header = Se.Language.General.TranslateRow,
-                    Command = vm.TranslateRowCommand,
-                },
+                menuItemTranslateRow,
+                menuItemTranslateRows,
             }
         };
 
         var tableView = TableViewExtras.MakeTableView();
+        contextMenu.Opening += (_, _) =>
+        {
+            // "Translate rows" only when more than one row is selected - one row keeps "Translate row".
+            var multipleSelected = (tableView.SelectedItems?.Count ?? 0) > 1;
+            menuItemTranslateRow.IsVisible = !multipleSelected;
+            menuItemTranslateRows.IsVisible = multipleSelected;
+        };
         tableView.Height = double.NaN;
         tableView.ContextFlyout = contextMenu;
         tableView.DataContext = vm;
@@ -478,11 +490,11 @@ public class AutoTranslateWindow : Window
         progressBar.WithAccessibleName(Se.Language.General.Translation);
 
         var statusText = EditorChrome.MakeBoundHint(nameof(vm.StatusText));
-        statusText.FontSize = 12;
+        statusText.FontSize = EditorChrome.FieldFontSize;
         statusText.MaxWidth = 300;
 
         var progressLabel = EditorChrome.MakeBoundHint(nameof(vm.ProgressText));
-        progressLabel.FontSize = 12;
+        progressLabel.FontSize = EditorChrome.FieldFontSize;
         progressLabel.MinWidth = 40;
         progressLabel.TextAlignment = TextAlignment.Right;
 
@@ -520,10 +532,10 @@ public class AutoTranslateWindow : Window
     private Border BuildButtonBar(AutoTranslateViewModel vm)
     {
         var poweredByLabel = EditorChrome.MakeDimLabel(Se.Language.General.PoweredBy, new Thickness(0));
-        poweredByLabel.FontSize = 11.5;
+        poweredByLabel.FontSize = EditorChrome.ScaledFont(11.5);
 
         var poweredByLink = UiUtil.MakeLink("Google Translate V1", vm.GoToAutoTranslatorUriCommand, vm, nameof(vm.AutoTranslatorLinkText));
-        poweredByLink.FontSize = 11.5;
+        poweredByLink.FontSize = EditorChrome.ScaledFont(11.5);
         poweredByLink.VerticalAlignment = VerticalAlignment.Center;
 
         var poweredByPanel = new StackPanel
@@ -590,10 +602,10 @@ public class AutoTranslateWindow : Window
     private static Button Flat(Button button)
     {
         button.Classes.Add("tool");
-        button.Height = 28;
+        button.Height = EditorChrome.ScaledSize(28);
         button.MinWidth = 0;
         button.Padding = new Thickness(10, 0);
-        button.FontSize = 12.5;
+        button.FontSize = EditorChrome.FieldFontSize;
         button.Margin = new Thickness(0);
         button.VerticalAlignment = VerticalAlignment.Center;
         return button;
@@ -602,10 +614,10 @@ public class AutoTranslateWindow : Window
     private static Button Compact(Button button)
     {
         button.MinHeight = 28;
-        button.Height = 28;
+        button.Height = EditorChrome.ScaledSize(28);
         button.MinWidth = 0;
         button.Padding = new Thickness(10, 0);
-        button.FontSize = 12.5;
+        button.FontSize = EditorChrome.FieldFontSize;
         button.Margin = new Thickness(0);
         button.VerticalContentAlignment = VerticalAlignment.Center;
         return button;

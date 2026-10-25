@@ -1,7 +1,4 @@
-﻿﻿using Nikse.SubtitleEdit.Features.Main;
-using System;
-
-namespace Nikse.SubtitleEdit.Logic.Config.Language.Options;
+﻿namespace Nikse.SubtitleEdit.Logic.Config.Language.Options;
 
 public class LanguageSettingsShortcuts
 {
@@ -56,6 +53,7 @@ public class LanguageSettingsShortcuts
     public string AlsoSetVideoPosition { get; set; }
     public string GeneralGoToVideoPosition { get; set; }
     public string GeneralToggleItalic { get; set; }
+    public string GeneralRecordSpeechToTextBox { get; set; }
     public string GeneralToggleBold { get; set; }
     public string GeneralToggleUnderline { get; set; }
     public string GeneralToggleBox { get; set; }
@@ -114,6 +112,7 @@ public class LanguageSettingsShortcuts
     public string ClearBookmarks { get; set; }
     public string GoToNextEmptyLine { get; set; }
     public string ToggleWaveformToolbar { get; set; }
+    public string CycleTheme { get; set; }
     public string ToggleSubtitleGridFormatting { get; set; }
     public string WaveformSetStartAndSetEndOfPreviousMinusGap { get; set; }
     public string WaveformSetEndAndStartOfNextAfterGap { get; set; }
@@ -409,6 +408,7 @@ public class LanguageSettingsShortcuts
         AlsoSetVideoPosition = "Also set video position";
         GeneralGoToVideoPosition = "Go to video position";
         GeneralToggleItalic = "Toggle italic";
+        GeneralRecordSpeechToTextBox = "Record speech to text box (start/stop)";
         GeneralToggleBold = "Toggle bold";
         GeneralToggleUnderline = "Toggle underline";
         GeneralToggleBox = "Toggle box (EBU STL)";
@@ -472,6 +472,7 @@ public class LanguageSettingsShortcuts
         ClearBookmarks = "Clear bookmarks";
         GoToNextEmptyLine = "Go to next empty line";
         ToggleWaveformToolbar = "Toggle waveform toolbar";
+        CycleTheme = "Cycle theme";
         ToggleSubtitleGridFormatting = "Toggle grid formatting (show formatting/show tags/no formatting/hide tags)";
         WaveformSetStartAndSetEndOfPreviousMinusGap = "Set start and set end of previous minus gap";
         WaveformSetEndAndStartOfNextAfterGap = "Set end and start of next plus gap";

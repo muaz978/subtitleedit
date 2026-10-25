@@ -14,7 +14,6 @@ using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
 using System.Linq;
-using Nikse.SubtitleEdit.UiLogic.LlamaCpp;
 
 namespace Nikse.SubtitleEdit.Features.Video.VideoOcr;
 
@@ -144,7 +143,7 @@ public class VideoOcrWindow : Window
         {
             VerticalAlignment = VerticalAlignment.Center,
             MinWidth = 60,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Margin = new Thickness(5, 0, 0, 0),
         };
         positionText.Bind(TextBlock.TextProperty, new Binding(nameof(vm.PreviewPositionText)) { Source = vm });
@@ -167,7 +166,7 @@ public class VideoOcrWindow : Window
         var scanAreaText = new TextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             Margin = new Thickness(8, 0, 0, 0),
         };
@@ -259,8 +258,8 @@ public class VideoOcrWindow : Window
         {
             Content = text,
             Command = command,
-            Height = 28,
-            FontSize = 12.5,
+            Height = EditorChrome.ScaledSize(28),
+            FontSize = EditorChrome.FieldFontSize,
             Padding = new Thickness(10, 0),
             VerticalContentAlignment = VerticalAlignment.Center,
             Background = EditorChrome.FieldBrush,
@@ -303,7 +302,7 @@ public class VideoOcrWindow : Window
         // (local vs cloud, what it needs installed) that had no home in the window until now.
         var engineDescription = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             TextWrapping = TextWrapping.Wrap,
         };
@@ -386,6 +385,32 @@ public class VideoOcrWindow : Window
             Se.Language.Video.VideoOcr.TextBrightnessMinimum,
             NumberField(vm, nameof(vm.BrightnessMinimum), 0, 255, 190),
             Se.Language.Video.VideoOcr.TextBrightnessMinimumHint));
+
+        // Time ranges (#16334): only these parts of the video are scanned. The button adds
+        // the preview position as the next range start or end.
+        var timeRangesTextBox = UiUtil.MakeTextBox(double.NaN, vm, nameof(vm.TimeRanges));
+        timeRangesTextBox.Classes.Add("text");
+        timeRangesTextBox.HorizontalAlignment = HorizontalAlignment.Stretch;
+        timeRangesTextBox.PlaceholderText = Se.Language.Video.VideoOcr.TimeRangesWatermark;
+        timeRangesTextBox.WithBindEnabled(nameof(vm.IsRunning), InverseBooleanConverter.Instance);
+        var timeRangesRow = new Grid
+        {
+            ColumnSpacing = 4,
+            ColumnDefinitions = { new ColumnDefinition(new GridLength(1, GridUnitType.Star)), new ColumnDefinition(GridLength.Auto) },
+        };
+        timeRangesRow.Add(timeRangesTextBox, 0, 0);
+        timeRangesRow.Add(EditorChrome.CreateToolButton("fa-solid fa-location-crosshairs",
+                Se.Language.Video.VideoOcr.InsertPreviewTime, vm.InsertPreviewTimeCommand, 28)
+            .WithBindEnabled(nameof(vm.IsRunning), InverseBooleanConverter.Instance), 0, 1);
+        var timeRangesLabel = EditorChrome.MakeDimLabel(Se.Language.Video.VideoOcr.TimeRanges, new Thickness(0));
+        timeRangesTextBox.WithLabeledBy(timeRangesLabel);
+        var timeRangesPanel = new StackPanel { Spacing = 4, Children = { timeRangesLabel, timeRangesRow } };
+        if (Se.Settings.Appearance.ShowHints)
+        {
+            ToolTip.SetTip(timeRangesPanel, Se.Language.Video.VideoOcr.TimeRangesHint);
+        }
+
+        scanRows.Children.Add(timeRangesPanel);
 
         // Post-processing settings
         var postRows = new StackPanel { Spacing = 8 };

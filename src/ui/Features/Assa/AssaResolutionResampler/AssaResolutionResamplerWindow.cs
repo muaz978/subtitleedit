@@ -2,7 +2,6 @@ using System;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Nikse.SubtitleEdit.Logic;
@@ -77,7 +76,7 @@ public class AssaResolutionResamplerWindow : Window
         row.Children.Add(new TextBlock
         {
             Text = text,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 490,
         });
@@ -120,8 +119,8 @@ public class AssaResolutionResamplerWindow : Window
             var text = $"{w} × {h}";
             var button = new Button
             {
-                Content = new TextBlock { Text = text, FontSize = 12, Margin = new Thickness(8, 0) },
-                Height = 26,
+                Content = new TextBlock { Text = text, FontSize = EditorChrome.FieldFontSize, Margin = new Thickness(8, 0) },
+                Height = EditorChrome.ScaledSize(26),
                 VerticalContentAlignment = VerticalAlignment.Center,
             };
             button.Classes.Add("tool");
@@ -166,7 +165,7 @@ public class AssaResolutionResamplerWindow : Window
         // How much everything is scaled, e.g. "×5 · ×3.75"
         var scale = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -205,13 +204,6 @@ public class AssaResolutionResamplerWindow : Window
         bar.Children.Add(buttons);
         bar.Children.Add(scale);
 
-        return new Border
-        {
-            Child = bar,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(bar);
     }
 }

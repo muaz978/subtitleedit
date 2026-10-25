@@ -4,11 +4,9 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Nikse.SubtitleEdit.Features.Video.TextToSpeech.Engines;
-using Nikse.SubtitleEdit.Features.Video.TextToSpeech.VoiceManager;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 
@@ -92,7 +90,7 @@ public class ActorVoiceRowSettingsWindow : Window
     {
         var title = new TextBlock
         {
-            FontSize = 15,
+            FontSize = EditorChrome.ScaledFont(15),
             FontWeight = FontWeight.SemiBold,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.Actor))
             {
@@ -103,7 +101,7 @@ public class ActorVoiceRowSettingsWindow : Window
 
         var sub = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             [!TextBlock.TextProperty] = new MultiBinding
             {
@@ -135,7 +133,7 @@ public class ActorVoiceRowSettingsWindow : Window
             Height = 90,
             Width = double.NaN,
             MinWidth = 420,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Background = EditorChrome.FieldBrush,
             BorderBrush = EditorChrome.FieldBorderBrush,
             CornerRadius = new CornerRadius(6),
@@ -202,7 +200,7 @@ public class ActorVoiceRowSettingsWindow : Window
         {
             Text = Se.Language.Video.TextToSpeech.VoiceInstructionClonedVoiceNote,
             TextWrapping = TextWrapping.Wrap,
-            FontSize = 11.5,
+            FontSize = EditorChrome.ScaledFont(11.5),
             Foreground = EditorChrome.DimTextBrush,
             MaxWidth = 430,
             HorizontalAlignment = HorizontalAlignment.Left,

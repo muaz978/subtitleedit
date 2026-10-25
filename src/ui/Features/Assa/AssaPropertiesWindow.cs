@@ -4,7 +4,6 @@ using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Styling;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 
@@ -56,7 +55,7 @@ public class AssaPropertiesWindow : Window
     {
         textBox = new TextBox
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             MinHeight = 28,
             Background = EditorChrome.FieldBrush,
             BorderBrush = EditorChrome.FieldBorderBrush,
@@ -66,7 +65,7 @@ public class AssaPropertiesWindow : Window
         AutomationProperties.SetName(textBox, label);
 
         var panel = new StackPanel { Spacing = 4 };
-        panel.Children.Add(new TextBlock { Text = label, FontSize = 12, Foreground = EditorChrome.DimTextBrush });
+        panel.Children.Add(new TextBlock { Text = label, FontSize = EditorChrome.FieldFontSize, Foreground = EditorChrome.DimTextBrush });
         panel.Children.Add(textBox);
         return panel;
     }
@@ -121,8 +120,8 @@ public class AssaPropertiesWindow : Window
         {
             var button = new Button
             {
-                Content = new TextBlock { Text = text, FontSize = 12, Margin = new Thickness(8, 0) },
-                Height = 26,
+                Content = new TextBlock { Text = text, FontSize = EditorChrome.FieldFontSize, Margin = new Thickness(8, 0) },
+                Height = EditorChrome.ScaledSize(26),
                 VerticalContentAlignment = VerticalAlignment.Center,
             };
             button.Classes.Add("tool");
@@ -173,7 +172,7 @@ public class AssaPropertiesWindow : Window
     private static StackPanel Labeled(string label, Control control)
     {
         var panel = new StackPanel { Spacing = 4 };
-        panel.Children.Add(new TextBlock { Text = label, FontSize = 12, Foreground = EditorChrome.DimTextBrush, TextTrimming = TextTrimming.CharacterEllipsis });
+        panel.Children.Add(new TextBlock { Text = label, FontSize = EditorChrome.FieldFontSize, Foreground = EditorChrome.DimTextBrush, TextTrimming = TextTrimming.CharacterEllipsis });
         panel.Children.Add(control);
         return panel;
     }
@@ -187,13 +186,6 @@ public class AssaPropertiesWindow : Window
         buttons.Children.Add(buttonCancel);
         buttons.Children.Add(buttonOk);
 
-        return new Border
-        {
-            Child = buttons,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(buttons);
     }
 }

@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -26,7 +25,7 @@ public class NOcrSettingsWindow : Window
 
         var labelTitle = new TextBlock
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 460,
         }.WithBindText(vm, nameof(vm.ActionText));

@@ -9,7 +9,6 @@ using Avalonia.Data.Converters;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
-using Avalonia.Styling;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 
@@ -47,7 +46,7 @@ public class AssaSetPositionWindow : Window
                 new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
             },
         };
-        content.Add(CreateSettingsPanel(vm, out var firstInput), 0, 0);
+        content.Add(CreateSettingsPanel(vm), 0, 0);
         content.Add(CreatePreview(vm), 0, 1);
 
         var mainGrid = new Grid
@@ -62,15 +61,19 @@ public class AssaSetPositionWindow : Window
         mainGrid.Add(CreateButtonBar(vm), 1, 0);
         Content = mainGrid;
 
-        // initial focus on an input, not an action button - a focused button clicks on bare Space
-        UiUtil.FocusOnFirstActivation(this, firstInput);
+        // Initial focus on the frame, so the arrow keys nudge the text right away (a focused X/Y
+        // field keeps them for its caret - #16289), and not on an action button, which clicks on bare Space
+        UiUtil.FocusOnFirstActivation(this, vm.VideoGrid!);
         KeyDown += vm.KeyDown;
+
+        Closing += delegate { UiUtil.SaveWindowPosition(this); };
+        Loaded += delegate { UiUtil.RestoreWindowPosition(this); };
     }
 
-    private static Border CreateSettingsPanel(AssaSetPositionViewModel vm, out Control firstInput)
+    private static Border CreateSettingsPanel(AssaSetPositionViewModel vm)
     {
         var sections = new StackPanel();
-        sections.Children.Add(CreatePositionSection(vm, out firstInput));
+        sections.Children.Add(CreatePositionSection(vm));
         sections.Children.Add(CreateRotationSection(vm));
         sections.Children.Add(CreateGuidesSection(vm));
 
@@ -85,19 +88,18 @@ public class AssaSetPositionWindow : Window
 
     private static TextBlock MakeHeaderValue(string property, string? format = null) => new()
     {
-        FontSize = 12,
+        FontSize = EditorChrome.FieldFontSize,
         Foreground = EditorChrome.DimTextBrush,
         VerticalAlignment = VerticalAlignment.Center,
         [!TextBlock.TextProperty] = new Binding(property) { StringFormat = format },
     };
 
-    private static Border CreatePositionSection(AssaSetPositionViewModel vm, out Control firstInput)
+    private static Border CreatePositionSection(AssaSetPositionViewModel vm)
     {
         var x = EditorChrome.MakeField(nameof(vm.PositionX), -10000, 10000, prefix: "X");
         var y = EditorChrome.MakeField(nameof(vm.PositionY), -10000, 10000, prefix: "Y");
         AutomationProperties.SetName(x, "X");
         AutomationProperties.SetName(y, "Y");
-        firstInput = x;
 
         // 3 x 3 anchor grid: a dot in each cell, the chosen one highlighted
         var anchors = new UniformGrid { Columns = 3, Rows = 3, Width = 3 * 30, Height = 3 * 30, HorizontalAlignment = HorizontalAlignment.Left };
@@ -160,7 +162,7 @@ public class AssaSetPositionWindow : Window
         content.Children.Add(new TextBlock
         {
             Text = Se.Language.Assa.SetPositionNudgeHint,
-            FontSize = 11.5,
+            FontSize = EditorChrome.ScaledFont(11.5),
             Foreground = EditorChrome.FaintTextBrush,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -199,6 +201,8 @@ public class AssaSetPositionWindow : Window
         content.Children.Add(EditorChrome.MakeToggleRow(nameof(vm.ShowSafeArea), Se.Language.Assa.SetPositionSafeArea));
         content.Children.Add(EditorChrome.MakeToggleRow(nameof(vm.ShowCenterLines), Se.Language.Assa.SetPositionCenterLines));
         content.Children.Add(EditorChrome.MakeToggleRow(nameof(vm.SnapToGuides), Se.Language.Assa.SetPositionSnapToGuides));
+        content.Children.Add(EditorChrome.MakeToggleRow(nameof(vm.ClickToPlace), Se.Language.Assa.SetPositionClickToPlace));
+        content.Children.Add(EditorChrome.MakeToggleRow(nameof(vm.ShowSelection), Se.Language.Assa.SetPositionShowSelection));
         return EditorChrome.MakeEditorSection(Se.Language.Assa.SetPositionGuides, content);
     }
 
@@ -212,7 +216,12 @@ public class AssaSetPositionWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
             ClipToBounds = true,
+            Focusable = true,
         };
+        AutomationProperties.SetName(videoGrid, Se.Language.General.Position);
+
+        // A click on the frame takes focus back from the X/Y fields, so the arrow keys nudge again
+        videoGrid.PointerPressed += (_, _) => videoGrid.Focus();
 
         var bitmapImage = new Image
         {
@@ -258,6 +267,8 @@ public class AssaSetPositionWindow : Window
             StrokeThickness = 1.5,
             Margin = new Thickness(-5),
         };
+        selection.Bind(IsVisibleProperty, new Binding(nameof(vm.ShowSelection)));
+        anchorDot.Bind(IsVisibleProperty, new Binding(nameof(vm.ShowSelection)));
         var overlay = new Grid
         {
             HorizontalAlignment = HorizontalAlignment.Left,
@@ -265,6 +276,7 @@ public class AssaSetPositionWindow : Window
             Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.SizeAll),
             Background = Brushes.Transparent,
         };
+        overlay.Bind(IsVisibleProperty, new Binding(nameof(vm.IsPreviewReady))); // its size and place are unknown until then
         overlay.Children.Add(textImage);
         overlay.Children.Add(selection);
         overlay.Children.Add(anchorDot);
@@ -302,8 +314,9 @@ public class AssaSetPositionWindow : Window
         var originalY = 0;
         overlay.PointerPressed += (_, e) =>
         {
-            if (e.GetCurrentPoint(overlay).Properties.IsLeftButtonPressed)
+            if (!vm.ClickToPlace && e.GetCurrentPoint(overlay).Properties.IsLeftButtonPressed)
             {
+                videoGrid.Focus();
                 dragStart = e.GetPosition(videoGrid);
                 originalX = vm.ScreenshotX;
                 originalY = vm.ScreenshotY;
@@ -333,10 +346,116 @@ public class AssaSetPositionWindow : Window
             }
         };
 
+        // Click-to-place (SE4 style): the text follows the mouse over the frame and a click puts it
+        // there; the next click picks it up again. Leaving the frame while it follows puts it back
+        // where it was last placed.
+        var following = true;
+        var placedX = 0;
+        var placedY = 0;
+        var hasPlaced = false;
+
+        bool TryGetRenderPoint(Avalonia.Input.PointerEventArgs e, out Point point)
+        {
+            point = default;
+            var image = bitmapImage.Bounds;
+            if (image.Width <= 0 || image.Height <= 0)
+            {
+                return false;
+            }
+
+            var p = e.GetPosition(videoGrid);
+            var offsetX = (videoGrid.Bounds.Width - image.Width) / 2;
+            var offsetY = (videoGrid.Bounds.Height - image.Height) / 2;
+            var scale = image.Width / vm.RenderWidth;
+            point = new Point((p.X - offsetX) / scale, (p.Y - offsetY) / scale);
+            return true;
+        }
+
+        void RememberPlaced()
+        {
+            placedX = vm.ScreenshotX;
+            placedY = vm.ScreenshotY;
+            hasPlaced = true;
+        }
+
+        void UpdateCursor()
+        {
+            var cursorType = !vm.ClickToPlace
+                ? Avalonia.Input.StandardCursorType.SizeAll
+                : following ? Avalonia.Input.StandardCursorType.Cross : Avalonia.Input.StandardCursorType.Hand;
+            overlay.Cursor = new Avalonia.Input.Cursor(cursorType);
+            videoGrid.Cursor = vm.ClickToPlace ? new Avalonia.Input.Cursor(cursorType) : null;
+        }
+
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(vm.ClickToPlace))
+            {
+                following = true;
+                hasPlaced = false;
+                UpdateCursor();
+            }
+            else if (e.PropertyName == nameof(vm.IsPreviewReady))
+            {
+                hasPlaced = false; // the position only means something once the frame is rendered
+            }
+        };
+        UpdateCursor();
+
+        videoGrid.PointerMoved += (_, e) =>
+        {
+            if (!vm.ClickToPlace || !vm.IsPreviewReady || !following || !TryGetRenderPoint(e, out var point))
+            {
+                return;
+            }
+
+            if (!hasPlaced)
+            {
+                RememberPlaced();
+            }
+
+            vm.CenterAt(point.X, point.Y);
+        };
+        videoGrid.PointerPressed += (_, e) =>
+        {
+            if (!vm.ClickToPlace || !vm.IsPreviewReady || !e.GetCurrentPoint(videoGrid).Properties.IsLeftButtonPressed || !TryGetRenderPoint(e, out var point))
+            {
+                return;
+            }
+
+            if (following)
+            {
+                vm.CenterAt(point.X, point.Y); // put it down here
+                RememberPlaced();
+                following = false;
+            }
+            else
+            {
+                RememberPlaced(); // pick it up - leaving the frame puts it back here
+                following = true;
+                vm.CenterAt(point.X, point.Y);
+            }
+
+            UpdateCursor();
+            e.Handled = true;
+        };
+        videoGrid.PointerExited += (_, _) =>
+        {
+            if (vm.ClickToPlace && following && hasPlaced)
+            {
+                vm.ScreenshotX = placedX; // exactly back, no snapping
+                vm.ScreenshotY = placedY;
+
+                // remember again on the next entry, so anchor picks, centering, typed X/Y and
+                // nudges made outside the frame are not undone the next time the mouse leaves it
+                hasPlaced = false;
+            }
+        };
+
         var info = new DockPanel { Margin = new Thickness(2, 8, 2, 0) };
         info.Children.Add(new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.LineInfo)),
         });
@@ -352,7 +471,7 @@ public class AssaSetPositionWindow : Window
         var tags = new TextBlock
         {
             FontFamily = new FontFamily("Menlo, Consolas, Cascadia Mono, DejaVu Sans Mono, monospace"),
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.FaintTextBrush,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -376,13 +495,6 @@ public class AssaSetPositionWindow : Window
         };
         grid.Add(tags, 0, 0);
         grid.Add(buttons, 0, 1);
-        return new Border
-        {
-            Child = grid,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(grid);
     }
 }

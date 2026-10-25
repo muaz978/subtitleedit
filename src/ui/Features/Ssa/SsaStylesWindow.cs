@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Automation;
@@ -43,7 +43,7 @@ public class SsaStylesWindow : Window
             Mode = BindingMode.TwoWay,
         });
         CanResize = true;
-        Width = 1200;
+        Width = 1400;
         Height = 800;
         MinWidth = 1000;
         MinHeight = 600;
@@ -54,14 +54,8 @@ public class SsaStylesWindow : Window
         vm.Window = this;
         DataContext = vm;
 
-        var content = new Grid
-        {
-            ColumnDefinitions =
-            {
-                new ColumnDefinition(new GridLength(360)),
-                new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
-            },
-        };
+        // Lists on the left, preview + editor on the right, a splitter between them (#16251)
+        var content = new Grid();
 
         var right = new Grid
         {
@@ -76,8 +70,7 @@ public class SsaStylesWindow : Window
         right.Add(MakeEditingBanner(vm), 1, 0);
         right.Add(MakeEditorPanel(vm), 2, 0);
 
-        content.Add(MakeListsPanel(vm), 0, 0);
-        content.Add(right, 0, 1);
+        StylesDialogHelper.AddListsSplitter(this, content, MakeListsPanel(vm), right);
 
         var mainGrid = new Grid
         {
@@ -259,9 +252,11 @@ public class SsaStylesWindow : Window
         AutomationProperties.SetName(dataGrid, Se.Language.Assa.StylesInFile);
         dataGrid.DataContext = vm;
         dataGrid.ItemsSource = vm.FileStyles;
-        dataGrid.Columns.Add(Column(Se.Language.General.Name, nameof(StyleDisplay.Name), new GridLength(1, GridUnitType.Star)));
+        dataGrid.Columns.Add(Column(Se.Language.General.Name, nameof(StyleDisplay.Name), new GridLength(150)));
+        dataGrid.Columns.Add(StylesDialogHelper.MakeFontNameColumn(110));
         dataGrid.Columns.Add(Column(Se.Language.General.FontSize, nameof(StyleDisplay.FontSize), new GridLength(70)));
         dataGrid.Columns.Add(Column(Se.Language.General.Usages, nameof(StyleDisplay.UsageCount), new GridLength(70)));
+        dataGrid.Columns.Add(StylesDialogHelper.MakeColorSampleColumn());
 
         dataGrid.Bind(TableView.SelectedItemProperty, new Binding(nameof(vm.SelectedFileStyle)) { Source = vm });
         dataGrid.SelectionChanged += vm.FileStylesChanged;
@@ -309,7 +304,9 @@ public class SsaStylesWindow : Window
         dataGrid.DataContext = vm;
         dataGrid.ItemsSource = vm.StorageStyles;
         dataGrid.Columns.Add(Column(Se.Language.General.Name, nameof(StyleDisplay.Name), new GridLength(1, GridUnitType.Star)));
+        dataGrid.Columns.Add(StylesDialogHelper.MakeFontNameColumn());
         dataGrid.Columns.Add(Column(Se.Language.General.FontSize, nameof(StyleDisplay.FontSize), new GridLength(70)));
+        dataGrid.Columns.Add(StylesDialogHelper.MakeColorSampleColumn());
 
         // The default style gets a yellow star instead of "True"/"False"
         dataGrid.Columns.Add(new SeTableViewColumn
@@ -330,7 +327,7 @@ public class SsaStylesWindow : Window
             {
                 Converter = new FuncValueConverter<bool, string>(isDefault => isDefault ? Se.Language.General.IsDefault : string.Empty),
             },
-            Width = new GridLength(70),
+            Width = new GridLength(44),
         });
 
         dataGrid.Bind(TableView.SelectedItemProperty, new Binding(nameof(vm.SelectedStorageStyle)) { Source = vm });
@@ -444,13 +441,13 @@ public class SsaStylesWindow : Window
         var editing = new TextBlock
         {
             Text = Se.Language.Assa.StylesEditing,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
         var name = new TextBlock
         {
-            FontSize = 13.5,
+            FontSize = EditorChrome.ScaledFont(13.5),
             FontWeight = FontWeight.SemiBold,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -458,7 +455,7 @@ public class SsaStylesWindow : Window
         };
         var badgeText = new TextBlock
         {
-            FontSize = 11.5,
+            FontSize = EditorChrome.ScaledFont(11.5),
             FontWeight = FontWeight.SemiBold,
             [!TextBlock.TextProperty] = new Binding(nameof(vm.CurrentTitle)),
         };
@@ -495,7 +492,7 @@ public class SsaStylesWindow : Window
     {
         var name = new TextBox
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Background = EditorChrome.FieldBrush,
             BorderBrush = EditorChrome.FieldBorderBrush,
             CornerRadius = new CornerRadius(6),
@@ -525,9 +522,9 @@ public class SsaStylesWindow : Window
         {
             var toggle = new ToggleButton
             {
-                Content = new TextBlock { Text = text, FontWeight = weight, FontStyle = style, FontSize = 13 },
+                Content = new TextBlock { Text = text, FontWeight = weight, FontStyle = style, FontSize = EditorChrome.FieldFontSize },
                 Width = 28,
-                Height = 28,
+                Height = EditorChrome.ScaledSize(28),
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 VerticalContentAlignment = VerticalAlignment.Center,
                 [!ToggleButton.IsCheckedProperty] = new Binding(Current + property) { Mode = BindingMode.TwoWay },
@@ -573,7 +570,7 @@ public class SsaStylesWindow : Window
             cell.Children.Add(new TextBlock
             {
                 Text = name,
-                FontSize = 11,
+                FontSize = EditorChrome.ScaledFont(11),
                 Foreground = EditorChrome.DimTextBrush,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -658,7 +655,7 @@ public class SsaStylesWindow : Window
         // "2 styles in file · 5 saved"
         var summary = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -687,14 +684,7 @@ public class SsaStylesWindow : Window
         };
         grid.Add(summary, 0, 0);
         grid.Add(buttons, 0, 1);
-        return new Border
-        {
-            Child = grid,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(grid);
     }
 
     /// <summary>

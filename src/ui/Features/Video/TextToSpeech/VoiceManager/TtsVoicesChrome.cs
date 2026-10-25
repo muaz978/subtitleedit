@@ -23,7 +23,7 @@ internal static class TtsVoicesChrome
         panel.Children.Add(new TextBlock
         {
             Text = title,
-            FontSize = 17,
+            FontSize = EditorChrome.ScaledFont(17),
             FontWeight = FontWeight.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         });
@@ -32,7 +32,7 @@ internal static class TtsVoicesChrome
             panel.Children.Add(new TextBlock
             {
                 Text = intro,
-                FontSize = 12.5,
+                FontSize = EditorChrome.FieldFontSize,
                 Foreground = EditorChrome.DimTextBrush,
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -56,7 +56,7 @@ internal static class TtsVoicesChrome
                 ColumnDefinitions = { new ColumnDefinition(GridLength.Auto), new ColumnDefinition(new GridLength(1, GridUnitType.Star)) },
             };
             row.Add(new TextBlock { Text = "•", Foreground = EditorChrome.AccentBrush, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Top }, 0, 0);
-            row.Add(new TextBlock { Text = point, TextWrapping = TextWrapping.Wrap, FontSize = 12.5 }, 0, 1);
+            row.Add(new TextBlock { Text = point, TextWrapping = TextWrapping.Wrap, FontSize = EditorChrome.FieldFontSize }, 0, 1);
             stack.Children.Add(row);
         }
 

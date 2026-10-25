@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
@@ -157,7 +156,7 @@ public class WaveformThemesWindow : Window
     private static TextBlock MakeColorLabel(string text)
     {
         var label = EditorChrome.MakeDimLabel(text, new Thickness(0));
-        label.FontSize = 12.5;
+        label.FontSize = EditorChrome.FieldFontSize;
         return label;
     }
 

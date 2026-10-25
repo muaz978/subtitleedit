@@ -5,10 +5,8 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Nikse.SubtitleEdit.Logic;
 using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Interactivity;
-using Avalonia.Media;
 using Avalonia.Styling;
 using Nikse.SubtitleEdit.Logic.Config;
 using System;
@@ -245,18 +243,7 @@ public class RemoveTextForHearingImpairedWindow : Window
                     Header = Se.Language.General.Apply,
                     CellTheme = UiUtil.TableViewNoPaddingCellTheme,
                     HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-                    CellTemplate = new FuncDataTemplate<RemoveItem>((item, _) =>
-                        new Border
-                        {
-                            Background = Brushes.Transparent, // Prevents highlighting
-                            Padding = new Thickness(4),
-                            Child = new CheckBox
-                            {
-                                Focusable = false,
-                                [!ToggleButton.IsCheckedProperty] = new Binding(nameof(RemoveItem.Apply)),
-                                HorizontalAlignment = HorizontalAlignment.Center
-                            }
-                        }),
+                    CellTemplate = TableViewExtras.MakeCheckBoxCellTemplate<RemoveItem>(nameof(RemoveItem.Apply)),
                     // Content-sized (Auto) on the DataGrid; TableView treats Auto as star.
                     Width = new GridLength(70)
                 },

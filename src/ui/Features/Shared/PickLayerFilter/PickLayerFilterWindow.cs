@@ -1,12 +1,8 @@
-using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
-using Avalonia.Media;
 using System.Collections;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
@@ -91,18 +87,7 @@ public class PickLayerFilterWindow : Window
             Header = Se.Language.General.Visible,
             CellTheme = UiUtil.TableViewNoPaddingCellTheme,
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-            CellTemplate = new FuncDataTemplate<LayerItem>((item, _) =>
-            new Border
-            {
-                Background = Brushes.Transparent, // Prevents highlighting
-                Padding = new Thickness(4),
-                Child = new CheckBox
-                {
-                    Focusable = false,
-                    [!ToggleButton.IsCheckedProperty] = new Binding(nameof(LayerItem.IsSelected)),
-                    HorizontalAlignment = HorizontalAlignment.Center
-                }
-            }),
+            CellTemplate = TableViewExtras.MakeCheckBoxCellTemplate<LayerItem>(nameof(LayerItem.IsSelected)),
             // Content-sized (Auto) on the DataGrid; TableView treats Auto as star.
             Width = new GridLength(80),
         };

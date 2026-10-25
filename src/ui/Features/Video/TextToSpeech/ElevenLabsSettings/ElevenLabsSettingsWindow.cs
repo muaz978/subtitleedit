@@ -90,7 +90,7 @@ public class ElevenLabsSettingsWindow : Window
         text.TextTrimming = TextTrimming.CharacterEllipsis;
         var value = new TextBlock
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             MinWidth = 40,
             TextAlignment = TextAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
@@ -122,20 +122,13 @@ public class ElevenLabsSettingsWindow : Window
         buttonOk.Classes.Add("primary");
         var buttonCancel = UiUtil.MakeButtonCancel(vm.CancelCommand);
 
-        return new Border
+        return EditorChrome.WrapButtonBar(new StackPanel
         {
-            Child = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Spacing = 10,
-                Children = { buttonCancel, buttonOk },
-            },
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10,
+            Children = { buttonCancel, buttonOk },
+        });
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

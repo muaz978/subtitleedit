@@ -969,9 +969,16 @@ public class NikseBitmapImageSplitter2
         var spacePixels = 0;
         var subtractSpacePixels = 0;
 
+        // Per row: everything left of this x is already transparent. Each cut used to clear its
+        // rows from x = 0 again, so the clearing grew with line width times glyph count.
+        var clearedUpTo = new int[bmpHeight];
+
+        // One list for every column - the points are only used within the same iteration.
+        var pointBuffer = new List<NiksePoint>(bmpHeight + 8);
+
         for (var x = 0; x < bmpWidth; x++)
         {
-            var points = IsVerticalLineTransparent(bmp, x, out var right, out var clean);
+            var points = IsVerticalLineTransparent(bmp, x, pointBuffer, out var right, out var clean) ? pointBuffer : null;
 
             if (points != null && clean)
             {
@@ -1031,7 +1038,18 @@ public class NikseBitmapImageSplitter2
                 // Remove pixels before next letter
                 foreach (var p in points)
                 {
-                    bmp.MakeVerticalLinePartTransparent(0, p.X, p.Y);
+                    if (p.Y < 0 || p.Y >= bmpHeight)
+                    {
+                        bmp.MakeVerticalLinePartTransparent(0, p.X, p.Y);
+                        continue;
+                    }
+
+                    var cleared = clearedUpTo[p.Y];
+                    if (p.X >= cleared)
+                    {
+                        bmp.MakeVerticalLinePartTransparent(cleared, p.X, p.Y);
+                        clearedUpTo[p.Y] = Math.Min(p.X, bmpWidth - 1) + 1;
+                    }
                 }
                 width = 1;
                 startX = FindMinX(points, x);
@@ -1045,7 +1063,69 @@ public class NikseBitmapImageSplitter2
             }
         }
 
+        RemoveCrumbs(parts);
         return parts;
+    }
+
+    /// <summary>
+    /// The vertical path search above slides around strokes, and on a bold "a" it slips
+    /// between the bowl and the 2 px foot that sticks out at the bottom right (also the leg of
+    /// "R", "x", "k", "A" and the accented "à"): the foot comes out as its own 2x2 part that no
+    /// database entry can match, so the OCR prompts for an unusable "character" (#16195). A
+    /// part a hundredth the area of the glyph whose box it touches is a crumb of that glyph.
+    /// It is dropped rather than merged back: the glyph matched without it before, and giving
+    /// "à" its foot back changed its match to "á".
+    /// </summary>
+    private static void RemoveCrumbs(List<ImageSplitterItem2> parts)
+    {
+        for (var i = parts.Count - 1; i >= 0; i--)
+        {
+            var crumb = parts[i];
+            if (crumb.NikseBitmap == null || (!IsCrumbOf(parts, i, -1) && !IsCrumbOf(parts, i, 1)))
+            {
+                continue;
+            }
+
+            parts.RemoveAt(i);
+
+            // A space item on both sides of the crumb is one gap now.
+            if (i > 0 && i < parts.Count && parts[i - 1].NikseBitmap == null && parts[i].NikseBitmap == null &&
+                parts[i - 1].SpecialCharacter == " " && parts[i].SpecialCharacter == " ")
+            {
+                parts[i - 1].SpacePixels += parts[i].SpacePixels + crumb.NikseBitmap.Width;
+                parts.RemoveAt(i);
+            }
+        }
+    }
+
+    private static bool IsCrumbOf(List<ImageSplitterItem2> parts, int crumbIndex, int direction)
+    {
+        // The path that cut the crumb off can count as a clean column, so a space item may sit
+        // between the crumb and its glyph although their boxes touch; the boxes decide.
+        var index = crumbIndex + direction;
+        while (index >= 0 && index < parts.Count && parts[index].NikseBitmap == null)
+        {
+            index += direction;
+        }
+
+        if (index < 0 || index >= parts.Count)
+        {
+            return false;
+        }
+
+        var crumb = parts[crumbIndex];
+        var glyph = parts[index];
+        var a = crumb.NikseBitmap!;
+        var b = glyph.NikseBitmap!;
+        if (a.Width * a.Height * 100 > b.Width * b.Height || a.Width * 4 > b.Width || a.Height * 4 > b.Height)
+        {
+            return false;
+        }
+
+        // Touching boxes: no column between them, and no row either (the foot of "R" starts
+        // on the row under its box).
+        var gap = direction < 0 ? crumb.X - (glyph.X + b.Width) : glyph.X - (crumb.X + a.Width);
+        return gap <= 0 && crumb.Y <= glyph.Y + b.Height && glyph.Y <= crumb.Y + a.Height;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1078,14 +1158,15 @@ public class NikseBitmapImageSplitter2
         return x;
     }
 
-    private static List<NiksePoint>? IsVerticalLineTransparent(NikseBitmap2 bmp, int x, out bool right, out bool clean)
+    /// <returns>False where the old version returned null; <paramref name="points"/> is cleared and refilled.</returns>
+    private static bool IsVerticalLineTransparent(NikseBitmap2 bmp, int x, List<NiksePoint> points, out bool right, out bool clean)
     {
         right = false;
         var left = false;
         var leftCount = 0;
         var rightCount = 0;
         clean = true;
-        List<NiksePoint>? points = null;
+        points.Clear();
         var y = 0;
         var bmpHeight = bmp.Height;
         var bmpWidth = bmp.Width;
@@ -1098,7 +1179,7 @@ public class NikseBitmapImageSplitter2
                 clean = false;
                 if (x == 0)
                 {
-                    return null;
+                    return false;
                 }
 
                 if (x < bmpWidth - 1 && y < bmpHeight - 1 && bmp.GetAlpha(x + 1, y) == 0 && bmp.GetAlpha(x + 1, y + 1) == 0)
@@ -1116,7 +1197,7 @@ public class NikseBitmapImageSplitter2
                     }
                     else
                     {
-                        return null;
+                        return false;
                     }
                 }
                 else if (x < bmpWidth - 1 && y == bmpHeight - 1 && bmp.GetAlpha(x + 1, y) == 0 && bmp.GetAlpha(x + 1, y - 1) == 0)
@@ -1129,7 +1210,7 @@ public class NikseBitmapImageSplitter2
                     }
                     else
                     {
-                        return null;
+                        return false;
                     }
                 }
                 else if (bmp.GetAlpha(x - 1, y) == 0)
@@ -1143,7 +1224,7 @@ public class NikseBitmapImageSplitter2
                     y--;
                     left = true;
                     // Remove points with Y > current Y
-                    while (points != null && points.Count > 0 && points[^1].Y > y)
+                    while (points.Count > 0 && points[^1].Y > y)
                     {
                         points.RemoveAt(points.Count - 1);
                     }
@@ -1154,14 +1235,14 @@ public class NikseBitmapImageSplitter2
                     y -= 2;
                     left = true;
                     // Remove points with Y > current Y
-                    while (points != null && points.Count > 0 && points[^1].Y > y)
+                    while (points.Count > 0 && points[^1].Y > y)
                     {
                         points.RemoveAt(points.Count - 1);
                     }
                 }
                 else
                 {
-                    return null;
+                    return false;
                 }
 
                 if (left)
@@ -1176,18 +1257,17 @@ public class NikseBitmapImageSplitter2
 
                 if (leftCount > maxSlide || rightCount > maxSlide)
                 {
-                    return null;
+                    return false;
                 }
             }
             else
             {
-                points ??= new List<NiksePoint>();
                 points.Add(new NiksePoint(x, y));
                 y++;
             }
         }
 
-        return points ?? new List<NiksePoint>();
+        return true;
     }
 
     //internal static int IsBitmapsAlike(ManagedBitmap2 bmp1, NikseBitmap2 bmp2)

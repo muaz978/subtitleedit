@@ -7,7 +7,6 @@ using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
-using Avalonia.Threading;
 using Avalonia.Media;
 using Nikse.SubtitleEdit.Features.Files.Compare;
 using Nikse.SubtitleEdit.Logic;
@@ -44,7 +43,7 @@ public class FixNetflixErrorsWindow : Window
         buttonOk.Classes.Add("primary");
 
         var summaryText = EditorChrome.MakeBoundHint(nameof(vm.FixesSummaryText));
-        summaryText.FontSize = 12;
+        summaryText.FontSize = EditorChrome.FieldFontSize;
 
         var panelButtons = EditorChrome.MakeButtonBar(summaryText, buttonGenerateReport, UiUtil.MakeButtonCancel(vm.CancelCommand), buttonOk);
 

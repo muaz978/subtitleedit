@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.LogicalTree;
@@ -46,7 +42,6 @@ public class TextToSpeechWindowTests : IDisposable
             new TtsDownloadService(new HttpClient()),
             new WindowService(new NullServiceProvider()),
             new FileHelper(),
-            new FolderHelper(),
             new AceStepAudioCppDownloadService(new HttpClient()));
         var window = new TextToSpeechWindow(vm);
         _windows.Add(window);

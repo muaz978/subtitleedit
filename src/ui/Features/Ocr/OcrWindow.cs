@@ -11,22 +11,18 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Nikse.SubtitleEdit.Features.Ocr.Engines;
-using Nikse.SubtitleEdit.Features.Ocr.FixEngine;
 using Nikse.SubtitleEdit.Features.Translate;
-using Nikse.SubtitleEdit.Features.Video.VideoOcr;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
 using Optris.Icons.Avalonia;
 using System;
-using System.Collections;
 using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using Nikse.SubtitleEdit.UiLogic.Ocr.FixEngine;
 using MenuItem = Avalonia.Controls.MenuItem;
-using Nikse.SubtitleEdit.UiLogic.Ocr;
 
 namespace Nikse.SubtitleEdit.Features.Ocr;
 
@@ -166,7 +162,6 @@ public class OcrWindow : Window
         Loaded += (s, e) => vm.OnLoaded();
         Closing += (s, e) => vm.OnClosing(e);
         KeyDown += (s, e) => vm.OnKeyDown(e);
-        KeyUp += (s, e) => vm.OnWindowKeyUp(e);
     }
 
     private static Border MakeTopControlsView(OcrViewModel vm)
@@ -1339,7 +1334,7 @@ public class OcrWindow : Window
 
         var subtitleCountText = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             TextTrimming = TextTrimming.CharacterEllipsis,
             HorizontalAlignment = HorizontalAlignment.Left,
@@ -1370,8 +1365,8 @@ public class OcrWindow : Window
         {
             Content = text,
             Command = command,
-            Height = 28,
-            FontSize = 12.5,
+            Height = EditorChrome.ScaledSize(28),
+            FontSize = EditorChrome.FieldFontSize,
             Padding = new Thickness(10, 0),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,

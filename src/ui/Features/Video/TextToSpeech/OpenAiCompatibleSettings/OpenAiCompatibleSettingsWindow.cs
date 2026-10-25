@@ -104,7 +104,7 @@ public class OpenAiCompatibleSettingsWindow : Window
 
     private static TextBox MakeTextBox(TextBox textBox, string name)
     {
-        textBox.FontSize = 12.5;
+        textBox.FontSize = EditorChrome.FieldFontSize;
         textBox.MinHeight = 28;
         textBox.Background = EditorChrome.FieldBrush;
         textBox.BorderBrush = EditorChrome.FieldBorderBrush;
@@ -153,20 +153,13 @@ public class OpenAiCompatibleSettingsWindow : Window
         buttonOk.Classes.Add("primary");
         var buttonCancel = UiUtil.MakeButtonCancel(vm.CancelCommand);
 
-        return new Border
+        return EditorChrome.WrapButtonBar(new StackPanel
         {
-            Child = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Spacing = 10,
-                Children = { buttonCancel, buttonOk },
-            },
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10,
+            Children = { buttonCancel, buttonOk },
+        });
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

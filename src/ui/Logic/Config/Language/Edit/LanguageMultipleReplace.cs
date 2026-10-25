@@ -19,6 +19,17 @@ public class LanguageMultipleReplace
     public string DescriptionOptional { get; set; }
     public string RegularExpressionTooSlowX { get; set; }
     public string MoveToCategory { get; set; }
+    public string AddRules { get; set; }
+    public string AddRulesDotDotDot { get; set; }
+    public string AddRulesToX { get; set; }
+    public string XRules { get; set; }
+    public string DiscardXRules { get; set; }
+    public string EnterAddsRule { get; set; }
+    public string Categories { get; set; }
+    public string NewestFirst { get; set; }
+    public string FilterRules { get; set; }
+    public string RulesInX { get; set; }
+    public string EnterAddsRuleToCategory { get; set; }
 
     public LanguageMultipleReplace()
     {
@@ -39,5 +50,16 @@ public class LanguageMultipleReplace
         DescriptionOptional = "Description (optional)";
         RegularExpressionTooSlowX = "Regular expression gave up after {0} seconds - the rule is skipped, try a simpler pattern";
         MoveToCategory = "Move to category";
+        AddRules = "Add rules";
+        AddRulesDotDotDot = "Add rules...";
+        AddRulesToX = "Add rules to '{0}'";
+        XRules = "{0:#,##0} rules";
+        DiscardXRules = "Discard the {0} rules entered?";
+        EnterAddsRule = "Enter adds the rule to the list, OK adds the list to the category (Ctrl+Enter)";
+        Categories = "Categories";
+        NewestFirst = "Newest first";
+        FilterRules = "Filter rules...";
+        RulesInX = "Rules in '{0}'";
+        EnterAddsRuleToCategory = "Enter adds the rule to the end of the category";
     }
 }

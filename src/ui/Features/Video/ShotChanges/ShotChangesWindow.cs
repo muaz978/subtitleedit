@@ -1,12 +1,10 @@
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Styling;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Platform.Progress;
@@ -140,7 +138,7 @@ public class ShotChangesWindow : Window
         AutomationProperties.SetName(sliderSensitivity, Se.Language.General.Sensitivity);
         var labelSensitivityValue = UiUtil.MakeLabel(string.Empty).WithBindText(vm, nameof(ShotChangesViewModel.Sensitivity), new DoubleToTwoDecimalConverter());
         labelSensitivityValue.MinWidth = 36;
-        labelSensitivityValue.FontSize = 12.5;
+        labelSensitivityValue.FontSize = EditorChrome.FieldFontSize;
         var buttonGenerate = UiUtil.MakeButton(Se.Language.Video.ShotChanges.GenerateShotChangesWithFfmpeg, vm.GenerateShotChangesFfmpegCommand)
             .WithBindEnabled(nameof(vm.IsGenerating), InverseBooleanConverter.Instance);
         buttonGenerate.Margin = new Thickness(12, 0, 0, 0);
@@ -227,7 +225,7 @@ public class ShotChangesWindow : Window
         };
         foreach (var radioButton in new[] { radioButtonFrames, radioButtonSeconds, radioButtonMilliseconds, radioButtonTHhMmSsMs })
         {
-            radioButton.FontSize = 12.5;
+            radioButton.FontSize = EditorChrome.FieldFontSize;
         }
 
         var textBoxImport = new TextBox

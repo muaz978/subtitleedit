@@ -7,7 +7,6 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using System.Collections;
 using Nikse.SubtitleEdit.Features.Main;
-using Nikse.SubtitleEdit.Features.Tools.BridgeGaps;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
@@ -73,7 +72,7 @@ public class SortByWindow : Window
             var textBlock = new TextBlock
             {
                 Margin = new Thickness(5),
-                FontSize = 12.5,
+                FontSize = EditorChrome.FieldFontSize,
             };
             textBlock.Bind(TextBlock.TextProperty, new Binding(nameof(SortCriterion.DisplayText)));
             return textBlock;

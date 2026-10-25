@@ -1,5 +1,4 @@
 using Avalonia;
-using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -8,7 +7,6 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Styling;
 using Nikse.SubtitleEdit.Features.Main.Layout;
 using Nikse.SubtitleEdit.Features.Sync.VisualSync;
 using Nikse.SubtitleEdit.Logic;
@@ -123,12 +121,12 @@ public class AssaApplyCustomOverrideTagsWindow : Window
                 };
 
                 var text = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-                text.Children.Add(new TextBlock { Text = preset.Name, FontSize = 12.5, TextTrimming = TextTrimming.CharacterEllipsis });
+                text.Children.Add(new TextBlock { Text = preset.Name, FontSize = EditorChrome.FieldFontSize, TextTrimming = TextTrimming.CharacterEllipsis });
                 text.Children.Add(new TextBlock
                 {
                     Text = preset.Tag,
                     FontFamily = MonoFont,
-                    FontSize = 11,
+                    FontSize = EditorChrome.ScaledFont(11),
                     Foreground = EditorChrome.FaintTextBrush,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                 });
@@ -197,7 +195,7 @@ public class AssaApplyCustomOverrideTagsWindow : Window
             MinHeight = 70,
             MaxHeight = 140,
             FontFamily = MonoFont,
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Background = EditorChrome.FieldBrush,
             BorderBrush = EditorChrome.FieldBorderBrush,
             CornerRadius = new CornerRadius(6),
@@ -219,7 +217,7 @@ public class AssaApplyCustomOverrideTagsWindow : Window
     {
         RadioButton Radio(string text, string property) => new()
         {
-            Content = new TextBlock { Text = text, FontSize = 12.5 },
+            Content = new TextBlock { Text = text, FontSize = EditorChrome.FieldFontSize },
             GroupName = "assa-override-tags-apply-to",
             [!RadioButton.IsCheckedProperty] = new Binding(property) { Mode = BindingMode.TwoWay },
         };
@@ -230,7 +228,7 @@ public class AssaApplyCustomOverrideTagsWindow : Window
         content.Children.Add(Radio(Se.Language.Sync.AdjustSelectedLinesAndForward, nameof(vm.AdjustSelectedLinesAndForward)));
         content.Children.Add(new TextBlock
         {
-            FontSize = 11.5,
+            FontSize = EditorChrome.ScaledFont(11.5),
             Foreground = EditorChrome.FaintTextBrush,
             Margin = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap,
@@ -283,13 +281,6 @@ public class AssaApplyCustomOverrideTagsWindow : Window
         buttons.Children.Add(buttonCancel);
         buttons.Children.Add(buttonOk);
 
-        return new Border
-        {
-            Child = buttons,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(buttons);
     }
 }

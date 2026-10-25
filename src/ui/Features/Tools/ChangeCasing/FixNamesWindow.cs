@@ -1,11 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
-using Avalonia.Media;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 
@@ -143,18 +140,7 @@ public class FixNamesWindow : Window
             Header = Se.Language.General.Enabled,
             CellTheme = UiUtil.TableViewNoPaddingCellTheme,
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-            CellTemplate = new FuncDataTemplate<FixNameItem>(static (item, _) =>
-            new Border
-            {
-                Background = Brushes.Transparent, // Prevents highlighting
-                Padding = new Thickness(4),
-                Child = new CheckBox
-                {
-                    Focusable = false,
-                    [!ToggleButton.IsCheckedProperty] = new Binding(nameof(FixNameItem.IsChecked)),
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-                }
-            }),
+            CellTemplate = TableViewExtras.MakeCheckBoxCellTemplate<FixNameItem>(nameof(FixNameItem.IsChecked)),
             // Content-sized (Auto) on the DataGrid; TableView treats Auto as star.
             Width = new GridLength(80)
         });
@@ -192,17 +178,7 @@ public class FixNamesWindow : Window
             Header = Se.Language.General.Apply,
             CellTheme = UiUtil.TableViewNoPaddingCellTheme,
             HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-            CellTemplate = new FuncDataTemplate<FixNameHitItem>(static (_, _) => new Border
-            {
-                Background = Brushes.Transparent, // Prevents highlighting
-                Padding = new Thickness(4),
-                Child = new CheckBox
-                {
-                    Focusable = false,
-                    [!ToggleButton.IsCheckedProperty] = new Binding(nameof(FixNameHitItem.IsEnabled)),
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center,
-                }
-            }),
+            CellTemplate = TableViewExtras.MakeCheckBoxCellTemplate<FixNameHitItem>(nameof(FixNameHitItem.IsEnabled)),
             // Content-sized (Auto) on the DataGrid; TableView treats Auto as star.
             Width = new GridLength(80)
         });

@@ -1,8 +1,6 @@
 using Nikse.SubtitleEdit.Logic;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Data;
 using Nikse.SubtitleEdit.Logic.Config;
@@ -36,7 +34,7 @@ public class TranscriptionProgressWindow : Window
 
         var connectionInfoText = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             TextWrapping = TextWrapping.Wrap
         };
@@ -44,14 +42,14 @@ public class TranscriptionProgressWindow : Window
 
         var modelInfoText = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
         };
         modelInfoText.Bind(TextBlock.TextProperty, new Binding(nameof(TranscriptionProgressViewModel.ModelName)) { StringFormat = Se.Language.General.TranscriptionProgressModelFormat });
 
         var statusText = new TextBlock
         {
-            FontSize = 13,
+            FontSize = EditorChrome.FieldFontSize,
             FontWeight = FontWeight.SemiBold,
             TextWrapping = TextWrapping.Wrap,
         };
@@ -64,7 +62,7 @@ public class TranscriptionProgressWindow : Window
         {
             TextWrapping = TextWrapping.Wrap,
             FontFamily = new FontFamily("Monospace"),
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Margin = new Thickness(8, 6),
         };
         streamedTextBlock.Bind(TextBlock.TextProperty, new Binding(nameof(TranscriptionProgressViewModel.StreamedText)));

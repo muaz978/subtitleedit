@@ -54,6 +54,7 @@ public class LanguageAssa
     public string DrawCategoryBasicShapes { get; set; }
     public string DrawCategorySymbols { get; set; }
     public string DrawCategoryClipArt { get; set; }
+    public string DrawCategoryAnimatedClipArt { get; set; }
     public string DrawClipArtRedHeart { get; set; }
     public string DrawClipArtAngerMark { get; set; }
     public string DrawClipArtSweatDrop { get; set; }
@@ -144,6 +145,7 @@ public class LanguageAssa
     public string DrawAnimationBlink { get; set; }
     public string DrawAnimationBounce { get; set; }
     public string DrawAnimationShake { get; set; }
+    public string DrawAnimationShakeHorizontal { get; set; }
     public string DrawAnimationSwing { get; set; }
     public string DrawAnimationFlip { get; set; }
     public string DrawAnimationLoopBlocked { get; set; }
@@ -426,6 +428,8 @@ public class LanguageAssa
     public string SetPositionSafeArea { get; set; }
     public string SetPositionCenterLines { get; set; }
     public string SetPositionSnapToGuides { get; set; }
+    public string SetPositionClickToPlace { get; set; }
+    public string SetPositionShowSelection { get; set; }
     public string SetPositionNudgeHint { get; set; }
     public string ScaleX { get; set; }
     public string ScaleY { get; set; }
@@ -603,6 +607,7 @@ public class LanguageAssa
         DrawCategoryBasicShapes = "Basic shapes";
         DrawCategorySymbols = "Symbols";
         DrawCategoryClipArt = "Clip art";
+        DrawCategoryAnimatedClipArt = "Animated clip art";
         DrawClipArtRedHeart = "Red heart";
         DrawClipArtAngerMark = "Anger mark";
         DrawClipArtSweatDrop = "Sweat drop";
@@ -693,6 +698,7 @@ public class LanguageAssa
         DrawAnimationBlink = "Blink";
         DrawAnimationBounce = "Bounce";
         DrawAnimationShake = "Shake";
+        DrawAnimationShakeHorizontal = "Shake horizontal";
         DrawAnimationSwing = "Swing";
         DrawAnimationFlip = "Flip";
         DrawAnimationLoopBlocked = "This loop turns around another point than the in/out effect, so it is left out.";
@@ -972,6 +978,8 @@ public class LanguageAssa
         SetPositionSafeArea = "Safe area";
         SetPositionCenterLines = "Center lines";
         SetPositionSnapToGuides = "Snap to guides";
+        SetPositionClickToPlace = "Text follows mouse, click to place";
+        SetPositionShowSelection = "Selection box and anchor";
         SetPositionNudgeHint = "Arrow keys nudge 1 px, Shift 10 px";
         ScaleX = "Scale X";
         ScaleY = "Scale Y";

@@ -53,7 +53,6 @@ using Nikse.SubtitleEdit.Features.Main.MainHelpers;
 using Nikse.SubtitleEdit.Features.Ocr;
 using Nikse.SubtitleEdit.Features.Ocr.BinaryOcr;
 using Nikse.SubtitleEdit.Features.Ocr.Download;
-using Nikse.SubtitleEdit.Features.Ocr.FixEngine;
 using Nikse.SubtitleEdit.Features.Ocr.NOcr;
 using Nikse.SubtitleEdit.Features.Ocr.VobSubColorChooser;
 using Nikse.SubtitleEdit.Features.Options.CustomErrorRules;
@@ -425,6 +424,7 @@ public static class DependencyInjectionExtensions
         collection.AddTransient<ChangeFrameRateViewModel>();
         collection.AddTransient<ChangeSpeedViewModel>();
         collection.AddTransient<CheckForUpdatesViewModel>();
+        collection.AddTransient<CheckForUpdatesSettingsViewModel>();
         collection.AddTransient<ColorPickerViewModel>();
         collection.AddTransient<ColumnPasteViewModel>();
         collection.AddTransient<CompareViewModel>();
@@ -455,6 +455,7 @@ public static class DependencyInjectionExtensions
         collection.AddTransient<EditCustomTextFormatViewModel>();
         collection.AddTransient<EditEmbeddedTrackViewModel>();
         collection.AddTransient<EditRuleViewModel>();
+        collection.AddTransient<AddRulesViewModel>();
         collection.AddTransient<EditWholeTextViewModel>();
         collection.AddTransient<UseAlwaysListViewModel>();
         collection.AddTransient<ElevenLabsSettingsViewModel>();

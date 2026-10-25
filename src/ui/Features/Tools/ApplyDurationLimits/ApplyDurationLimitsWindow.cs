@@ -1,13 +1,8 @@
-using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
-using Avalonia.Threading;
-using Avalonia.Media;
 using System.Collections;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Logic;
@@ -137,18 +132,7 @@ public class ApplyDurationLimitsWindow : Window
                 Header = Se.Language.General.Apply,
                 CellTheme = UiUtil.TableViewNoPaddingCellTheme,
                 HeaderTheme = UiUtil.TableViewColumnHeaderTheme,
-                CellTemplate = new FuncDataTemplate<ApplyDurationLimitItem>((item, _) =>
-                    new Border
-                    {
-                        Background = Brushes.Transparent, // Prevents highlighting
-                        Padding = new Thickness(4),
-                        Child = new CheckBox
-                        {
-                            Focusable = false,
-                            [!ToggleButton.IsCheckedProperty] = new Binding(nameof(ApplyDurationLimitItem.Apply)),
-                            HorizontalAlignment = HorizontalAlignment.Center
-                        }
-                    }),
+                CellTemplate = TableViewExtras.MakeCheckBoxCellTemplate<ApplyDurationLimitItem>(nameof(ApplyDurationLimitItem.Apply)),
                 Width = new GridLength(80), // content-sized (Auto) on the DataGrid; TableView treats Auto as star
             },
             new SeTableViewColumn

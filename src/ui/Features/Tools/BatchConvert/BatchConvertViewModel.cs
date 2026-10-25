@@ -1,4 +1,4 @@
-﻿using Nikse.SubtitleEdit.UiLogic.Export;
+using Nikse.SubtitleEdit.UiLogic.Export;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -40,7 +40,6 @@ using Nikse.SubtitleEdit.Features.Tools.RemoveTextForHearingImpaired;
 using Nikse.SubtitleEdit.Features.Translate;
 using Nikse.SubtitleEdit.Features.Translate.LlamaCppAdvanced;
 using Nikse.SubtitleEdit.Features.Translate.LlamaCppEngineSettings;
-using Nikse.SubtitleEdit.Logic.LlamaCpp;
 using Nikse.SubtitleEdit.Features.Video.SpeechToText;
 using Nikse.SubtitleEdit.Features.Video.SpeechToText.Engines;
 using Nikse.SubtitleEdit.Logic;
@@ -1806,6 +1805,11 @@ public partial class BatchConvertViewModel : ObservableObject, IClosingCleanup
         if (!config.RunPlugin.IsActive || config.RunPlugin.Plugin is { CanRun: true })
         {
             return true;
+        }
+
+        if (Window == null)
+        {
+            return false;
         }
 
         await MessageBox.Show(

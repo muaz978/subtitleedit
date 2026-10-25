@@ -1,9 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Media;
-using Avalonia.Styling;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 
@@ -39,7 +37,7 @@ public class DownloadSpeechToTextEngineWindow : Window
         progressBar.Bind(ProgressBar.ValueProperty, new Binding(nameof(vm.ProgressValue)));
         progressBar.Bind(ProgressBar.OpacityProperty, new Binding(nameof(vm.ProgressOpacity)));
 
-        var statusText = new TextBlock { FontSize = 12, Foreground = EditorChrome.DimTextBrush };
+        var statusText = new TextBlock { FontSize = EditorChrome.FieldFontSize, Foreground = EditorChrome.DimTextBrush };
         statusText.Bind(TextBlock.TextProperty, new Binding(nameof(vm.ProgressText)));
 
         // The view models set Error on every failure path, but nothing rendered it - the user saw

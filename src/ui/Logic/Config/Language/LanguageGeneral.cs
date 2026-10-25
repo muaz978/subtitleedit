@@ -660,6 +660,9 @@ public class LanguageGeneral
     public string Styles { get; set; }
     public string SubtitleFile { get; set; }
     public string SubtitleFileChangedOutsideX { get; set; }
+    public string SubtitleFileChangedOutsideReloadX { get; set; }
+    public string SubtitleFileChangedOutsideOverwriteX { get; set; }
+    public string SubtitleFileChangedOutsideAutoSaveSkippedX { get; set; }
     public string SubtitleFileName { get; set; }
     public string SubtitleFileSaved { get; set; }
     public string SubtitleFileSavedToX { get; set; }
@@ -707,6 +710,7 @@ public class LanguageGeneral
     public string Translate { get; set; }
     public string TranslatePercentX { get; set; }
     public string TranslateRow { get; set; }
+    public string TranslateRows { get; set; }
     public string Translation { get; set; }
     public string TwoLetterLanguageCode { get; set; }
     public string Type { get; set; }
@@ -1555,6 +1559,9 @@ public class LanguageGeneral
         Styles = "Styles";
         SubtitleFile = "Subtitle file";
         SubtitleFileChangedOutsideX = "The file \"{0}\" was changed outside Subtitle Edit." + Environment.NewLine + Environment.NewLine + "Reload it and lose your changes?";
+        SubtitleFileChangedOutsideReloadX = "The file \"{0}\" was changed outside Subtitle Edit." + Environment.NewLine + Environment.NewLine + "Reload it?";
+        SubtitleFileChangedOutsideOverwriteX = "The file \"{0}\" was changed outside Subtitle Edit after it was loaded." + Environment.NewLine + Environment.NewLine + "Overwrite it with the subtitle in Subtitle Edit?";
+        SubtitleFileChangedOutsideAutoSaveSkippedX = "Auto-save skipped: {0} was changed outside Subtitle Edit";
         SubtitleFileName = "Subtitle file name";
         SubtitleFileSaved = "Subtitle file saved";
         SubtitleFileSavedToX = "Subtitle file saved to {0}";
@@ -1602,6 +1609,7 @@ public class LanguageGeneral
         Translate = "Translate";
         TranslatePercentX = "Translating: {0}%";
         TranslateRow = "Translate row";
+        TranslateRows = "Translate rows";
         Translation = "Translation";
         TwoLetterLanguageCode = "Two-letter language code";
         Type = "Type";

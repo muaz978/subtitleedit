@@ -3,6 +3,7 @@ using Nikse.SubtitleEdit.Core.ContainerFormats.MaterialExchangeFormat;
 using Nikse.SubtitleEdit.Core.Forms;
 using Nikse.SubtitleEdit.Core.Interfaces;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
+using Nikse.SubtitleEdit.UiLogic.MergeContinuationLines;
 using Nikse.SubtitleEdit.UiLogic.SubtitleLoading;
 using Spectre.Console;
 using System.Globalization;
@@ -736,13 +737,17 @@ internal static class LibSEIntegration
     /// OCR-fix (from <c>--fce-language</c>); pass <c>null</c> to auto-detect from content.
     /// <paramref name="removeFormattingRules"/> is consulted only when <c>removeformatting</c>
     /// is in the operation list — pass <c>null</c> to strip every tag wholesale.
+    /// <paramref name="mergeContinuationLinesMaxGapMs"/> / <paramref name="mergeContinuationLinesMaxCharacters"/>
+    /// are consulted only for <c>mergecontinuationlines</c>; pass <c>null</c> for the batch convert defaults.
     /// </summary>
     public static void ApplyOperations(
         Subtitle subtitle,
         List<string> operations,
         IReadOnlyList<string>? fixCommonErrorsRules = null,
         string? fixCommonErrorsLanguage = null,
-        IReadOnlyList<string>? removeFormattingRules = null)
+        IReadOnlyList<string>? removeFormattingRules = null,
+        int? mergeContinuationLinesMaxGapMs = null,
+        int? mergeContinuationLinesMaxCharacters = null)
     {
         if (subtitle == null || operations == null || operations.Count == 0)
         {
@@ -751,7 +756,7 @@ internal static class LibSEIntegration
 
         foreach (var operation in operations)
         {
-            ApplyOperation(subtitle, operation, fixCommonErrorsRules, fixCommonErrorsLanguage, removeFormattingRules);
+            ApplyOperation(subtitle, operation, fixCommonErrorsRules, fixCommonErrorsLanguage, removeFormattingRules, mergeContinuationLinesMaxGapMs, mergeContinuationLinesMaxCharacters);
         }
     }
 
@@ -760,7 +765,9 @@ internal static class LibSEIntegration
         string operation,
         IReadOnlyList<string>? fixCommonErrorsRules,
         string? fixCommonErrorsLanguage,
-        IReadOnlyList<string>? removeFormattingRules)
+        IReadOnlyList<string>? removeFormattingRules,
+        int? mergeContinuationLinesMaxGapMs,
+        int? mergeContinuationLinesMaxCharacters)
     {
         switch (operation.ToLowerInvariant())
         {
@@ -785,6 +792,24 @@ internal static class LibSEIntegration
                         hiIndex--;
                     }
                     subtitle.Renumber();
+                }
+                break;
+
+            case "mergecontinuationlines":
+                {
+                    // Defaults are batch convert's (SeBatchConvert): 250 ms, and 0 characters there
+                    // means max line length x max number of lines.
+                    var maxGapMs = mergeContinuationLinesMaxGapMs ?? 250;
+                    var maxCharacters = mergeContinuationLinesMaxCharacters
+                        ?? Configuration.Settings.General.SubtitleLineMaximumLength * Configuration.Settings.General.MaxNumberOfLines;
+                    var language = SubtitleLanguageDetector.Detect(subtitle);
+                    var merged = MergeContinuationLinesUtils.MergeContinuationLinesInSubtitle(subtitle, language, maxGapMs, maxCharacters);
+                    if (merged.Paragraphs.Count != subtitle.Paragraphs.Count)
+                    {
+                        subtitle.Paragraphs.Clear();
+                        subtitle.Paragraphs.AddRange(merged.Paragraphs);
+                        subtitle.Renumber();
+                    }
                 }
                 break;
 
@@ -904,9 +929,14 @@ internal static class LibSEIntegration
                 break;
 
             case "fixrtlviaunicodechars":
-                foreach (var p in subtitle.Paragraphs)
+                // Only meaningful for Hebrew/Arabic text; on a Latin-only subtitle it would just
+                // wrap every line in RTL control characters (same guard as Batch convert in the UI).
+                if (ContainsRightToLeftLetter(subtitle))
                 {
-                    p.Text = Utilities.FixRtlViaUnicodeChars(p.Text);
+                    foreach (var p in subtitle.Paragraphs)
+                    {
+                        p.Text = Utilities.FixRtlViaUnicodeChars(p.Text);
+                    }
                 }
                 break;
 
@@ -915,9 +945,14 @@ internal static class LibSEIntegration
                 break;
 
             case "reversertlstartend":
-                foreach (var p in subtitle.Paragraphs)
+                // Moves the punctuation of every line from the end to the start, which scrambles
+                // a Latin-only subtitle (".Hello world") - skip those (same guard as Batch convert).
+                if (ContainsRightToLeftLetter(subtitle))
                 {
-                    p.Text = Utilities.ReverseStartAndEndingForRightToLeft(p.Text);
+                    foreach (var p in subtitle.Paragraphs)
+                    {
+                        p.Text = Utilities.ReverseStartAndEndingForRightToLeft(p.Text);
+                    }
                 }
                 break;
 
@@ -925,6 +960,19 @@ internal static class LibSEIntegration
                 // Unknown operation - ignore or log warning
                 break;
         }
+    }
+
+    private static bool ContainsRightToLeftLetter(Subtitle subtitle)
+    {
+        foreach (var p in subtitle.Paragraphs)
+        {
+            if (LanguageAutoDetect.ContainsRightToLeftLetter(p.Text))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static void RemoveUnicodeControlChars(Subtitle subtitle)

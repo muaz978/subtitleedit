@@ -43,7 +43,7 @@ public class AssaTagHistoryWindow : Window
             ItemTemplate = new FuncDataTemplate<string>((_, _) => new TextBlock
             {
                 FontFamily = MonoFont,
-                FontSize = 12.5,
+                FontSize = EditorChrome.FieldFontSize,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 [!TextBlock.TextProperty] = new Binding("."),
             }),
@@ -76,13 +76,6 @@ public class AssaTagHistoryWindow : Window
         buttons.Children.Add(buttonCancel);
         buttons.Children.Add(buttonOk);
 
-        return new Border
-        {
-            Child = buttons,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(buttons);
     }
 }

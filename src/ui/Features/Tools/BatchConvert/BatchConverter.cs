@@ -18,9 +18,7 @@ using Nikse.SubtitleEdit.Features.Files.ExportImageBased;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Features.Ocr;
 using Nikse.SubtitleEdit.Features.Ocr.Engines;
-using Nikse.SubtitleEdit.Features.Ocr.NOcr;
 using Nikse.SubtitleEdit.Features.Ocr.OcrSubtitle;
-using Nikse.SubtitleEdit.Features.Translate;
 using Nikse.SubtitleEdit.UiLogic.AdjustDuration;
 using Nikse.SubtitleEdit.UiLogic.BatchConvert;
 using Nikse.SubtitleEdit.Features.Tools.ChangeCasing;
@@ -32,7 +30,6 @@ using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Dictionaries;
 using Nikse.SubtitleEdit.Logic.Media;
-using Nikse.SubtitleEdit.Logic.LlamaCpp;
 using Nikse.SubtitleEdit.Logic.Plugins;
 using Nikse.SubtitleEdit.UiLogic.Ocr;
 using SkiaSharp;
@@ -152,12 +149,17 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         // be the source file itself, and reading the timestamps afterwards would only give back
         // the time the output was written.
         var sourceTimestamps = _config.KeepSourceTimestamp ? FileTimestampHelper.Capture(item.FileName) : null;
+        // Saving may switch libse's frame rate to the "change frame rate" target (see
+        // SaveConverted) - a batch run must not leave the main window on another frame rate.
+        var oldFrameRate = Configuration.Settings.General.CurrentFrameRate;
         try
         {
             await ConvertCore(item, cancellationToken);
         }
         finally
         {
+            Configuration.Settings.General.CurrentFrameRate = oldFrameRate;
+
             if (sourceTimestamps != null)
             {
                 ApplySourceTimestamp(sourceTimestamps.Value);
@@ -576,6 +578,14 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
 
     private async Task SaveConverted(BatchConvertItem item, IOcrSubtitle? imageSubtitle, CancellationToken cancellationToken)
     {
+        // Frame-based writers (ITT, SMPTE TTML, EBU STL, SCC, D-Cinema, ...) write frames and their
+        // frame rate from libse's current frame rate - after "change frame rate" that must be the
+        // target rate, not the source's (#16257). Convert restores the previous value.
+        if (_config.ChangeFrameRate.IsActive && _config.ChangeFrameRate.ToFrameRate > 0)
+        {
+            Configuration.Settings.General.CurrentFrameRate = _config.ChangeFrameRate.ToFrameRate;
+        }
+
         // Save text based formats - binary ones like EBU STL are in the list too (for loading),
         // but their ToText is just "Not supported!", so they go through the binary save below
         foreach (var format in _subtitleFormats)
@@ -696,68 +706,6 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         public bool IsImage { get; set; }
         public IOcrSubtitle? OcrSubtitle { get; set; }
         public Subtitle? Subtitle { get; set; }
-    }
-
-    private List<TransportStreamResult> LoadTransportStream(BatchConvertItem item, CancellationToken cancellationToken)
-    {
-        var result = new List<TransportStreamResult>();
-
-        var tsParser = new TransportStreamParser();
-        tsParser.Parse(item.FileName, null);
-
-        var programMapTableParser = new ProgramMapTableParser();
-        programMapTableParser.Parse(item.FileName); // get languages
-
-        foreach (var packetId in tsParser.SubtitlePacketIds)
-        {
-            var language = string.Empty;
-            if (programMapTableParser.GetSubtitlePacketIds().Count > 0)
-            {
-                language = programMapTableParser.GetSubtitleLanguage(packetId);
-            }
-
-            var subtitles = tsParser.GetDvbSubtitles(packetId);
-            if (subtitles.Count > 0)
-            {
-                result.Add(new TransportStreamResult { IsImage = true, OcrSubtitle = new OcrSubtitleTransportStream(subtitles) });
-            }
-        }
-
-        // One PID can carry several teletext subtitle pages; emit each page as its own result.
-        foreach (var pages in tsParser.TeletextSubtitlesLookup.Values)
-        {
-            foreach (var paragraphs in pages.Values)
-            {
-                if (paragraphs.Count > 0)
-                {
-                    result.Add(new TransportStreamResult { IsImage = false, Subtitle = new Subtitle(paragraphs) });
-                }
-            }
-        }
-
-        foreach (var aribPid in tsParser.AribSubtitlesLookup)
-        {
-            foreach (var language in aribPid.Value)
-            {
-                if (language.Value.Count > 0)
-                {
-                    result.Add(new TransportStreamResult { IsImage = false, Subtitle = new Subtitle(language.Value) });
-                }
-            }
-        }
-
-        foreach (var tracks in tsParser.ClosedCaptionSubtitlesLookup.Values)
-        {
-            foreach (var paragraphs in tracks.Values)
-            {
-                if (paragraphs.Count > 0)
-                {
-                    result.Add(new TransportStreamResult { IsImage = false, Subtitle = new Subtitle(paragraphs) });
-                }
-            }
-        }
-
-        return result;
     }
 
     public static List<IBinaryParagraphWithPosition> LoadDvbFromMatroska(MatroskaTrackInfo track, MatroskaFile matroska, ref Subtitle subtitle)
@@ -1186,43 +1134,12 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             index++;
         }
 
-        matches = RemoveSpacesAfter1(matches, pixelsAreSpace);
+        matches = NOcrSpaceDetector.RemoveFalseSpacesInNumbers(matches, pixelsAreSpace);
 
         var text = ItalicTextMerger.MergeWithItalicTags(matches).Trim();
         return new Paragraph(text, imageSubtitles.GetStartTime(i).TotalMilliseconds, imageSubtitles.GetEndTime(i).TotalMilliseconds);
     }
 
-    private static List<NOcrChar> RemoveSpacesAfter1(List<NOcrChar> matches, int pixelsAreSpace)
-    {
-        var deleteItems = new List<NOcrChar>();
-        for (var i = 0; i < matches.Count - 1; i++)
-        {
-            var match = matches[i];
-            if (match.Text.EndsWith('1') && !match.Italic)
-            {
-                var pixelsLess = 0;
-                if (pixelsAreSpace > 7)
-                {
-                    pixelsLess = (int)Math.Round(pixelsAreSpace * 0.3m, MidpointRounding.AwayFromZero);
-                }
-
-                var nextMatch = matches[i + 1];
-                if (nextMatch.ImageSplitterItem != null &&
-                    nextMatch.ImageSplitterItem.SpecialCharacter == " " &&
-                    nextMatch.ImageSplitterItem.SpacePixels - pixelsLess < pixelsAreSpace)
-                {
-                    deleteItems.Add(nextMatch);
-                }
-            }
-        }
-
-        foreach (var deleteItem in deleteItems)
-        {
-            matches.Remove(deleteItem);
-        }
-
-        return matches;
-    }
 
     private const int OcrPreflightSampleSize = 50;
 
@@ -3984,6 +3901,17 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
             return subtitle;
         }
 
+        // "Reverse RTL start/end" moves the punctuation of every line from the end to the start, and
+        // "Fix via Unicode" wraps every line in RTL control characters. Both are right for Hebrew or
+        // Arabic text in players without bidi support and wrong for anything else - a user who left
+        // the box ticked got ".Hello world" in 26 English files. A subtitle with no right-to-left
+        // letters at all has nothing for them to fix, so leave it alone. Removing control characters
+        // is harmless either way and still runs.
+        if (!_config.RightToLeft.RemoveUnicode && !ContainsRightToLeftLetter(subtitle))
+        {
+            return subtitle;
+        }
+
         if (_config.RightToLeft.FixViaUnicode)
         {
             foreach (var p in subtitle.Paragraphs)
@@ -4007,6 +3935,20 @@ public class BatchConverter : IBatchConverter, IFixCallbacks
         }
 
         return subtitle;
+    }
+
+    private static bool ContainsRightToLeftLetter(Subtitle subtitle)
+    {
+        // Every line, not just the first few: an RTL subtitle may well open with Latin credits.
+        foreach (var p in subtitle.Paragraphs)
+        {
+            if (LanguageAutoDetect.ContainsRightToLeftLetter(p.Text))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private Subtitle MergeLinesWithSameTimeCodes(Subtitle subtitle, string language)

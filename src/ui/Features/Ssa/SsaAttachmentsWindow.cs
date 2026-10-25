@@ -7,7 +7,6 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using System.Linq;
-using Avalonia.Styling;
 using Nikse.SubtitleEdit.Core.Common;
 using Nikse.SubtitleEdit.Features.Assa;
 using Nikse.SubtitleEdit.Logic;
@@ -80,11 +79,11 @@ public class SsaAttachmentsWindow : Window
     {
         var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, Margin = new Thickness(10, 0) };
         content.Children.Add(new Optris.Icons.Avalonia.Icon { Value = icon, FontSize = 13, VerticalAlignment = VerticalAlignment.Center });
-        content.Children.Add(new TextBlock { Text = text, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center });
+        content.Children.Add(new TextBlock { Text = text, FontSize = EditorChrome.FieldFontSize, VerticalAlignment = VerticalAlignment.Center });
         var button = new Button
         {
             Content = content,
-            Height = 30,
+            Height = EditorChrome.ScaledSize(30),
             Command = command,
             VerticalContentAlignment = VerticalAlignment.Center,
         };
@@ -119,7 +118,7 @@ public class SsaAttachmentsWindow : Window
         // "2 fonts · 1 graphics · 120 KB"
         var summary = new TextBlock
         {
-            FontSize = 12,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -150,14 +149,7 @@ public class SsaAttachmentsWindow : Window
         };
         grid.Add(summary, 0, 0);
         grid.Add(buttons, 0, 1);
-        return new Border
-        {
-            Child = grid,
-            Background = EditorChrome.ButtonBarBrush,
-            BorderBrush = EditorChrome.LineBrush,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Padding = new Thickness(16, 10),
-        };
+        return EditorChrome.WrapButtonBar(grid);
     }
 
     private static Border MakeLeftView(SsaAttachmentsViewModel vm, out TableView tableView)
@@ -271,7 +263,7 @@ public class SsaAttachmentsWindow : Window
     {
         var title = new TextBlock
         {
-            FontSize = 12.5,
+            FontSize = EditorChrome.FieldFontSize,
             Foreground = EditorChrome.DimTextBrush,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
