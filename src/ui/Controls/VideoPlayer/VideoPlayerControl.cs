@@ -979,8 +979,9 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
 
         private void OnMainGridPointerPressed(object? sender, PointerPressedEventArgs e)
         {
+            // Only a left click toggles play or opens a video - right/middle clicks must not
             var props = e.GetCurrentPoint(this).Properties;
-            if (props.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed || _surfaceLeftButtonDown)
+            if (props.PointerUpdateKind != PointerUpdateKind.LeftButtonPressed)
             {
                 return;
             }
@@ -1019,10 +1020,10 @@ namespace Nikse.SubtitleEdit.Controls.VideoPlayer
                 return;
             }
 
+            _surfaceLeftButtonDown = false;
             var props = e.GetCurrentPoint(this).Properties;
             if (!props.IsLeftButtonPressed)
             {
-                _surfaceLeftButtonDown = false;
                 e.Pointer.Capture(null);
             }
         }

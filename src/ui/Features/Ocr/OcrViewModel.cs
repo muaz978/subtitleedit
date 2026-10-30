@@ -15,7 +15,6 @@ using Nikse.SubtitleEdit.Core.ContainerFormats.TransportStream;
 using Nikse.SubtitleEdit.Core.Interfaces;
 using Nikse.SubtitleEdit.Core.SubtitleFormats;
 using Nikse.SubtitleEdit.Core.VobSub;
-using Nikse.SubtitleEdit.UiLogic.Ocr.Service;
 using Nikse.SubtitleEdit.Features.Files.ImportImages;
 using Nikse.SubtitleEdit.Features.Main;
 using Nikse.SubtitleEdit.Features.Ocr.BinaryOcr;
@@ -44,7 +43,11 @@ using Nikse.SubtitleEdit.Logic.Download;
 using Nikse.SubtitleEdit.Logic.Media;
 using Nikse.SubtitleEdit.Logic.Ocr;
 using Nikse.SubtitleEdit.Logic.Ocr.GoogleLens;
+using Nikse.SubtitleEdit.UiLogic.LlamaCpp;
 using Nikse.SubtitleEdit.UiLogic.Ocr;
+using Nikse.SubtitleEdit.UiLogic.Ocr.FixEngine;
+using Nikse.SubtitleEdit.UiLogic.Ocr.Service;
+using Nikse.SubtitleEdit.UiLogic.SpellCheck;
 using SkiaSharp;
 using System;
 using System.Collections.Generic;
@@ -55,9 +58,6 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Nikse.SubtitleEdit.UiLogic.LlamaCpp;
-using Nikse.SubtitleEdit.UiLogic.Ocr.FixEngine;
-using Nikse.SubtitleEdit.UiLogic.SpellCheck;
 
 namespace Nikse.SubtitleEdit.Features.Ocr;
 
@@ -100,6 +100,52 @@ public partial class OcrViewModel : ObservableObject
     [ObservableProperty] private string _selectionStatus;
     [ObservableProperty] private Bitmap? _currentImageSource;
     [ObservableProperty] private string _currentBitmapInfo;
+    [ObservableProperty] private bool _showVideoPreview;
+    [ObservableProperty] private Bitmap? _videoPreviewBitmap;
+    [ObservableProperty] private double _videoPreviewScreenWidth = 1920;
+    [ObservableProperty] private double _videoPreviewScreenHeight = 1080;
+    [ObservableProperty] private double _videoPreviewLeft;
+    [ObservableProperty] private double _videoPreviewTop;
+    [ObservableProperty] private double _videoPreviewImageWidth;
+    [ObservableProperty] private double _videoPreviewImageHeight;
+
+    partial void OnSelectedOcrSubtitleItemChanged(OcrSubtitleItem? value)
+    {
+        UpdateVideoPreview();
+    }
+
+    partial void OnShowVideoPreviewChanged(bool value)
+    {
+        UpdateVideoPreview();
+    }
+
+    private void UpdateVideoPreview()
+    {
+        var item = SelectedOcrSubtitleItem;
+        if (!ShowVideoPreview || item == null)
+        {
+            VideoPreviewBitmap = null;
+            return;
+        }
+
+        try
+        {
+            using var skBitmap = item.GetSkBitmapClean();
+            var position = item.GetPosition();
+            var screen = item.GetScreenSize();
+            VideoPreviewImageWidth = skBitmap.Width;
+            VideoPreviewImageHeight = skBitmap.Height;
+            VideoPreviewLeft = position.X;
+            VideoPreviewTop = position.Y;
+            VideoPreviewScreenWidth = screen.Width > 0 ? screen.Width : Math.Max(1920, position.X + skBitmap.Width);
+            VideoPreviewScreenHeight = screen.Height > 0 ? screen.Height : Math.Max(1080, position.Y + skBitmap.Height);
+            VideoPreviewBitmap = skBitmap.ToAvaloniaBitmap();
+        }
+        catch (Exception)
+        {
+            VideoPreviewBitmap = null;
+        }
+    }
     [ObservableProperty] private string _currentText;
     [ObservableProperty] private bool _isOcrRunning;
     [ObservableProperty] private bool _hasForcedSubtitles;
@@ -1499,15 +1545,9 @@ public partial class OcrViewModel : ObservableObject
         LlamaCppServerManager.StopServer();
         UpdateLlamaCppOcrServerButtonText();
 
-        // Re-download the same backend that is installed (CPU/Vulkan/CUDA all unpack into one
-        // folder); when nothing is installed yet, DownloadAsync falls back to asking the user.
-        var folder = LlamaCppServerManager.GetAndCreateFolder();
-        var variant = LlamaCppServerManager.IsEngineInstalled() && OperatingSystem.IsWindows()
-            ? DownloadHashManager.DetectLlamaCppWindowsVariant(folder)
-            : null;
-
+        // No forced variant: the user picks CPU/Vulkan/CUDA, which is how to change the installed build.
         var model = SelectedLlamaCppOcrModel?.Model;
-        var downloaded = await LlamaCppDownloadHelper.DownloadAsync(Window, _windowService, model, variant, forceEngineDownload: true);
+        var downloaded = await LlamaCppDownloadHelper.DownloadAsync(Window, _windowService, model, forceEngineDownload: true);
         if (downloaded != null)
         {
             var selectName = string.IsNullOrEmpty(downloaded) ? model?.FileName : downloaded;
@@ -2365,7 +2405,7 @@ public partial class OcrViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void DeleteSelectedLines()
+    private async Task DeleteSelectedLines()
     {
         if (IsOcrRunning)
         {
@@ -2376,6 +2416,27 @@ public partial class OcrViewModel : ObservableObject
         if (selectedItems == null || selectedItems.Count == 0)
         {
             return;
+        }
+
+        if (Se.Settings.General.PromptBeforeDelete && Window != null)
+        {
+            var selectedLines = selectedItems.OfType<OcrSubtitleItem>().ToList();
+            var message = selectedLines.Count == 1
+                ? string.Format(Se.Language.General.DeleteLineXPrompt, selectedLines[0].Number)
+                : string.Format(Se.Language.General.DeleteXLinesPrompt, selectedLines.Count);
+            var answer = await MessageBox.Show(
+                Window,
+                Se.Language.General.Delete,
+                message,
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            // OCR may have been started, or the selection changed, while the prompt was up
+            selectedItems = SubtitleGrid.SelectedItems;
+            if (answer != MessageBoxResult.Yes || IsOcrRunning || selectedItems == null || selectedItems.Count == 0)
+            {
+                return;
+            }
         }
 
         // Row -> index once: a Contains here plus a Remove per row below searched the whole
@@ -5096,10 +5157,11 @@ public partial class OcrViewModel : ObservableObject
             e.Handled = true; // prevent further handling if needed
             Dispatcher.UIThread.Post(async void () => { await ViewSelectedImage(); });
         }
-        else if (e.Key == Key.Delete)
+        else if ((e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None) ||
+                 (OperatingSystem.IsMacOS() && e.Key == Key.Back && e.KeyModifiers == KeyModifiers.Meta)) // Mac keyboards have no forward Delete - same keys as the main grid
         {
             e.Handled = true; // prevent further handling if needed
-            DeleteSelectedLines();
+            _ = DeleteSelectedLines();
         }
         else if (e.Key == Key.I && e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift))
         {
@@ -5642,8 +5704,8 @@ public partial class OcrViewModel : ObservableObject
 
         var answer = await MessageBox.Show(
             Window,
-            "Update CrispEmbed?",
-            $"A newer version of CrispEmbed is available.{Environment.NewLine}{Environment.NewLine}Download it now?",
+            Se.Language.Ocr.UpdateCrispEmbedQuestion,
+            Se.Language.Ocr.UpdateCrispEmbedDetailsQuestion,
             MessageBoxButtons.YesNoCancel,
             MessageBoxIcon.Question);
 
@@ -5685,8 +5747,8 @@ public partial class OcrViewModel : ObservableObject
             {
                 var result = await MessageBox.Show(
                     Window!,
-                    "Discard OCR result?",
-                    "Some items have OCR text. Close and discard the OCR result?",
+                    Se.Language.Ocr.DiscardOcrResultQuestion,
+                    Se.Language.Ocr.DiscardOcrResultDetaulsQuestion,
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question);
 

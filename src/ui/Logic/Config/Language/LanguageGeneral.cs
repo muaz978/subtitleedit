@@ -152,6 +152,9 @@ public class LanguageGeneral
     public string ContinueFindTitle { get; set; }
     public string SearchItemNotFoundContinueFromTop { get; set; }
     public string SearchItemNotFoundContinueFromBottom { get; set; }
+    public string ContinueReplaceTitle { get; set; }
+    public string ReplaceNotFoundContinueFromTop { get; set; }
+    public string ReplacedXContinueFromTop { get; set; }
     public string ConversionCancelledByUser { get; set; }
     public string Convert { get; set; }
     public string Converted { get; set; }
@@ -900,6 +903,7 @@ public class LanguageGeneral
     public string FixOcrErrors { get; set; }
     public string RunningOcrXY { get; set; }
     public string LlamaCppDownloadEnginePrompt { get; set; }
+    public string DoYouWantToDeleteX { get; set; }
 
     public LanguageGeneral()
     {
@@ -1059,6 +1063,9 @@ public class LanguageGeneral
         ContinueFindTitle = "Continue Find?";
         SearchItemNotFoundContinueFromTop = "The search item was not found.\nWould you like to start from the top of the document and search one more time?";
         SearchItemNotFoundContinueFromBottom = "The search item was not found.\nWould you like to start from the end of the document and search one more time?";
+        ContinueReplaceTitle = "Continue replace?";
+        ReplaceNotFoundContinueFromTop = "The search item was not found.\nWould you like to start from the top of the document and continue search and replace?";
+        ReplacedXContinueFromTop = "The search item was replaced {0} time(s).\nWould you like to start from the top of the document and continue search and replace?";
         ConversionCancelledByUser = "Conversion cancelled by user";
         Convert = "Convert";
         Converted = "Converted";
@@ -1591,7 +1598,7 @@ public class LanguageGeneral
         Timing = "Timing";
         Title = "Title";
         To = "To";
-        ToggleCasing = "Toggle casing";
+        ToggleCasing = "Cycle casing";
         ToggleDirection = "Toggle direction";
         ToggleForced = "Toggle forced";
         MarkedXLinesAsForced = "Marked {0} line(s) as forced";
@@ -1799,5 +1806,6 @@ public class LanguageGeneral
         FixOcrErrors = "Fix OCR errors";
         RunningOcrXY = "Running OCR... {0}/{1}";
         LlamaCppDownloadEnginePrompt = "llama.cpp requires the llama-server engine to be downloaded. Download now?";
+        DoYouWantToDeleteX = "Do you want to delete \"{0}\"?";
     }
 }

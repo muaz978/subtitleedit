@@ -35,7 +35,7 @@ internal sealed class LlamaCppOcrEngine : IOcrEngine
         _modelName = modelName;
         _language = string.IsNullOrWhiteSpace(language) ? "English" : language;
         // Shared with the UI's default so the two cannot drift; --ocr-prompt overrides it, and a
-        // curated model with its own tuned prompt (LFM2.5-VL) gets that unless --ocr-prompt is set.
+        // curated model with its own tuned prompt (LFM3-VL) gets that unless --ocr-prompt is set.
         _promptTemplate = LlamaCppServerManager.ResolveOcrPrompt(model, prompt);
         _quiet = quiet;
         _httpClient = new HttpClient
@@ -60,11 +60,7 @@ internal sealed class LlamaCppOcrEngine : IOcrEngine
         var url = options.OcrUrl?.Trim();
         if (!string.IsNullOrEmpty(url))
         {
-            // User-managed server: accept a bare host:port and complete it to the
-            // chat/completions endpoint (same convention as --translate-url).
-            var fullUrl = url.Contains("/v1/", StringComparison.OrdinalIgnoreCase)
-                ? url
-                : url.TrimEnd('/') + "/v1/chat/completions";
+            var fullUrl = CompleteUrl(url);
             var modelName = string.IsNullOrWhiteSpace(options.OcrModel)
                 ? "glmocr"
                 : ModelStem(options.OcrModel);
@@ -79,6 +75,24 @@ internal sealed class LlamaCppOcrEngine : IOcrEngine
         LlamaCppLocal.EnsureServerBinary("the OCR window > llama.cpp", "--ocr-url");
         var model = ResolveOcrModel(options.OcrModel);
         return new LlamaCppOcrEngine(null, model, Path.GetFileNameWithoutExtension(model.FileName), options.OcrLanguage, options.OcrPrompt, options.Quiet);
+    }
+
+    /// <summary>
+    /// Completes a user-supplied --ocr-url to the chat/completions endpoint: a bare
+    /// <c>host:port</c> gets <c>http://</c> (HttpClient rejects a URI without a scheme), and a
+    /// URL without a <c>/v1/</c> path gets <c>/v1/chat/completions</c> appended.
+    /// </summary>
+    internal static string CompleteUrl(string url)
+    {
+        var fullUrl = url.Trim();
+        if (!fullUrl.Contains("://", StringComparison.Ordinal))
+        {
+            fullUrl = "http://" + fullUrl;
+        }
+
+        return fullUrl.Contains("/v1/", StringComparison.OrdinalIgnoreCase)
+            ? fullUrl
+            : fullUrl.TrimEnd('/') + "/v1/chat/completions";
     }
 
     /// <summary>

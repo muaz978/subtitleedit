@@ -12,6 +12,7 @@ using Nikse.SubtitleEdit.Features.Translate;
 using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Download;
+using Nikse.SubtitleEdit.Logic.Platform.Progress;
 using Nikse.SubtitleEdit.Logic.ValueConverters;
 using System.Linq;
 
@@ -404,7 +405,14 @@ public class VideoOcrWindow : Window
             .WithBindEnabled(nameof(vm.IsRunning), InverseBooleanConverter.Instance), 0, 1);
         var timeRangesLabel = EditorChrome.MakeDimLabel(Se.Language.Video.VideoOcr.TimeRanges, new Thickness(0));
         timeRangesTextBox.WithLabeledBy(timeRangesLabel);
-        var timeRangesPanel = new StackPanel { Spacing = 4, Children = { timeRangesLabel, timeRangesRow } };
+        var keepLinesCheckBox = new CheckBox
+        {
+            Content = Se.Language.Video.VideoOcr.KeepExistingLines,
+            DataContext = vm,
+        };
+        keepLinesCheckBox.Bind(CheckBox.IsCheckedProperty, new Avalonia.Data.Binding(nameof(vm.KeepExistingLines)) { Mode = Avalonia.Data.BindingMode.TwoWay });
+        keepLinesCheckBox.WithBindEnabled(nameof(vm.IsRunning), InverseBooleanConverter.Instance);
+        var timeRangesPanel = new StackPanel { Spacing = 4, Children = { timeRangesLabel, timeRangesRow, keepLinesCheckBox } };
         if (Se.Settings.Appearance.ShowHints)
         {
             ToolTip.SetTip(timeRangesPanel, Se.Language.Video.VideoOcr.TimeRangesHint);
@@ -813,12 +821,13 @@ public class VideoOcrWindow : Window
     /// <summary>
     /// Progress bar and status in a strip above the buttons while the OCR runs.
     /// </summary>
-    private static Border MakeProgressView(VideoOcrViewModel vm)
+    private Border MakeProgressView(VideoOcrViewModel vm)
     {
         var progressBar = UiUtil.MakeProgressBar();
         progressBar.VerticalAlignment = VerticalAlignment.Center;
         progressBar.Bind(ProgressBar.ValueProperty, new Binding(nameof(vm.ProgressValue)));
         progressBar.DataContext = vm;
+        progressBar.WithPlatformProgress(this, nameof(vm.IsRunning));
 
         var statusText = EditorChrome.MakeBoundHint(nameof(vm.ProgressText), 12);
         statusText.DataContext = vm;

@@ -14,13 +14,13 @@ using Nikse.SubtitleEdit.Logic;
 using Nikse.SubtitleEdit.Logic.Config;
 using Nikse.SubtitleEdit.Logic.Config.Language.Tools;
 using Nikse.SubtitleEdit.Logic.Dictionaries;
+using Nikse.SubtitleEdit.UiLogic.Ocr.FixEngine;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Nikse.SubtitleEdit.UiLogic.Ocr.FixEngine;
 
 namespace Nikse.SubtitleEdit.Features.Tools.FixCommonErrors;
 
@@ -102,6 +102,7 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
     private readonly INamesList _namesList;
     private string? _namesListFolder;
     private string? _namesListLanguage;
+    private Task _namesListLoad = Task.CompletedTask;
     private readonly IWindowService _windowService;
     private readonly IOcrFixEngine _ocrFixEngine;
 
@@ -164,7 +165,7 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
 
         if (Se.Settings.Tools.FixCommonErrors.SkipStep1 && SelectedProfile != null)
         {
-            ShowStep2();
+            _ = ShowStep2Async();
         }
     }
 
@@ -261,11 +262,92 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
         IsStepOne = true;
     }
 
-    // Used when step 1 is skipped at startup - the window is not up yet, so there is nothing to flash on.
-    private void ShowStep2()
+    [RelayCommand]
+    private async Task DeleteSelectedLines()
     {
-        EnterStep2();
+        await DeleteSelectedItems();
+    }
+
+    private async Task DeleteSelectedItems()
+    {
+        var selectedItems = GetSelectedEditableSubtitles();
+        if (selectedItems.Count == 0 || Window == null)
+        {
+            return;
+        }
+
+        if (Se.Settings.General.PromptBeforeDelete)
+        {
+            var title = Se.Language.General.Delete;
+
+            var message = string.Format(Se.Language.General.DeleteXLinesPrompt, selectedItems.Count);
+            if (selectedItems.Count == 1)
+            {
+                var idx = Paragraphs.IndexOf(selectedItems[0]);
+                message = string.Format(Se.Language.General.DeleteLineXPrompt, idx + 1);
+            }
+
+            var answer = await MessageBox.Show(
+                Window,
+                title,
+                message,
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question);
+
+            if (answer != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
+        var firstIndex = Paragraphs.IndexOf(selectedItems[0]);
+        foreach (var item in selectedItems)
+        {
+            if (item.Paragraph != null)
+            {
+                FixedSubtitle.Paragraphs.Remove(item.Paragraph);
+            }
+        }
+
+        // Fixes and the grid find lines by number, so close the gap the deleted line left
+        FixedSubtitle.Renumber();
+        await LoadNamesListIfNeededAsync();
         RefreshFixes();
+
+        // Keep the cursor where the deleted line was, so Delete can be pressed again
+        if (Paragraphs.Count > 0)
+        {
+            var row = Paragraphs[Math.Clamp(firstIndex, 0, Paragraphs.Count - 1)];
+            SelectedParagraph = row;
+            GridSubtitles.ScrollIntoView(row);
+            GridSubtitles.Focus();
+        }
+    }
+
+    /// <summary>
+    /// Delete in the preview grid - plus Cmd+Backspace on macOS, whose keyboards have no forward
+    /// Delete key (same keys as the main window's grid).
+    /// </summary>
+    internal void GridSubtitlesKeyDown(KeyEventArgs e)
+    {
+        var isDelete = e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None;
+        var isMacDelete = OperatingSystem.IsMacOS() && e.Key == Key.Back && e.KeyModifiers == KeyModifiers.Meta;
+        if (isDelete || isMacDelete)
+        {
+            e.Handled = true;
+            _ = DeleteSelectedItems();
+        }
+    }
+
+    private List<SubtitleLineViewModel> GetSelectedEditableSubtitles()
+    {
+        var selected = SelectedParagraph;
+        if (selected == null)
+        {
+            return [];
+        }
+
+        return new List<SubtitleLineViewModel>() { selected };
     }
 
     private async Task ShowStep2Async()
@@ -622,6 +704,7 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
             AnalysingIsVisible = true;
             await Task.Delay(AnalysingPaintDelayMilliseconds);
 
+            await LoadNamesListIfNeededAsync();
             scan();
 
             await Task.Delay(AnalysingMinimumVisibleMilliseconds);
@@ -708,8 +791,6 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
         {
             return;
         }
-
-        LoadNamesListIfNeeded();
 
         _totalErrors = 0;
         if (_previewMode)
@@ -1234,20 +1315,46 @@ public partial class FixCommonErrorsViewModel : ObservableObject, IFixCallbacks
     /// The names list backs <see cref="IsName"/> and <see cref="GetAbbreviations"/>, so without
     /// this the rules saw no names and no abbreviations at all - e.g. Dutch "dhr. de vries" was
     /// capitalized to "dhr. De vries" (#13082). Reloaded only when the language changes, like
-    /// the batch converter does.
+    /// the batch converter does. Awaited by the async callers of ApplyFixes, which itself stays
+    /// synchronous because it mutates the grid-bound collections. A caller that comes in while a
+    /// load for the same language is running awaits that load instead of starting a second one.
     /// </summary>
-    private void LoadNamesListIfNeeded()
+    private Task LoadNamesListIfNeededAsync()
     {
         var dictionaryFolder = Se.DictionariesFolder;
         if (string.Equals(_namesListFolder, dictionaryFolder, StringComparison.Ordinal) &&
             string.Equals(_namesListLanguage, Language, StringComparison.Ordinal))
         {
-            return;
+            return _namesListLoad;
         }
 
-        _namesList.Load(dictionaryFolder, Language);
         _namesListFolder = dictionaryFolder;
         _namesListLanguage = Language;
+        _namesListLoad = LoadNamesListAsync(dictionaryFolder, Language);
+        return _namesListLoad;
+    }
+
+    // A broken names file must not leave the fixes grid empty without a word, so report it and
+    // let the scan run without names. It is not retried until the language changes.
+    private async Task LoadNamesListAsync(string dictionaryFolder, string language)
+    {
+        try
+        {
+            await _namesList.LoadAsync(dictionaryFolder, language);
+        }
+        catch (Exception exception)
+        {
+            Se.LogError(exception, "Fix common errors: could not load names list");
+            if (Window != null)
+            {
+                await MessageBox.Show(
+                    Window,
+                    Se.Language.General.Error,
+                    exception.Message,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
     }
 
     public bool IsName(string candidate)

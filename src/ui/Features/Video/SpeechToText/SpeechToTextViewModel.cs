@@ -1027,7 +1027,9 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// the bundled Silero model keeps it from downloading its own copy into ~/.cache/crispasr
     /// mid-transcription. Index-Echo windows its audio on Silero speech boundaries when it has the
     /// model and falls back to fixed 60 s windows otherwise, which cut sentences in half and repeated
-    /// a cue at the seam.
+    /// a cue at the seam. Granite otherwise runs in crispasr's fixed 30 s auto-chunks, which drop
+    /// words at the cuts: on FLEURS (30 en / 25 de clips, crispasr 0.8.48) Silero took Granite 4.1
+    /// from 11.8% to 9.2% WER in English and from 12.7% to 10.7% in German.
     ///
     /// --chunk-seconds/-ck in the user's parameters means "no VAD, use fixed chunks" - that is
     /// crispasr's own documented way to switch its auto-VAD back off, and it is the only way to
@@ -1047,7 +1049,7 @@ public partial class SpeechToTextViewModel : ObservableObject
             return false;
         }
 
-        var needsVad = engine is CrispAsrCohere or CrispAsrMega or CrispAsrIndexEcho;
+        var needsVad = engine is CrispAsrCohere or CrispAsrMega or CrispAsrIndexEcho or CrispAsrGranite;
         if (!needsVad && CrispAsrVadModel.Get(vadChoice).Choice == CrispAsrVadModel.Automatic)
         {
             return false;
@@ -1076,7 +1078,7 @@ public partial class SpeechToTextViewModel : ObservableObject
     /// was the crispasr v0.8.29 GPU packages, built with AVX-512 against a CI runner that had it
     /// (CrispASR #374) - every CPU without AVX-512 got this on the CUDA/Vulkan build while the CPU
     /// build ran fine, so naming the installed package is most of the answer. That build flaw is
-    /// fixed from v0.8.30 (SE now pins v0.8.43), but the message still earns its keep: a pre-AVX2 CPU
+    /// fixed from v0.8.30 (SE now pins v0.8.48), but the message still earns its keep: a pre-AVX2 CPU
     /// hits the same silent death on the AVX2 CPU package, and an install predating the pin bump
     /// keeps the broken GPU binary until the user downloads the engine again.
     /// </summary>
