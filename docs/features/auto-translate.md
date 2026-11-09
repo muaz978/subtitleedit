@@ -23,11 +23,15 @@ Right-click selected lines in the grid and choose **Auto-translate** to translat
 
 The shortcut **Auto-translate selected lines (no prompt, use last engine/languages)** (no default key; set it in [Shortcuts](shortcuts.md)) starts right away with the last used engine and languages; the dialog only shows progress and closes when done. Until a translation has been run once, it prompts as usual.
 
+### Find and replace in the translation
+
+**Find...** and **Replace...** (right-click a line in the grid, Ctrl+F / Ctrl+H, Cmd+F / Cmd+Option+F on macOS) open the same Find and Replace windows as the main window, so a recurring error in the translation can be fixed before you click **OK**. F3 and Shift+F3 repeat the last search. Only the translation column is searched, and text can't be replaced while a translation is running.
+
 ## Supported Engines
 
 - **Google Translate V1 API** — Free Google Translate. When Google answers with its "unusual traffic" block page, Subtitle Edit retries the request through a fallback endpoint (`clients5.google.com`) before giving up; a block is on Google's side and is usually lifted again after minutes to a few hours
 - **Google Translate V2 API** — Google Cloud Translation (requires API key)
-- **Bing Microsoft Translator** — Azure Cognitive Services (requires API key)
+- **Bing Microsoft Translator** — Azure Cognitive Services (requires API key). For a regional or multi-service Azure resource, also enter its **Region**, for example `westeurope` (shown under Keys and Endpoint in the Azure portal); leave it empty for a global resource
 - **DeepL V2 translate** — DeepL translation (requires API key). Every language the DeepL API offers is listed, as source and as target (including the target-only regional variants such as fr-CA and de-CH). A **Formality** dropdown — Default, More formal, Less formal, More formal (fall back to default), Less formal (fall back to default) — appears for target languages that support it
 - **LibreTranslate** — Open-source, self-hosted translation
 - **MyMemory Translate** — Free translation memory
@@ -54,6 +58,23 @@ The shortcut **Auto-translate selected lines (no prompt, use last engine/languag
 - **winstxnhdw-nllb-api** — NLLB (No Language Left Behind) API
 - **Baidu Translate** — Baidu translation (requires App ID and secret)
 - **CrispASR MADLAD** — Local MADLAD-based translation with downloadable models (shown with size and install status); also available in Batch Convert. The language list is the 419 languages the MADLAD-400 model itself knows, so it is both longer and shorter than the usual one: it adds languages such as Iloko, Waray, Papiamento, Moroccan Arabic and Latin, and leaves out ones MADLAD cannot produce — including Cantonese, for which Google Translate, NLLB or any of the LLM engines are the alternatives. Quality varies a lot across that long tail — Google evaluated only about half of the languages the model claims
+
+## CrispASR MADLAD: CPU and GPU builds
+
+When CrispASR is downloaded you choose a build: **CPU**, **Vulkan** or **CUDA** on Windows, plus **ROCm** on Linux x64. macOS and Linux ARM64 have one build, so there is nothing to choose. MADLAD stays on the CPU on macOS.
+
+- **CPU** — no GPU needed and the smallest download. Windows also has a Legacy build for CPUs without AVX2.
+- **Vulkan** — AMD, NVIDIA and Intel GPUs, including integrated graphics, with a working Vulkan driver.
+- **CUDA** — NVIDIA GPUs. Pick CUDA 12 or CUDA 13 to match your driver.
+- **ROCm** — supported AMD GPUs on Linux. Not every AMD GPU supports it.
+
+To switch later, click the gear next to the **CrispASR MADLAD** model, in Auto Translate or Batch Convert, and then **Re-download** or **Update**. Downloaded models are kept. The **Update** button next to the engine keeps your current build.
+
+Speech-to-text shares the CrispASR engine, so a build you pick here is used there too, and a GPU build you installed for speech-to-text already runs MADLAD on the GPU.
+
+A GPU build uses the GPU automatically. The model is a 2.04 GB download and needs more than that in VRAM once it is running. If a line fails on the GPU, for example because the model does not fit, Subtitle Edit retries it on the CPU and stays on the CPU for the rest of that translation, so it finishes more slowly rather than failing. To see whether the GPU is doing the work, watch its activity while translating.
+
+A GPU build is not always faster here: each subtitle line starts CrispASR and loads the model again, and that time is the same however fast the GPU is.
 
 ## Best local models for translating from English
 
