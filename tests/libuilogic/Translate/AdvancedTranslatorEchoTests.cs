@@ -1,6 +1,6 @@
-using Nikse.SubtitleEdit.Features.Translate.LlamaCppAdvanced;
+using Nikse.SubtitleEdit.UiLogic.Translate.LlamaCppAdvanced;
 
-namespace UITests.Features.Translate;
+namespace LibUiLogicTests.Translate;
 
 /// <summary>
 /// A batch reply where the model handed a line back in the source language (TranslateGemma 12B,
@@ -124,7 +124,7 @@ public class AdvancedTranslatorEchoTests
             [3] = "...",
         };
 
-        Assert.Equal(3, AdvancedTranslatorBase.FindPlaceholderTranslation(map, Lines));
+        Assert.Equal(3, AdvancedTranslatorBase.FindPlaceholderTranslation(map, Lines, new List<LlamaCppAdvancedProtocol.HistoryPair>()));
     }
 
     [Fact]
@@ -137,6 +137,6 @@ public class AdvancedTranslatorEchoTests
             [3] = "Ich war bis spät im Büro.",
         };
 
-        Assert.Equal(-1, AdvancedTranslatorBase.FindPlaceholderTranslation(map, Lines));
+        Assert.Equal(-1, AdvancedTranslatorBase.FindPlaceholderTranslation(map, Lines, new List<LlamaCppAdvancedProtocol.HistoryPair>()));
     }
 }

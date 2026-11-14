@@ -458,6 +458,7 @@ public partial class MainViewModel :
     [ObservableProperty] private bool _hasMultipleLinesSelected;
     [ObservableProperty] private bool _showShotChangesListMenuItem;
     [ObservableProperty] private bool _showLayer;
+    [ObservableProperty] private bool _showActorBox;
     [ObservableProperty] private bool _showLayerFilterIcon;
     [ObservableProperty] private bool _showColumnLayerFlyoutMenuItem;
     [ObservableProperty] private bool _isVideoLoaded;
@@ -6803,7 +6804,7 @@ public partial class MainViewModel :
     {
         var vp = GetVideoPlayerControl();
         var audioPeaks = AudioPeaks;
-        if (Window == null || audioPeaks == null || vp == null)
+        if (Window == null || audioPeaks == null || vp == null || AudioVisualizer == null)
         {
             return;
         }
@@ -6836,7 +6837,7 @@ public partial class MainViewModel :
     private void SeekSilenceBack()
     {
         var vp = GetVideoPlayerControl();
-        if (AudioPeaks == null || vp == null)
+        if (AudioPeaks == null || vp == null || AudioVisualizer == null)
         {
             return;
         }
@@ -6853,7 +6854,7 @@ public partial class MainViewModel :
     private void SeekSilenceForward()
     {
         var vp = GetVideoPlayerControl();
-        if (AudioPeaks == null || vp == null)
+        if (AudioPeaks == null || vp == null || AudioVisualizer == null)
         {
             return;
         }
@@ -6922,7 +6923,7 @@ public partial class MainViewModel :
             return Se.Language.Main.Waveform.GuessStartTimeCodesLocked;
         }
 
-        if (AudioPeaks == null)
+        if (AudioPeaks == null || AudioVisualizer == null)
         {
             return Se.Language.Main.Waveform.GuessStartNoWaveform;
         }
@@ -7101,7 +7102,7 @@ public partial class MainViewModel :
             return Se.Language.Main.Waveform.GuessEndTimeCodesLocked;
         }
 
-        if (AudioPeaks == null)
+        if (AudioPeaks == null || AudioVisualizer == null)
         {
             return Se.Language.Main.Waveform.GuessEndNoWaveform;
         }
@@ -7638,7 +7639,7 @@ public partial class MainViewModel :
     private async Task ShowWaveformGuessTimeCodes()
     {
         var vp = GetVideoPlayerControl();
-        if (Window == null || AudioPeaks == null || vp == null)
+        if (Window == null || AudioPeaks == null || vp == null || AudioVisualizer == null)
         {
             return;
         }
@@ -8860,6 +8861,9 @@ public partial class MainViewModel :
         // Carry over the header that SortAndLoad spent its merge building, or the joined file is
         // written with no style table at all.
         _subtitle.Header = result.JoinedSubtitle.Header;
+        // The format comes from the joined files, so Save as must offer it instead of the
+        // "Default Save as format" setting, or joined ASSA files are suggested as .srt (#16899).
+        _formatChangedByUser = SelectedSubtitleFormat is not SubRip;
         SelectAndScrollToRow(0);
         ShowStatus(Se.Language.Main.JoinedSubtitleLoaded);
     }
@@ -8897,6 +8901,8 @@ public partial class MainViewModel :
         SetSubtitles(result.ResultSubtitle);
         // Carry over the header so the merged styles (Style1/Style2) are kept
         _subtitle.Header = result.ResultSubtitle.Header;
+        // Keep the merged format (and its styles) on Save as - see ShowToolsJoin (#16899).
+        _formatChangedByUser = SelectedSubtitleFormat is not SubRip;
         SelectAndScrollToRow(0);
     }
 
@@ -9214,9 +9220,22 @@ public partial class MainViewModel :
     private async Task CopyLinesToClipboard(IEnumerable<string> lines)
     {
         var list = lines.ToList();
-        await ClipboardHelper.SetTextAsync(Window!, string.Join(Environment.NewLine + Environment.NewLine, list));
+        await ClipboardHelper.SetTextAsync(Window!, JoinCopiedText(list));
 
         ShowStatus(string.Format("{0} lines copied to clipboard", list.Count));
+    }
+
+    /// <summary>
+    /// Joins subtitle texts for the "Copy text" commands (grid and waveform): an empty line between
+    /// subtitles when <see cref="SeGeneral.CopyTextBlankLineBetweenSubtitles"/> is on (SE4 style),
+    /// otherwise one subtitle per line.
+    /// </summary>
+    private static string JoinCopiedText(IEnumerable<string> texts)
+    {
+        var separator = Se.Settings.General.CopyTextBlankLineBetweenSubtitles
+            ? Environment.NewLine + Environment.NewLine
+            : Environment.NewLine;
+        return string.Join(separator, texts);
     }
 
     /// <summary>
@@ -9248,7 +9267,7 @@ public partial class MainViewModel :
             return;
         }
 
-        await ClipboardHelper.SetTextAsync(Window, string.Join(Environment.NewLine, lines.Select(p => p.Text)));
+        await ClipboardHelper.SetTextAsync(Window, JoinCopiedText(lines.Select(p => p.Text)));
         _shortcutManager.ClearKeys();
     }
 
@@ -14674,6 +14693,7 @@ public partial class MainViewModel :
                     Region = line.Region,
                     Layer = line.Layer,
                     Bookmark = line.Bookmark,
+                    BookmarkColor = line.BookmarkColor,
                 };
                 sub.Paragraphs.Add(p);
             }
@@ -14828,6 +14848,7 @@ public partial class MainViewModel :
                     Region = line.Region,
                     Layer = line.Layer,
                     Bookmark = line.Bookmark,
+                    BookmarkColor = line.BookmarkColor,
                 };
                 sub.Paragraphs.Add(p);
             }
@@ -14882,6 +14903,7 @@ public partial class MainViewModel :
                     Region = line.Region,
                     Layer = line.Layer,
                     Bookmark = line.Bookmark,
+                    BookmarkColor = line.BookmarkColor,
                 };
                 sub.Paragraphs.Add(p);
             }
@@ -14952,6 +14974,7 @@ public partial class MainViewModel :
                     Region = line.Region,
                     Layer = line.Layer,
                     Bookmark = line.Bookmark,
+                    BookmarkColor = line.BookmarkColor,
                 };
                 sub.Paragraphs.Add(p);
             }
@@ -15159,6 +15182,7 @@ public partial class MainViewModel :
                     Region = line.Region,
                     Layer = line.Layer,
                     Bookmark = line.Bookmark,
+                    BookmarkColor = line.BookmarkColor,
                 };
                 sub.Paragraphs.Add(p);
                 if (p.Id.HasValue)
@@ -15740,6 +15764,7 @@ public partial class MainViewModel :
         ShowUpDownDuration = Se.Settings.Appearance.ShowUpDownDuration;
         ShowUpDownLabels = Se.Settings.Appearance.ShowUpDownLabels;
         ShowTimeCodeModeInStatusBar = Se.Settings.Appearance.ShowTimeCodeModeInStatusBar;
+        ShowActorBox = HasFormatActor && !IsFormatWebVtt && Se.Settings.Appearance.ShowActor;
 
         _errorColor = Se.Settings.General.ErrorColor.FromHexToColor();
         _errorBrush = new ImmutableSolidColorBrush(_errorColor);
@@ -15909,6 +15934,13 @@ public partial class MainViewModel :
         var result = await ShowDialogAsync<WordListsWindow, WordListsViewModel>();
     }
 
+    /// <summary>Saves the bookmarks next to the subtitle and repaints the waveform, which draws them.</summary>
+    private void SaveBookmarks()
+    {
+        new SubtitleMarksPersistence(GetSaveSubtitle(), _subtitleFileName).Save();
+        _updateAudioVisualizer = true;
+    }
+
     [RelayCommand]
     private async Task AddOrEditBookmark()
     {
@@ -15940,17 +15972,16 @@ public partial class MainViewModel :
             foreach (var item in selectedItems)
             {
                 item.Bookmark = result.BookmarkText;
+                item.BookmarkColor = result.BookmarkText != null ? result.ColorIndex : 0;
             }
         }
 
-        new SubtitleMarksPersistence(GetSaveSubtitle(), _subtitleFileName).Save();
+        SaveBookmarks();
 
         if (result.ListPressed)
         {
             await ListBookmarks();
         }
-
-        _updateAudioVisualizer = true;
     }
 
     [RelayCommand]
@@ -15969,7 +16000,7 @@ public partial class MainViewModel :
             }
         }
 
-        new SubtitleMarksPersistence(GetSaveSubtitle(), _subtitleFileName).Save();
+        SaveBookmarks();
 
         _shortcutManager.ClearKeys();
     }
@@ -16059,7 +16090,7 @@ public partial class MainViewModel :
 
         var result = await ShowDialogAsync<BookmarksListWindow, BookmarksListViewModel>(vm => { vm.Initialize(Subtitles.ToList()); });
 
-        new SubtitleMarksPersistence(GetSaveSubtitle(), _subtitleFileName).Save();
+        SaveBookmarks();
 
         if (result.GoToPressed && result.SelectedSubtitle != null)
         {
@@ -16076,7 +16107,7 @@ public partial class MainViewModel :
             item.Bookmark = null;
         }
 
-        new SubtitleMarksPersistence(GetSaveSubtitle(), _subtitleFileName).Save();
+        SaveBookmarks();
 
         _shortcutManager.ClearKeys();
     }
@@ -16121,7 +16152,7 @@ public partial class MainViewModel :
             item.Bookmark = null;
         }
 
-        new SubtitleMarksPersistence(GetSaveSubtitle(), _subtitleFileName).Save();
+        SaveBookmarks();
 
         _shortcutManager.ClearKeys();
     }
@@ -24644,7 +24675,7 @@ public partial class MainViewModel :
     /// this list, so shortcut "1" sets the first actor, "2" the second, etc. - and keeps doing
     /// so when a new actor is added.
     /// </summary>
-    private List<string> GetActorsInSubtitle()
+    internal List<string> GetActorsInSubtitle()
     {
         return _actorOrder.GetOrdered(Subtitles.Select(p => p.Actor));
     }
@@ -27129,9 +27160,15 @@ public partial class MainViewModel :
                 SelectedEncoding = otherEncoding ?? Encodings.First(p => p.DisplayName == TextEncoding.Utf8WithBom);
             }
 
-            if (Se.Settings.General.AutoConvertToUtf8 && !SelectedEncoding.DisplayName.StartsWith("utf-8", StringComparison.OrdinalIgnoreCase))
+            // (#9382) No "not UTF-8 yet" guard: the option normalises every opened file, including
+            // one that already is UTF-8 but carries the other BOM variant - that file used to be
+            // left exactly as it was, which is what made the option look broken.
+            if (Se.Settings.General.AutoConvertToUtf8)
             {
-                SelectedEncoding = Encodings.FirstOrDefault(p => p.DisplayName.StartsWith("utf-8", StringComparison.OrdinalIgnoreCase)) ?? SelectedEncoding;
+                var utf8Variant = Se.Settings.General.AutoConvertToUtf8WithoutBom
+                    ? TextEncoding.Utf8WithoutBom
+                    : TextEncoding.Utf8WithBom;
+                SelectedEncoding = Encodings.First(p => p.DisplayName == utf8Variant);
             }
 
             _subtitleFileName = fileName;
@@ -27250,21 +27287,21 @@ public partial class MainViewModel :
             SetupLiveSpellCheck();
         }
 
-        if (rememberedRecentFile != null && selectedSubtitleIndex > 0)
+        if (rememberedRecentFile != null && selectedSubtitleIndex != null)
         {
             await SeekVideoToSelectedLineAsync();
         }
     }
 
     // Where the video should be opened when a session is restored: the start time of the line the
-    // user was last on. Mirrors the "index 0 is not a restored position" rule in
-    // SeekVideoToSelectedLineAsync, so a freshly opened file still comes up at 0:00.
+    // user was last on - the first line too (#16822). A file opened for the first time has no
+    // remembered line (null) and still comes up at 0:00 (#13191 / #12898).
     // videoOffsetToRestoreMs is the remembered video offset the caller takes off the rows once the
     // open is done (SetRecentFileProperties): the rows still hold the file's time codes here, which
     // carry that offset, so the video position is the start time minus it.
     private double GetRestoredVideoStartPositionSeconds(int? selectedSubtitleIndex, long videoOffsetToRestoreMs)
     {
-        if (selectedSubtitleIndex is not > 0 || selectedSubtitleIndex.Value >= Subtitles.Count)
+        if (selectedSubtitleIndex is not >= 0 || selectedSubtitleIndex.Value >= Subtitles.Count)
         {
             return 0;
         }
@@ -27288,14 +27325,9 @@ public partial class MainViewModel :
             return;
         }
 
-        // A remembered first-line selection is not a previously established position - it is
-        // just where the grid always lands on open. Leave the video at 0:00 instead of jumping
-        // to the first caption's start time (#13191 / #12898); only a mid-file line restores.
-        if ((SelectedSubtitleIndex ?? 0) == 0)
-        {
-            return;
-        }
-
+        // Only called when a remembered session is restored, so the first line restores like any
+        // other (#16822) - "start at 0:00" (#13191 / #12898) is for a file opened for the first
+        // time, which never gets here.
         await vp.WaitForPlayersReadyAsync();
         await Task.Delay(200);
         var s = SelectedSubtitle;
@@ -27547,6 +27579,7 @@ public partial class MainViewModel :
         for (var i = 0; i < Subtitles.Count && i < sub.Paragraphs.Count; i++)
         {
             Subtitles[i].Bookmark = sub.Paragraphs[i].Bookmark;
+            Subtitles[i].BookmarkColor = sub.Paragraphs[i].BookmarkColor;
 
             // Union, not assignment: a format that carries the forced flag itself (BDN xml)
             // has already set it on the row, and the sidecar only ever adds marks.
@@ -28516,6 +28549,10 @@ public partial class MainViewModel :
         // auto-imported single track showed "Untitled" in the title bar and save prompt (#12848).
         _subtitleFileName = Utilities.GetPathAndFileNameWithoutExtension(fileName) + SelectedSubtitleFormat.Extension;
         _converted = true;
+
+        // The format comes from the track (ASSA, SSA, WebVTT, ...), so Save as must offer it instead
+        // of the "Default Save as format" setting, which suggested .srt for an ASSA track (#16899).
+        _formatChangedByUser = SelectedSubtitleFormat is not SubRip;
 
         return true;
     }
@@ -32225,6 +32262,7 @@ public partial class MainViewModel :
                 // too - otherwise bookmarking alone records no snapshot and the bookmark gets
                 // baked into the next unrelated edit's entry, where one undo removes both.
                 hash = hash * 23 + (p.Bookmark?.GetHashCode() ?? 0);
+                hash = hash * 23 + p.BookmarkColor;
                 // Same reasoning for the forced-narrative mark (#14322).
                 hash = hash * 23 + (p.Forced ? 1 : 0);
             }
@@ -38441,6 +38479,7 @@ public partial class MainViewModel :
             ? Se.Language.File.WebVtt.ShowVoiceColumn
             : Se.Language.General.ShowActorColumn;
         ShowLayer = IsFormatAssa && Se.Settings.Appearance.ShowLayer;
+        ShowActorBox = HasFormatActor && !IsFormatWebVtt && Se.Settings.Appearance.ShowActor;
         ShowLayerFilterIcon = IsFormatAssa && Se.Settings.Appearance.ShowLayer && _visibleLayers != null;
 
         if (!IsFormatAssa)
